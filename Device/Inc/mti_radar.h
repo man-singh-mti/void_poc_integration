@@ -44,10 +44,10 @@ void radar_switch_to_next_sensor(void);
 void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADAR_DETECTED_POINTS][2], uint8_t numPoints);
 
 // Getter functions for measurements (implemented in mti_radar.c)
-radar_measurement_t *radar_get_measurement(uint8_t sensor_idx);
 bool                 radar_has_valid_data(uint8_t sensor_idx);
-uint16_t             radar_get_distance(uint8_t sensor_idx);
-uint16_t             radar_get_angle(uint8_t sensor_idx);
+uint16_t             radar_get_distance_mm(uint8_t sensor_idx);
+uint16_t             radar_get_angle_deg(uint8_t sensor_idx);
+radar_measurement_t *radar_get_measurement(uint8_t sensor_idx);
 
 // External access to round-robin state
 extern radar_round_robin_t radar_round_robin;

@@ -244,34 +244,27 @@ void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_
     switch (command)
     {
     case CAN_CMD_START:
-        debug_send("S%d: Start command received", sensor_idx);
+        // Remove: debug_send("S%d: Start command received", sensor_idx);
         break;
 
     case CAN_CMD_STOP:
-        debug_send("S%d: Stop command received", sensor_idx);
+        // Remove: debug_send("S%d: Stop command received", sensor_idx);
         break;
 
     case CAN_CMD_STATUS:
+        // Respond with current status
         can_send(CAN_MSG_ID_STATUS_SENSOR(sensor_idx), (uint8_t)sensor->status);
-        // Set radar initialization to OK when we get response
         radar_init_status_set(RADAR_INIT_OK);
-        radar_status_set(RADAR_READY);
+        // Remove: debug_send("S%d: Status response sent", sensor_idx);
         break;
 
     case CAN_CMD_CAL:
-        debug_send("S%d: Calibration command received", sensor_idx);
-        break;
-
-    case CAN_CMD_POWER:
-        if (data && data->bytes[1]) // Check if there's additional data
-        {
-            uint8_t power_level = data->bytes[1];
-            debug_send("S%d: Power level set to %d%%", sensor_idx, power_level);
-        }
+        // Remove: debug_send("S%d: Calibration command received", sensor_idx);
         break;
 
     default:
-        debug_send("S%d: Unknown command 0x%02X", sensor_idx, command);
+        // Keep only error messages
+        debug_send("S%d: Unknown cmd 0x%02X", sensor_idx, command);
         break;
     }
 }
@@ -284,4 +277,18 @@ void process_complete_radar_frame(uint8_t sensor_idx)
 
     // Call the simplified radar processing function
     radar_process_measurement(sensor_idx, sensor->detectedPoints, sensor->numDetPoints);
+}
+
+// Add this function if it's missing
+uint8_t get_active_sensor_count(void)
+{
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_system.sensor_online[i])
+        {
+            count++;
+        }
+    }
+    return count;
 }

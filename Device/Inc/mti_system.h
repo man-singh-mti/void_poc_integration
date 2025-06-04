@@ -60,3 +60,6 @@ bool     module_init(void);
 void     version_ack(bool received);
 bool     keepalive_check(void);
 void     keepalive_reset(void);
+// Add these missing function declarations
+radar_init_status_t radar_init_status_get(void);
+void                radar_init_status_set(radar_init_status_t status);

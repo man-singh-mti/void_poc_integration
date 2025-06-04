@@ -1,4 +1,6 @@
 #include "vmt_device.h"
+#include "mti_can.h"
+#include "mti_radar.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -1074,6 +1076,32 @@ static void dev_debug_process(void)
             printf(",%f", p_h_imu->h_gyro.angle);
             //			printf(",%f", p_h_imu->h_accel.variance);
             //			printf(",%f", p_h_imu->h_gyro.variance);
+            printf("\r\n");
+        }
+    }
+
+    // Add radar debug - every 2 seconds
+    if (h_dev_debug.b_radar_sample)
+    {
+        static uint32_t time_log = 0;
+        uint32_t        time_now = HAL_GetTick();
+        if (time_now - time_log >= 2000)
+        { // Every 2 seconds
+            time_log = time_now;
+
+            printf("> radar:status"); // Remove sensor count
+
+            for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+            {
+                if (radar_has_valid_data(i))
+                {
+                    printf(",S%d:%umm", i, radar_get_distance_mm(i));
+                }
+                else
+                {
+                    printf(",S%d:no_data", i);
+                }
+            }
             printf("\r\n");
         }
     }

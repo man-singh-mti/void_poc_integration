@@ -32,30 +32,6 @@ typedef enum uart_select_
 } uart_select_t;
 
 
-static inline void debug_send(const char *fmt, ...)
-{
-    va_list args;
-    uart_tx_channel_set(UART_DEBUG);
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-    printf("\n");
-    uart_tx_channel_undo();
-}
-
-/*— uphole_send: select the UPHOLE UART, print a formatted line, then restore —*/
-static inline void uphole_send(const char *fmt, ...)
-{
-    va_list args;
-    uart_tx_channel_set(UART_UPHOLE);
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-    printf("\n");
-    uart_tx_channel_undo();
-}
-
-
 typedef struct h_uart_tx_
 {
     uint8_t *p_buff;
@@ -124,5 +100,28 @@ bool   uart_rx_dequeue_dma(uart_select_t ch, size_t front, uint8_t *ptr, size_t 
 bool   uart_rx_front_add(uart_select_t ch, size_t *p_front, size_t gain);
 size_t uart_rx_back_get(uart_select_t ch);
 void   uart_rx_en_set(uart_select_t ch, bool b_enalbe);
+
+/* Inline functions at the end */
+static inline void debug_send(const char *fmt, ...)
+{
+    va_list args;
+    uart_tx_channel_set(UART_DEBUG);
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+    uart_tx_channel_undo();
+}
+
+static inline void uphole_send(const char *fmt, ...)
+{
+    va_list args;
+    uart_tx_channel_set(UART_UPHOLE);
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+    uart_tx_channel_undo();
+}
 
 #endif /* __VMT_UART_H__ */

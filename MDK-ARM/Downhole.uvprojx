@@ -10,7 +10,7 @@
       <TargetName>DEBUG</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
-      <pCCUsed>5060750::V5.06 update 6 (build 750)::.\ARMCC</pCCUsed>
+      <pCCUsed>5060750::V5.06 update 6 (build 750)::.\ARM_CC_5_6</pCCUsed>
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
@@ -495,24 +495,9 @@
               <FilePath>..\Device\Src\mti_water.c</FilePath>
             </File>
             <File>
-              <FileName>mti_imu.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_imu.h</FilePath>
-            </File>
-            <File>
-              <FileName>mti_water.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_water.h</FilePath>
-            </File>
-            <File>
               <FileName>vmt_flash.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Src\vmt_flash.c</FilePath>
-            </File>
-            <File>
-              <FileName>vmt_flash.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\vmt_flash.h</FilePath>
             </File>
             <File>
               <FileName>vmt_flash_fifo.c</FileName>
@@ -520,19 +505,9 @@
               <FilePath>..\Device\Src\vmt_flash_fifo.c</FilePath>
             </File>
             <File>
-              <FileName>vmt_flash_fifo.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\vmt_flash_fifo.h</FilePath>
-            </File>
-            <File>
               <FileName>mti_system.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Src\mti_system.c</FilePath>
-            </File>
-            <File>
-              <FileName>mti_system.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_system.h</FilePath>
             </File>
             <File>
               <FileName>mti_can.c</FileName>
@@ -540,9 +515,9 @@
               <FilePath>..\Device\Src\mti_can.c</FilePath>
             </File>
             <File>
-              <FileName>mti_can.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_can.h</FilePath>
+              <FileName>mti_radar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Src\mti_radar.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -2481,24 +2456,9 @@
               <FilePath>..\Device\Src\mti_water.c</FilePath>
             </File>
             <File>
-              <FileName>mti_imu.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_imu.h</FilePath>
-            </File>
-            <File>
-              <FileName>mti_water.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_water.h</FilePath>
-            </File>
-            <File>
               <FileName>vmt_flash.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Src\vmt_flash.c</FilePath>
-            </File>
-            <File>
-              <FileName>vmt_flash.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\vmt_flash.h</FilePath>
             </File>
             <File>
               <FileName>vmt_flash_fifo.c</FileName>
@@ -2506,19 +2466,9 @@
               <FilePath>..\Device\Src\vmt_flash_fifo.c</FilePath>
             </File>
             <File>
-              <FileName>vmt_flash_fifo.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\vmt_flash_fifo.h</FilePath>
-            </File>
-            <File>
               <FileName>mti_system.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Src\mti_system.c</FilePath>
-            </File>
-            <File>
-              <FileName>mti_system.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_system.h</FilePath>
             </File>
             <File>
               <FileName>mti_can.c</FileName>
@@ -2526,9 +2476,9 @@
               <FilePath>..\Device\Src\mti_can.c</FilePath>
             </File>
             <File>
-              <FileName>mti_can.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Device\Inc\mti_can.h</FilePath>
+              <FileName>mti_radar.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Src\mti_radar.c</FilePath>
             </File>
           </Files>
         </Group>

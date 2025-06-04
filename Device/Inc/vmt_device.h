@@ -182,7 +182,7 @@ typedef union h_dev_debug_
     struct
     {
         bool b_init : 1, b_spi_init : 1, b_imu_sample_set : 1, b_adc_sample : 1;
-        bool b_imu_sample : 1;
+        bool b_imu_sample : 1, b_radar_sample : 1; // Add radar debug flag
     };
 } h_dev_debug_t;
 
