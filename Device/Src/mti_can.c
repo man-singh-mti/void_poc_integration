@@ -252,8 +252,10 @@ void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_
         break;
 
     case CAN_CMD_STATUS:
-        // Respond with current status
         can_send(CAN_MSG_ID_STATUS_SENSOR(sensor_idx), (uint8_t)sensor->status);
+        // Set radar initialization to OK when we get response
+        radar_init_status_set(RADAR_INIT_OK);
+        radar_status_set(RADAR_READY);
         break;
 
     case CAN_CMD_CAL:
