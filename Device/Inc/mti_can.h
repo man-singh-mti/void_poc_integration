@@ -1,24 +1,14 @@
-/**
- * @file    mti_can.h
- * @author  Mti Group
- * @brief   CAN interface for radar sensor communication
- * @version 1.2.0 (Updated for naming and status conventions)
- * @date    2025-05-22
- */
-
 #ifndef MTI_CAN_H
 #define MTI_CAN_H
 
+#include "stm32f7xx.h"
 #include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include "stm32f7xx_hal.h"
-#include "vmt_common_defs.h" // For MAX_SENSORS, radar_hw_status_t, etc.
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+// Update for 3 sensors
+#define MAX_RADAR_SENSORS         3U
+#define MAX_RADAR_DETECTED_POINTS 20
 
+// Command definitions - Updated to match design document
 #define CAN_CMD_BASE      0x80U
 #define CAN_CMD_START     0x00U
 #define CAN_CMD_STOP      0x01U
@@ -31,48 +21,75 @@ extern "C" {
 #define CAN_CMD_FOV       0x08U
 #define CAN_CMD_INIT      0x09U
 
+// Power level definitions
+#define RADAR_POWER_OFF    0
+#define RADAR_POWER_LOW    25
+#define RADAR_POWER_MEDIUM 50
+#define RADAR_POWER_HIGH   75
+#define RADAR_POWER_MAX    100
+
+// Field of View definitions (degrees)
+#define RADAR_FOV_NARROW 60
+#define RADAR_FOV_MEDIUM 90
+#define RADAR_FOV_WIDE   120
+#define RADAR_FOV_MAX    150
+
+// Base IDs for different message types
 #define CAN_ID_HEADER_BASE  0xA0U
 #define CAN_ID_OBJECT_BASE  0xA1U
 #define CAN_ID_PROFILE_BASE 0xA2U
 #define CAN_ID_STATUS_BASE  0xA3U
 #define CAN_ID_VERSION_BASE 0xA4U
 
-#define CAN_SENSOR_OFFSET_0 0x00U
-#define CAN_SENSOR_OFFSET_1 0x10U
-#define CAN_SENSOR_OFFSET_2 0x20U
+// Sensor offsets (0x00, 0x10, 0x20 for 3 sensors)
+#define CAN_SENSOR_OFFSET(sensor_idx) ((sensor_idx) * 0x10U)
 
-#define CAN_CMD_ID_SENSOR(sensor_idx)         (CAN_CMD_BASE + (sensor_idx))
-#define CAN_MSG_ID_HEADER_SENSOR(sensor_idx)  (CAN_ID_HEADER_BASE + ((sensor_idx) * 0x10U))
-#define CAN_MSG_ID_OBJECT_SENSOR(sensor_idx)  (CAN_ID_OBJECT_BASE + ((sensor_idx) * 0x10U))
-#define CAN_MSG_ID_PROFILE_SENSOR(sensor_idx) (CAN_ID_PROFILE_BASE + ((sensor_idx) * 0x10U))
-#define CAN_MSG_ID_STATUS_SENSOR(sensor_idx)  (CAN_ID_STATUS_BASE + ((sensor_idx) * 0x10U))
-#define CAN_MSG_ID_VERSION_SENSOR(sensor_idx) (CAN_ID_VERSION_BASE + ((sensor_idx) * 0x10U))
+// Macros to get sensor-specific CAN IDs
+#define CAN_MSG_ID_HEADER_SENSOR(idx)  (CAN_ID_HEADER_BASE + CAN_SENSOR_OFFSET(idx))
+#define CAN_MSG_ID_OBJECT_SENSOR(idx)  (CAN_ID_OBJECT_BASE + CAN_SENSOR_OFFSET(idx))
+#define CAN_MSG_ID_PROFILE_SENSOR(idx) (CAN_ID_PROFILE_BASE + CAN_SENSOR_OFFSET(idx))
+#define CAN_MSG_ID_STATUS_SENSOR(idx)  (CAN_ID_STATUS_BASE + CAN_SENSOR_OFFSET(idx))
+#define CAN_MSG_ID_VERSION_SENSOR(idx) (CAN_ID_VERSION_BASE + CAN_SENSOR_OFFSET(idx))
 
-#define DEFAULT_RADAR_FILTER_ID_BASE      CAN_CMD_BASE
-#define DEFAULT_RADAR_DETECTION_THRESHOLD 150
-#define DEFAULT_RADAR_FOV                 100
-#define DEFAULT_RADAR_OPERATING_MODE      0
-#define DEFAULT_RADAR_POWER_PERCENT       100
+// Base addresses for each sensor type
+#define SENSOR_0_BASE_ADDR 0x00
+#define SENSOR_1_BASE_ADDR 0x10
+#define SENSOR_2_BASE_ADDR 0x20
 
-#define CAN_ID_MSG_TYPE_MASK         0x0FU
-#define CAN_ID_BASE_MASK             0xF0U
-#define CAN_ID_TYPE_STATUS_DATA_BASE 0xA0U
-#define CAN_ID_SENSOR_OFFSET_MASK    0x30U
-#define CAN_ID_SENSOR_OFFSET_SHIFT   4
-#define CAN_ID_TYPE_COMMAND_BASE     0x80U
-#define CAN_ID_SENSOR_INDEX_MASK     0x0FU
-#define INVALID_SENSOR_INDEX         0xFFU
+// Command ID generation for specific sensors
+#define CAN_CMD_SENSOR_ID(sensor_idx) (CAN_CMD_BASE + (sensor_idx))
 
-#define MIN_RADAR_PACKET_LENGTH   129U
-#define MAX_RADAR_DETECTED_POINTS 20
+// Radar profiles
+#define RADAR_PROFILE_CAL         0
+#define RADAR_PROFILE_50M_SINGLE  1
+#define RADAR_PROFILE_50M_MULTI   2
+#define RADAR_PROFILE_100M_SINGLE 3
+#define RADAR_PROFILE_100M_MULTI  4
 
 typedef enum
 {
-    CAN_STATE_UNINIT,
-    CAN_STATE_READY,
-    CAN_STATE_ERROR,
-    CAN_STATE_BUSY
-} can_state_t;
+    RADAR_INITIALISING,
+    RADAR_READY,
+    RADAR_CHIRPING,
+    RADAR_STOPPED,
+} radar_status_t;
+
+typedef enum
+{
+    RADAR_HW_INITIALISING = 0,
+    RADAR_HW_READY        = 1,
+    RADAR_HW_CHIRPING     = 2,
+    RADAR_HW_STOPPED      = 3,
+    RADAR_HW_ERROR        = 4,
+    RADAR_HW_CALIBRATING  = 5
+} radar_hw_status_t;
+
+typedef union
+{
+    uint8_t  bytes[8];
+    uint32_t words[2];
+    float    floats[2];
+} can_data_union_t;
 
 typedef struct
 {
@@ -92,40 +109,33 @@ typedef struct
     } version;
 } radar_data_t;
 
-typedef union
+// Multi-sensor system
+typedef struct
 {
-    uint8_t  bytes[8];
-    uint32_t words[2];
-    float    floats[2];
-} can_data_union_t;
+    radar_data_t sensors[MAX_RADAR_SENSORS];
+    uint8_t      active_sensor_count;
+    uint32_t     last_message_timestamp[MAX_RADAR_SENSORS];
+    bool         sensor_online[MAX_RADAR_SENSORS];
+} multi_radar_system_t;
 
-can_state_t       can_init(void);
-can_state_t       can_get_state(void);
-can_state_t       can_send_to_sensor(uint8_t sensor_idx, uint8_t cmd, const uint8_t *data, size_t data_len);
-can_state_t       can_request_radar_data(void); // Renamed from can_request_all_radar_data for brevity if only one type of request
-uint32_t          can_get_error_count(void);
-uint32_t          can_get_timeout_count(void);
-uint32_t          can_get_time_since_last_msg(void);
-uint8_t           can_get_radar_signal(uint8_t sensor_idx); // Renamed from can_get_sensor_signal
-bool              can_handle_error(uint8_t sensor_idx, can_error_type_t error_type);
-void              can_process(void);
-radar_data_t     *can_get_radar_data_ptr(uint8_t sensor_idx); // Renamed from can_get_radar_data
-can_state_t       can_reset_sensor(uint8_t sensor_idx);
-bool              can_all_sensors_ready(void);
-radar_hw_status_t can_get_sensor_hw_status(uint8_t sensor_idx); // Renamed from can_get_sensor_status
+// CAN communication functions (implemented in mti_can.c)
+bool    can_setup(void);
+bool    can_send(uint32_t ID, uint8_t message);
+bool    can_send_array(uint32_t ID, uint8_t *message, size_t length);
+bool    can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message);
+void    broadcast_to_all_sensors(uint32_t base_id, uint8_t message);
+uint8_t get_sensor_index_from_can_id(uint32_t can_id);
 
-can_state_t can_send_byte(uint32_t id, uint8_t message);
-can_state_t can_send_array(uint32_t id, const uint8_t *message, size_t length);
-can_state_t can_send_sensor_command(uint8_t sensor_idx, uint8_t cmd); // Add this declaration
+// CAN message processing functions (implemented in mti_can.c)
+void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_t *data);
+void process_complete_radar_frame(uint8_t sensor_idx);
 
-bool can_setup_all_sensors(void);
-bool can_setup_sensor_filter(uint8_t sensor_idx, uint32_t filter_id); // Renamed from can_setup_sensor
+// Sensor status functions (implemented in mti_can.c)
+bool    is_sensor_online(uint8_t sensor_idx);
+uint8_t get_active_sensor_count(void);
+void    reset_sensor_data(uint8_t sensor_idx);
 
-typedef void (*radar_data_callback_t)(uint8_t sensor_idx, radar_data_t *radar_data_ptr); // Parameter name consistency
-can_state_t can_register_data_callback(radar_data_callback_t callback);
+// Global radar system instance
+extern multi_radar_system_t radar_system;
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* MTI_CAN_H */
+#endif // MTI_CAN_H

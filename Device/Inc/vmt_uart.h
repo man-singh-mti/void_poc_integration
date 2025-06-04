@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdarg.h>
+
 
 #include "usart.h"
 
@@ -30,15 +32,29 @@ typedef enum uart_select_
 } uart_select_t;
 
 
-#define DEBUG_SEND(fmt, ...)             \
-    do                                   \
-    {                                    \
-        uart_tx_channel_set(UART_DEBUG); \
-        printf(fmt, ##__VA_ARGS__);      \
-        printf("\n");                    \
-        uart_tx_channel_undo();          \
-    }                                    \
-    while (0)
+static inline void debug_send(const char *fmt, ...)
+{
+    va_list args;
+    uart_tx_channel_set(UART_DEBUG);
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+    uart_tx_channel_undo();
+}
+
+/*— uphole_send: select the UPHOLE UART, print a formatted line, then restore —*/
+static inline void uphole_send(const char *fmt, ...)
+{
+    va_list args;
+    uart_tx_channel_set(UART_UPHOLE);
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    printf("\n");
+    uart_tx_channel_undo();
+}
+
 
 typedef struct h_uart_tx_
 {

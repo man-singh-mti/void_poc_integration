@@ -1,816 +1,285 @@
-/**
- * @file    mti_can.c
- * @author  Mti Group
- * @brief   CAN interface implementation for radar sensor communication
- * @version 1.2.0 (Updated for naming and status conventions)
- * @date    2025-05-22
- */
-
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-
 #include "can.h"
-#include "vmt_common_defs.h"
-#include "vmt_uart.h"
 #include "mti_can.h"
+#include "vmt_uart.h"
+#include "mti_system.h"
+#include <string.h>
 
-#define CAN_TX_DEBUG_BUFFER_SIZE 17
+CAN_RxHeaderTypeDef rxHeader;
+CAN_TxHeaderTypeDef txHeader;
+uint8_t             canRX[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+CAN_FilterTypeDef   canfil;
+uint32_t            canMailbox;
 
-static struct
+// Multi-sensor system instance
+multi_radar_system_t radar_system = { 0 };
+
+bool can_setup(void)
 {
-    uint32_t filter_id;
-    uint8_t  threshold;
-    uint8_t  fov;
-    uint8_t  mode;
-    uint8_t  power;
-} prv_can_default_sensor_params = { .filter_id = DEFAULT_RADAR_FILTER_ID_BASE,
-                                    .threshold = DEFAULT_RADAR_DETECTION_THRESHOLD,
-                                    .fov       = DEFAULT_RADAR_FOV,
-                                    .mode      = DEFAULT_RADAR_OPERATING_MODE,
-                                    .power     = DEFAULT_RADAR_POWER_PERCENT };
+#ifdef PCB_CANBUS
+// Configure filter to accept both command (0x80-0x8F) and data (0xA0-0xBF) messages
+#define FILTER_ID_CMD    ((0x00000080 << 3) | 0x4)
+#define FILTER_MASK_CMD  ((0x000000F0 << 3) | 0x4)
+#define FILTER_ID_DATA   ((0x000000A0 << 3) | 0x4)
+#define FILTER_MASK_DATA ((0x000000F0 << 3) | 0x4)
 
-static CAN_TxHeaderTypeDef prv_can_tx_header;
-static uint32_t            prv_can_tx_mailbox;
-static can_state_t         prv_can_current_state = CAN_STATE_UNINIT;
+    // Filter 0: Command messages (0x80-0x8F)
+    canfil.FilterBank           = 0;
+    canfil.FilterMode           = CAN_FILTERMODE_IDMASK;
+    canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
+    canfil.FilterIdHigh         = FILTER_ID_CMD >> 16;
+    canfil.FilterIdLow          = FILTER_ID_CMD & 0xFFFF;
+    canfil.FilterMaskIdHigh     = FILTER_MASK_CMD >> 16;
+    canfil.FilterMaskIdLow      = FILTER_MASK_CMD & 0xFFFF;
+    canfil.FilterScale          = CAN_FILTERSCALE_32BIT;
+    canfil.FilterActivation     = ENABLE;
+    HAL_CAN_ConfigFilter(&hcan1, &canfil);
 
-static radar_data_t prv_radar_sensor_data_array[MAX_SENSORS];
-static uint32_t     prv_can_total_error_count   = 0;
-static uint32_t     prv_can_total_timeout_count = 0;
-static uint32_t     prv_can_last_msg_rx_time    = 0;
+    // Filter 1: Data messages (0xA0-0xBF)
+    canfil.FilterBank       = 1;
+    canfil.FilterIdHigh     = FILTER_ID_DATA >> 16;
+    canfil.FilterIdLow      = FILTER_ID_DATA & 0xFFFF;
+    canfil.FilterMaskIdHigh = FILTER_MASK_DATA >> 16;
+    canfil.FilterMaskIdLow  = FILTER_MASK_DATA & 0xFFFF;
+    HAL_CAN_ConfigFilter(&hcan1, &canfil);
 
-static radar_hw_status_t prv_sensor_hw_status_array[MAX_SENSORS];
-static uint8_t           prv_sensor_signal_strength_array[MAX_SENSORS];
-static uint8_t           prv_sensor_reset_attempt_counts_array[MAX_SENSORS];
-
-static radar_data_callback_t prv_global_radar_data_callback = NULL;
-
-static HAL_StatusTypeDef
-prv_can_hal_configure_filter(CAN_FilterTypeDef *filter_config, uint8_t filter_bank_offset, uint32_t id1, uint32_t mask_or_id2, bool is_mask_mode);
-static HAL_StatusTypeDef prv_can_hal_enable_notifications(void);
-static can_state_t       prv_can_validate_tx_params(const uint8_t *data, size_t length);
-static void              prv_can_configure_hal_tx_header(CAN_TxHeaderTypeDef *tx_hdr, uint32_t msg_id, size_t data_len);
-static void              prv_can_format_data_for_debug(char *hex_buf, const uint8_t *data, size_t data_len);
-static bool              prv_can_rx_get_message(CAN_HandleTypeDef *hcan_ptr, CAN_RxHeaderTypeDef *rx_hdr, uint8_t *data_buf);
-static bool              prv_can_rx_validate_dlc(const CAN_RxHeaderTypeDef *rx_hdr, uint8_t min_dlc);
-static void              prv_can_rx_convert_bytes_to_union(can_data_union_t *data_union, const uint8_t *bytes, uint8_t dlc);
-static void              prv_can_rx_process_header_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data);
-static void              prv_can_rx_process_object_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data);
-static void              prv_can_rx_process_status_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data);
-static void              prv_can_rx_process_version_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data);
-static void              prv_can_debug_print_radar_hw_status(radar_hw_status_t status);
-static uint8_t           prv_can_get_sensor_idx_from_id(uint32_t can_id);
-static void              prv_can_calculate_snr_for_sensor_data(uint8_t sensor_idx, radar_data_t *radar_data);
-
-
-static HAL_StatusTypeDef
-prv_can_hal_configure_filter(CAN_FilterTypeDef *filter_config, uint8_t filter_bank_offset, uint32_t id1, uint32_t mask_or_id2, bool is_mask_mode)
-{
-    memset(filter_config, 0, sizeof(CAN_FilterTypeDef));
-    filter_config->FilterBank  = filter_bank_offset;
-    filter_config->FilterMode  = is_mask_mode ? CAN_FILTERMODE_IDMASK : CAN_FILTERMODE_IDLIST;
-    filter_config->FilterScale = CAN_FILTERSCALE_32BIT;
-
-    filter_config->FilterIdHigh = (uint16_t)((id1 >> 13) & 0xFFFF);
-    filter_config->FilterIdLow  = (uint16_t)(((id1 << 3) & 0xFFF8) | CAN_ID_EXT);
-
-    if (is_mask_mode)
+    HAL_CAN_Start(&hcan1);
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) == HAL_OK)
     {
-        filter_config->FilterMaskIdHigh = (uint16_t)((mask_or_id2 >> 13) & 0xFFFF);
-        filter_config->FilterMaskIdLow  = (uint16_t)(((mask_or_id2 << 3) & 0xFFF8) | CAN_ID_EXT);
+        return true;
     }
-    else
-    {
-        filter_config->FilterMaskIdHigh = (uint16_t)((mask_or_id2 >> 13) & 0xFFFF);
-        filter_config->FilterMaskIdLow  = (uint16_t)(((mask_or_id2 << 3) & 0xFFF8) | CAN_ID_EXT);
-    }
-
-    filter_config->FilterFIFOAssignment = CAN_RX_FIFO0;
-    filter_config->FilterActivation     = ENABLE;
-    filter_config->SlaveStartFilterBank = 14;
-
-    return HAL_CAN_ConfigFilter(&hcan1, filter_config);
-}
-
-static HAL_StatusTypeDef prv_can_hal_enable_notifications(void)
-{
-    return HAL_CAN_ActivateNotification(&hcan1,
-                                        CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_RX_FIFO0_FULL | CAN_IT_ERROR_WARNING | CAN_IT_ERROR_PASSIVE | CAN_IT_BUSOFF |
-                                            CAN_IT_LAST_ERROR_CODE | CAN_IT_ERROR);
-}
-
-can_state_t can_init(void)
-{
-    if (prv_can_current_state == CAN_STATE_READY)
-    {
-        return CAN_STATE_READY;
-    }
-
-    CAN_FilterTypeDef default_filter;
-    if (prv_can_hal_configure_filter(&default_filter, 0, 0x00000000, 0x00000000, true) != HAL_OK)
-    {
-        DEBUG_SEND("CAN Init: Default filter config failed.");
-        prv_can_current_state = CAN_STATE_ERROR;
-        return CAN_STATE_ERROR;
-    }
-
-    if (HAL_CAN_Start(&hcan1) != HAL_OK)
-    {
-        DEBUG_SEND("CAN Init: HAL_CAN_Start failed (Error: 0x%08lX).", HAL_CAN_GetError(&hcan1));
-        prv_can_current_state = CAN_STATE_ERROR;
-        return CAN_STATE_ERROR;
-    }
-
-    if (prv_can_hal_enable_notifications() != HAL_OK)
-    {
-        DEBUG_SEND("CAN Init: Notification activation failed.");
-        prv_can_current_state = CAN_STATE_ERROR;
-        return CAN_STATE_ERROR;
-    }
-
-    for (uint8_t i = 0; i < MAX_SENSORS; i++)
-    {
-        memset(&prv_radar_sensor_data_array[i], 0, sizeof(radar_data_t));
-        prv_sensor_hw_status_array[i]            = RADAR_HW_STATUS_INITIALISING;
-        prv_sensor_signal_strength_array[i]      = 0;
-        prv_sensor_reset_attempt_counts_array[i] = 0;
-        prv_radar_sensor_data_array[i].status    = RADAR_HW_STATUS_INITIALISING;
-    }
-
-    prv_can_current_state    = CAN_STATE_READY;
-    prv_can_last_msg_rx_time = HAL_GetTick();
-    DEBUG_SEND("CAN: Interface initialized.");
-    return CAN_STATE_READY;
-}
-
-can_state_t can_get_state(void)
-{
-    return prv_can_current_state;
-}
-
-static can_state_t prv_can_validate_tx_params(const uint8_t *data, size_t length)
-{
-    if (data == NULL && length > 0)
-    {
-        DEBUG_SEND("CAN TX Error: Null data with non-zero length %u.", (unsigned int)length);
-        return CAN_STATE_ERROR;
-    }
-    if (length > 8)
-    {
-        DEBUG_SEND("CAN TX Error: Data length %u exceeds 8 bytes.", (unsigned int)length);
-        return CAN_STATE_ERROR;
-    }
-    return CAN_STATE_READY;
-}
-
-static void prv_can_configure_hal_tx_header(CAN_TxHeaderTypeDef *tx_hdr, uint32_t msg_id, size_t data_len)
-{
-    memset(tx_hdr, 0, sizeof(CAN_TxHeaderTypeDef));
-    tx_hdr->ExtId              = msg_id;
-    tx_hdr->IDE                = CAN_ID_EXT;
-    tx_hdr->RTR                = CAN_RTR_DATA;
-    tx_hdr->DLC                = data_len;
-    tx_hdr->TransmitGlobalTime = DISABLE;
-}
-
-static void prv_can_format_data_for_debug(char *hex_buf, const uint8_t *data, size_t data_len)
-{
-    memset(hex_buf, 0, CAN_TX_DEBUG_BUFFER_SIZE);
-    for (size_t i = 0; i < data_len && i < 8; ++i)
-    {
-        snprintf(&hex_buf[i * 2], 3, "%02X", data[i]);
-    }
-}
-
-can_state_t can_send_byte(uint32_t id, uint8_t message)
-{
-    return can_send_array(id, &message, 1);
-}
-
-can_state_t can_send_array(uint32_t id, const uint8_t *message, size_t length)
-{
-    if (prv_can_current_state != CAN_STATE_READY && prv_can_current_state != CAN_STATE_BUSY)
-    {
-        DEBUG_SEND("CAN TX Error: Interface not ready (State: %d).", prv_can_current_state);
-        return prv_can_current_state;
-    }
-    if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0)
-    {
-        return CAN_STATE_BUSY;
-    }
-    if (prv_can_validate_tx_params(message, length) != CAN_STATE_READY)
-    {
-        return CAN_STATE_ERROR;
-    }
-
-    prv_can_configure_hal_tx_header(&prv_can_tx_header, id, length);
-
-    if (g_debug_enabled)
-    {
-        char data_hex_str[CAN_TX_DEBUG_BUFFER_SIZE];
-        prv_can_format_data_for_debug(data_hex_str, message, length);
-        DEBUG_SEND("CAN TX (ID: 0x%08lX, DLC: %u) Data: 0x%s", id, (unsigned int)length, data_hex_str);
-    }
-
-    if (HAL_CAN_AddTxMessage(&hcan1, &prv_can_tx_header, (uint8_t *)message, &prv_can_tx_mailbox) != HAL_OK)
-    {
-        DEBUG_SEND("CAN TX Error: HAL_CAN_AddTxMessage failed (Error: 0x%08lX).", HAL_CAN_GetError(&hcan1));
-        prv_can_total_error_count++;
-        return CAN_STATE_ERROR;
-    }
-    return CAN_STATE_READY;
-}
-
-can_state_t can_send_to_sensor(uint8_t sensor_idx, uint8_t cmd, const uint8_t *data, size_t data_len)
-{
-    if (sensor_idx >= MAX_SENSORS)
-    {
-        DEBUG_SEND("CAN Send Error: Sensor index %u out of range.", sensor_idx);
-        return CAN_STATE_ERROR;
-    }
-    if (data_len > 7)
-    {
-        DEBUG_SEND("CAN Send Error: Cmd data length %u too large for sensor %u cmd %u.", (unsigned int)data_len, sensor_idx, cmd);
-        return CAN_STATE_ERROR;
-    }
-
-    uint32_t message_id = CAN_CMD_ID_SENSOR(sensor_idx);
-    uint8_t  payload[8];
-    size_t   payload_len = 0;
-
-    payload[0]  = cmd;
-    payload_len = 1;
-
-    if (data != NULL && data_len > 0)
-    {
-        memcpy(&payload[1], data, data_len);
-        payload_len += data_len;
-    }
-    return can_send_array(message_id, payload, payload_len);
-}
-
-can_state_t can_request_radar_data(void)
-{
-    can_state_t overall_send_status = CAN_STATE_READY;
-    bool        any_busy            = false;
-
-    for (uint8_t i = 0; i < MAX_SENSORS; ++i)
-    {
-        if (prv_sensor_hw_status_array[i] == RADAR_HW_STATUS_READY || prv_sensor_hw_status_array[i] == RADAR_HW_STATUS_CHIRPING ||
-            prv_sensor_hw_status_array[i] == RADAR_HW_STATUS_STOPPED)
-        {
-            can_state_t sensor_send_status = can_send_to_sensor(i, CAN_CMD_START, NULL, 0);
-            if (sensor_send_status == CAN_STATE_ERROR)
-            {
-                overall_send_status = CAN_STATE_ERROR;
-                can_handle_error(i, CAN_ERROR_TYPE_UNKNOWN);
-            }
-            else if (sensor_send_status == CAN_STATE_BUSY)
-            {
-                any_busy = true;
-            }
-        }
-    }
-    if (overall_send_status == CAN_STATE_READY && any_busy)
-    {
-        return CAN_STATE_BUSY;
-    }
-    return overall_send_status;
-}
-
-uint32_t can_get_error_count(void)
-{
-    return prv_can_total_error_count;
-}
-
-uint32_t can_get_timeout_count(void)
-{
-    return prv_can_total_timeout_count;
-}
-
-uint32_t can_get_time_since_last_msg(void)
-{
-    uint32_t current_time = HAL_GetTick();
-    if (current_time >= prv_can_last_msg_rx_time)
-    {
-        return current_time - prv_can_last_msg_rx_time;
-    }
-    return (0xFFFFFFFFUL - prv_can_last_msg_rx_time) + current_time + 1;
-}
-
-uint8_t can_get_radar_signal(uint8_t sensor_idx)
-{
-    if (sensor_idx < MAX_SENSORS)
-    {
-        return prv_sensor_signal_strength_array[sensor_idx];
-    }
-    return 0;
-}
-
-bool can_handle_error(uint8_t sensor_idx, can_error_type_t error_type)
-{
-    if (sensor_idx < MAX_SENSORS)
-    {
-        DEBUG_SEND("CAN Error: Handling type %d for sensor %u.", error_type, sensor_idx);
-        if (prv_sensor_hw_status_array[sensor_idx] != RADAR_HW_STATUS_ERROR)
-        {
-            if (prv_sensor_reset_attempt_counts_array[sensor_idx] < SENSOR_MAX_RESET_ATTEMPTS)
-            { // Use SENSOR_MAX_RESET_ATTEMPTS for resets
-                DEBUG_SEND("CAN Error: Attempting reset for sensor %u (reset attempt %u/%u).",
-                           sensor_idx,
-                           prv_sensor_reset_attempt_counts_array[sensor_idx] + 1,
-                           SENSOR_MAX_RESET_ATTEMPTS);
-                if (can_reset_sensor(sensor_idx) == CAN_STATE_READY)
-                {
-                    return true;
-                }
-                else
-                {
-                    DEBUG_SEND("CAN Error: Reset initiation failed for sensor %u.", sensor_idx);
-                    return false;
-                }
-            }
-            else
-            { // Exceeded SENSOR_MAX_RESET_ATTEMPTS
-                DEBUG_SEND("CAN Error: Sensor %u max reset attempts (%u) reached. Marking as ERROR.", sensor_idx, SENSOR_MAX_RESET_ATTEMPTS);
-                prv_sensor_hw_status_array[sensor_idx]         = RADAR_HW_STATUS_ERROR;
-                prv_radar_sensor_data_array[sensor_idx].status = RADAR_HW_STATUS_ERROR;
-                return false;
-            }
-        }
-        else
-        {
-            DEBUG_SEND("CAN Error: Sensor %u already in RADAR_HW_STATUS_ERROR.", sensor_idx);
-            return false;
-        }
-    }
-    else if (sensor_idx == INVALID_SENSOR_INDEX)
-    {
-        DEBUG_SEND("CAN Error: Handling generic bus error type %d.", error_type);
-        // Generic bus errors usually handled by HAL_CAN_ErrorCallback
-        prv_can_total_error_count++;
-        return false;
-    }
+#endif
     return false;
 }
 
-void can_process(void)
+bool can_send(uint32_t ID, uint8_t message)
 {
-    if (prv_can_current_state == CAN_STATE_UNINIT)
+#ifdef PCB_CANBUS
+    txHeader.DLC                = 1;
+    txHeader.IDE                = CAN_ID_EXT;
+    txHeader.RTR                = CAN_RTR_DATA;
+    txHeader.StdId              = ID;
+    txHeader.ExtId              = ID;
+    txHeader.TransmitGlobalTime = DISABLE;
+
+    debug_send("CAN TX (0x%02X) 0x%02X", ID, message);
+
+    uint8_t csend[1] = { message };
+    if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox) == HAL_OK)
+        return true;
+#endif
+    return false;
+}
+
+bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
+{
+#ifdef PCB_CANBUS
+    txHeader.DLC                = length;
+    txHeader.IDE                = CAN_ID_EXT;
+    txHeader.RTR                = CAN_RTR_DATA;
+    txHeader.StdId              = ID;
+    txHeader.ExtId              = ID;
+    txHeader.TransmitGlobalTime = DISABLE;
+
+    char data_hex[17];
+    memset(data_hex, 0, 17);
+    for (int i = 0; i < length; i++)
     {
-        can_init();
-        return;
+        sprintf(data_hex, "%s%02X", data_hex, message[i]);
     }
-    if (prv_can_current_state == CAN_STATE_ERROR)
+    debug_send("CAN TX (0x%02X) 0x%s", ID, data_hex);
+
+    if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, message, &canMailbox) == HAL_OK)
+        return true;
+#endif
+    return false;
+}
+
+// Send command to specific sensor
+bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS)
+        return false;
+
+    uint32_t sensor_id = base_id + CAN_SENSOR_OFFSET(sensor_idx);
+    return can_send(sensor_id, message);
+}
+
+// Broadcast command to all sensors
+void broadcast_to_all_sensors(uint32_t base_id, uint8_t message)
+{
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        return;
+        can_send_to_sensor(i, base_id, message);
+    }
+}
+
+// Corrected sensor index extraction
+uint8_t get_sensor_index_from_can_id(uint32_t can_id)
+{
+    // Handle command messages (0x80-0x82)
+    if ((can_id & 0xF0) == 0x80)
+    {
+        uint8_t sensor_idx = can_id & 0x0F;
+        if (sensor_idx < MAX_RADAR_SENSORS)
+            return sensor_idx;
     }
 
-    if (can_get_time_since_last_msg() > CAN_COMM_TIMEOUT_MS)
+    // Handle data messages (0xA0-0xC4 range)
+    if ((can_id & 0xF0) >= 0xA0 && (can_id & 0xF0) <= 0xC0)
     {
-        prv_can_total_timeout_count++;
-        DEBUG_SEND("CAN Timeout: No bus activity for >%lu ms. Count: %lu", (unsigned long)CAN_COMM_TIMEOUT_MS, prv_can_total_timeout_count);
-        prv_can_last_msg_rx_time = HAL_GetTick();
+        uint8_t offset     = can_id & 0x0F;
+        uint8_t sensor_idx = offset >> 4; // Extract sensor index from upper nibble of offset
+        if (sensor_idx < MAX_RADAR_SENSORS)
+            return sensor_idx;
+    }
 
-        for (uint8_t i = 0; i < MAX_SENSORS; ++i)
+    return 0xFF; // Invalid sensor index
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1)
+{
+    if (HAL_CAN_GetRxMessage(hcan1, CAN_RX_FIFO0, &rxHeader, canRX) == HAL_OK)
+    {
+        can_data_union_t rx_data;
+        memcpy(rx_data.bytes, canRX, rxHeader.DLC);
+
+        // Handle command messages
+        if ((rxHeader.ExtId & 0xF0) == 0x80)
         {
-            if (prv_sensor_hw_status_array[i] != RADAR_HW_STATUS_ERROR && prv_sensor_hw_status_array[i] != RADAR_HW_STATUS_INITIALISING)
+            uint8_t sensor_idx = rxHeader.ExtId & 0x0F;
+            uint8_t command    = rx_data.bytes[0];
+
+            debug_send("CAN CMD S%d: 0x%02X Data: 0x%02X", sensor_idx, rxHeader.ExtId, command);
+
+            if (sensor_idx < MAX_RADAR_SENSORS)
             {
-                DEBUG_SEND("CAN Timeout: Sensor %u may be affected by bus timeout.", i);
-                // If a global timeout occurs, it might imply individual sensors need checking or resetting.
-                // This could call can_handle_error(i, CAN_ERROR_TYPE_TIMEOUT);
-                // However, this should be handled carefully to avoid cascading resets if the bus is truly down.
+                process_sensor_command(sensor_idx, command, &rx_data);
             }
+            return;
         }
-    }
 
-    for (uint8_t i = 0; i < MAX_SENSORS; ++i)
-    {
-        if (prv_radar_sensor_data_array[i].new_data_ready)
+        // Handle data messages
+        uint8_t sensor_idx = get_sensor_index_from_can_id(rxHeader.ExtId);
+
+        if (sensor_idx >= MAX_RADAR_SENSORS)
         {
-            prv_can_calculate_snr_for_sensor_data(i, &prv_radar_sensor_data_array[i]);
-            if (prv_global_radar_data_callback != NULL)
+            debug_send("Invalid sensor index for ID: 0x%02X", rxHeader.ExtId);
+            return;
+        }
+
+        radar_data_t *sensor  = &radar_system.sensors[sensor_idx];
+        uint8_t       base_id = rxHeader.ExtId & 0xF0;
+
+        // Debug output
+        char data_hex[17];
+        memset(data_hex, 0, 17);
+        for (int i = 0; i < rxHeader.DLC; i++)
+        {
+            sprintf(data_hex, "%s%02X", data_hex, rx_data.bytes[i]);
+        }
+        debug_send("CAN RX S%d: (0x%02X) 0x%s", sensor_idx, rxHeader.ExtId, data_hex);
+
+        switch (base_id)
+        {
+        case 0xA0: // Header
+            sensor->totalPacketLength = rx_data.words[0];
+            sensor->frameNumber       = rx_data.words[1];
+            sensor->numDetPoints      = (sensor->totalPacketLength > 129) ? (sensor->totalPacketLength - 129) : 0;
+            sensor->pointIndex        = 0;
+            sensor->maxSNR            = 0;
+            sensor->new_data_ready    = false;
+
+            debug_send("S%d Frame: %d, Points: %d", sensor_idx, sensor->frameNumber, sensor->numDetPoints);
+            break;
+
+        case 0xA1: // Detected point
+            if (sensor->pointIndex < MAX_RADAR_DETECTED_POINTS && sensor->pointIndex < sensor->numDetPoints)
             {
-                prv_global_radar_data_callback(i, &prv_radar_sensor_data_array[i]);
-            }
-            prv_radar_sensor_data_array[i].new_data_ready = false;
-        }
-    }
-}
+                sensor->detectedPoints[sensor->pointIndex][0] = rx_data.floats[0];
+                sensor->detectedPoints[sensor->pointIndex][1] = rx_data.floats[1];
 
-radar_data_t *can_get_radar_data_ptr(uint8_t sensor_idx)
-{
-    if (sensor_idx < MAX_SENSORS)
-    {
-        return &prv_radar_sensor_data_array[sensor_idx];
-    }
-    return NULL;
-}
+                debug_send("S%d Point %d: %.2f, %.2f",
+                           sensor_idx,
+                           sensor->pointIndex,
+                           sensor->detectedPoints[sensor->pointIndex][0],
+                           sensor->detectedPoints[sensor->pointIndex][1]);
 
-can_state_t can_reset_sensor(uint8_t sensor_idx)
-{
-    if (sensor_idx >= MAX_SENSORS)
-    {
-        return CAN_STATE_ERROR;
-    }
+                sensor->pointIndex++;
 
-    // This counter is for reset attempts for THIS sensor
-    prv_sensor_reset_attempt_counts_array[sensor_idx]++;
-    if (prv_sensor_reset_attempt_counts_array[sensor_idx] > SENSOR_MAX_RESET_ATTEMPTS)
-    {
-        DEBUG_SEND("CAN Reset: Sensor %u max reset attempts. Marking ERROR.", sensor_idx);
-        prv_sensor_hw_status_array[sensor_idx]         = RADAR_HW_STATUS_ERROR;
-        prv_radar_sensor_data_array[sensor_idx].status = RADAR_HW_STATUS_ERROR;
-        return CAN_STATE_ERROR;
-    }
-
-    DEBUG_SEND("CAN Reset: Sensor %u (Attempt %u/%u)", sensor_idx, prv_sensor_reset_attempt_counts_array[sensor_idx], SENSOR_MAX_RESET_ATTEMPTS);
-    memset(&prv_radar_sensor_data_array[sensor_idx], 0, sizeof(radar_data_t));
-    prv_sensor_hw_status_array[sensor_idx]         = RADAR_HW_STATUS_INITIALISING;
-    prv_radar_sensor_data_array[sensor_idx].status = RADAR_HW_STATUS_INITIALISING;
-    prv_sensor_signal_strength_array[sensor_idx]   = 0;
-
-    can_state_t cmd_status;
-    cmd_status = can_send_to_sensor(sensor_idx, CAN_CMD_STOP, NULL, 0);
-    HAL_Delay(SENSOR_RESET_DELAY_MS);
-    cmd_status = can_send_to_sensor(sensor_idx, CAN_CMD_INIT, NULL, 0);
-
-    if (cmd_status == CAN_STATE_ERROR)
-    {
-        DEBUG_SEND("CAN Reset: Failed to send INIT to sensor %u.", sensor_idx);
-        return CAN_STATE_ERROR;
-    }
-    return CAN_STATE_READY;
-}
-
-bool can_all_sensors_ready(void)
-{
-    for (uint8_t i = 0; i < MAX_SENSORS; ++i)
-    {
-        if (prv_sensor_hw_status_array[i] != RADAR_HW_STATUS_READY && prv_sensor_hw_status_array[i] != RADAR_HW_STATUS_CHIRPING)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-radar_hw_status_t can_get_sensor_hw_status(uint8_t sensor_idx)
-{
-    if (sensor_idx < MAX_SENSORS)
-    {
-        return prv_sensor_hw_status_array[sensor_idx];
-    }
-    return RADAR_HW_STATUS_ERROR;
-}
-
-bool can_setup_sensor_filter(uint8_t sensor_idx, uint32_t filter_id)
-{
-    if (sensor_idx >= MAX_SENSORS)
-    {
-        DEBUG_SEND("CAN Filter Error: Sensor index %u invalid.", sensor_idx);
-        return false;
-    }
-    uint8_t target_filter_bank = sensor_idx + 1;
-    if (target_filter_bank >= 14)
-    {
-        DEBUG_SEND("CAN Filter Error: Target bank %u out of range for sensor %u.", target_filter_bank, sensor_idx);
-        return false;
-    }
-
-    if (prv_can_current_state != CAN_STATE_READY)
-    {
-        if (can_init() != CAN_STATE_READY)
-        {
-            DEBUG_SEND("CAN Filter Error: CAN init failed for sensor %u filter.", sensor_idx);
-            return false;
-        }
-    }
-
-    CAN_FilterTypeDef filter_s;
-    if (prv_can_hal_configure_filter(&filter_s, target_filter_bank, filter_id, 0x1FFFFFFF, true) != HAL_OK)
-    { // Mask for exact ID match
-        DEBUG_SEND("CAN Filter Error: Config failed for S%u, ID 0x%08lX, Bank %u.", sensor_idx, filter_id, target_filter_bank);
-        return false;
-    }
-    DEBUG_SEND("CAN Filter: S%u, ID 0x%08lX, Bank %u configured.", sensor_idx, filter_id, target_filter_bank);
-    return true;
-}
-
-bool can_setup_all_sensors(void)
-{
-    if (prv_can_current_state != CAN_STATE_READY)
-    {
-        if (can_init() != CAN_STATE_READY)
-        {
-            DEBUG_SEND("CAN SetupAll: CAN init failed. Cannot setup filters.");
-            return false;
-        }
-    }
-    DEBUG_SEND("CAN SetupAll: Configuring filters for %d sensors.", MAX_SENSORS);
-    bool success = true;
-    for (uint8_t i = 0; i < MAX_SENSORS; ++i)
-    {
-        if (!can_setup_sensor_filter(i, CAN_MSG_ID_HEADER_SENSOR(i)))
-        { // Setup for header ID
-            DEBUG_SEND("CAN SetupAll: Failed filter for Header ID for sensor %u.", i);
-            success = false;
-        }
-        // Add more calls to can_setup_sensor_filter here if other IDs need specific filters,
-        // ensuring filter banks are managed correctly.
-    }
-    return success;
-}
-
-can_state_t can_register_data_callback(radar_data_callback_t callback)
-{
-    if (callback == NULL)
-    {
-        prv_global_radar_data_callback = NULL;
-        return CAN_STATE_ERROR;
-    }
-    prv_global_radar_data_callback = callback;
-    return CAN_STATE_READY;
-}
-
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
-    if (hcan->Instance == hcan1.Instance)
-    {
-        CAN_RxHeaderTypeDef rx_header;
-        uint8_t             rx_data[8];
-        if (prv_can_rx_get_message(hcan, &rx_header, rx_data))
-        {
-            if (rx_header.IDE == CAN_ID_EXT)
-            {
-                uint8_t sensor_idx = prv_can_get_sensor_idx_from_id(rx_header.ExtId);
-                if (sensor_idx < MAX_SENSORS)
+                if (sensor->pointIndex >= sensor->numDetPoints)
                 {
-                    if (rx_header.ExtId == CAN_MSG_ID_HEADER_SENSOR(sensor_idx))
-                    {
-                        prv_can_rx_process_header_msg(sensor_idx, &rx_header, rx_data);
-                    }
-                    else if (rx_header.ExtId == CAN_MSG_ID_OBJECT_SENSOR(sensor_idx))
-                    {
-                        prv_can_rx_process_object_msg(sensor_idx, &rx_header, rx_data);
-                    }
-                    else if (rx_header.ExtId == CAN_MSG_ID_STATUS_SENSOR(sensor_idx))
-                    {
-                        prv_can_rx_process_status_msg(sensor_idx, &rx_header, rx_data);
-                    }
-                    else if (rx_header.ExtId == CAN_MSG_ID_VERSION_SENSOR(sensor_idx))
-                    {
-                        prv_can_rx_process_version_msg(sensor_idx, &rx_header, rx_data);
-                    }
+                    sensor->new_data_ready = true;
+                    // Process complete frame for this sensor
+                    process_complete_radar_frame(sensor_idx);
                 }
             }
+            break;
+
+        case 0xA3: // Status
+            sensor->status = (radar_hw_status_t)rx_data.bytes[0];
+            debug_send("S%d Status: %d", sensor_idx, rx_data.bytes[0]);
+            break;
+
+        case 0xA4: // Version
+            sensor->version.major = rx_data.bytes[0];
+            sensor->version.minor = rx_data.bytes[1];
+            sensor->version.sub   = rx_data.bytes[2];
+            debug_send("S%d Version: %d.%d.%d", sensor_idx, sensor->version.major, sensor->version.minor, sensor->version.sub);
+            break;
         }
-    }
-}
 
-void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
-{
-    if (hcan->Instance == hcan1.Instance)
-    {
-        DEBUG_SEND("CAN RX Error: FIFO0 Full! Messages lost.");
-        prv_can_total_error_count++;
-        can_handle_error(INVALID_SENSOR_INDEX, CAN_ERROR_TYPE_FIFO);
-    }
-}
-
-void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
-{
-    if (hcan->Instance == hcan1.Instance)
-    {
-        uint32_t errorcode = HAL_CAN_GetError(hcan);
-        DEBUG_SEND("CAN HAL Error Callback. Code: 0x%08lX", errorcode);
-        prv_can_total_error_count++;
-
-        if (errorcode & (HAL_CAN_ERROR_BOF | HAL_CAN_ERROR_EPV | HAL_CAN_ERROR_EWG))
-        {
-            DEBUG_SEND("CAN: Severe bus error. Attempting recovery...");
-            HAL_CAN_Stop(hcan);
-            HAL_CAN_ResetError(hcan);
-            if (HAL_CAN_Start(hcan) != HAL_OK)
-            {
-                DEBUG_SEND("CAN Error: HAL_CAN_Start failed post-error. State: ERROR.");
-                prv_can_current_state = CAN_STATE_ERROR;
-            }
-            else
-            {
-                if (prv_can_hal_enable_notifications() != HAL_OK)
-                {
-                    DEBUG_SEND("CAN Error: Failed to re-enable notifications post-error. State: ERROR.");
-                    prv_can_current_state = CAN_STATE_ERROR;
-                }
-                else
-                {
-                    DEBUG_SEND("CAN: HAL recovery successful. Resumed.");
-                    prv_can_current_state = CAN_STATE_READY;
-                }
-            }
-        }
-        else
-        {
-            HAL_CAN_ResetError(hcan);
-        }
-    }
-}
-
-static void prv_can_rx_convert_bytes_to_union(can_data_union_t *data_union, const uint8_t *bytes, uint8_t dlc)
-{
-    memset(data_union, 0, sizeof(can_data_union_t));
-    for (uint8_t i = 0; i < dlc && i < 8; ++i)
-    {
-        data_union->bytes[i] = bytes[i];
-    }
-}
-
-static bool prv_can_rx_get_message(CAN_HandleTypeDef *hcan_ptr, CAN_RxHeaderTypeDef *rx_hdr, uint8_t *data_buf)
-{
-    if (HAL_CAN_GetRxMessage(hcan_ptr, CAN_RX_FIFO0, rx_hdr, data_buf) != HAL_OK)
-    {
-        DEBUG_SEND("CAN RX Error: GetRxMessage failed (Error: 0x%08lX)", HAL_CAN_GetError(hcan_ptr));
-        prv_can_total_error_count++;
-        return false;
-    }
-    prv_can_last_msg_rx_time = HAL_GetTick();
-    if (g_debug_enabled)
-    {
-        char dbg_buf[CAN_TX_DEBUG_BUFFER_SIZE];
-        prv_can_format_data_for_debug(dbg_buf, data_buf, rx_hdr->DLC);
-        DEBUG_SEND("CAN RX (ID: 0x%0*lX, DLC: %u, %s) Data: %s",
-                   (rx_hdr->IDE == CAN_ID_EXT ? 8 : 3),
-                   (rx_hdr->IDE == CAN_ID_EXT ? rx_hdr->ExtId : rx_hdr->StdId),
-                   rx_hdr->DLC,
-                   (rx_hdr->IDE == CAN_ID_EXT ? "Ext" : "Std"),
-                   dbg_buf);
-    }
-    return true;
-}
-
-static bool prv_can_rx_validate_dlc(const CAN_RxHeaderTypeDef *rx_hdr, uint8_t min_dlc)
-{
-    if (rx_hdr->DLC < min_dlc)
-    {
-        DEBUG_SEND("CAN RX Error: ID 0x%08lX DLC %u < min %u", (rx_hdr->IDE == CAN_ID_EXT ? rx_hdr->ExtId : (uint32_t)rx_hdr->StdId), rx_hdr->DLC, min_dlc);
-        return false;
-    }
-    return true;
-}
-
-static void prv_can_rx_process_header_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data)
-{
-    if (!prv_can_rx_validate_dlc(rx_hdr, 8))
-    {
-        return;
-    }
-
-    radar_data_t    *radar = &prv_radar_sensor_data_array[sensor_idx];
-    can_data_union_t d_union;
-    prv_can_rx_convert_bytes_to_union(&d_union, data, rx_hdr->DLC);
-
-    radar->totalPacketLength = d_union.words[0];
-    radar->frameNumber       = d_union.words[1];
-    radar->numDetPoints      = (radar->totalPacketLength > MAX_RADAR_DETECTED_POINTS) ? MAX_RADAR_DETECTED_POINTS : (uint8_t)radar->totalPacketLength;
-    radar->pointIndex        = 0;
-    radar->maxSNR            = 0.0f;
-    radar->new_data_ready    = false;
-
-    prv_sensor_reset_attempt_counts_array[sensor_idx] = 0;
-    prv_sensor_hw_status_array[sensor_idx]            = RADAR_HW_STATUS_CHIRPING;
-    radar->status                                     = RADAR_HW_STATUS_CHIRPING;
-    DEBUG_SEND("CAN RX: S%u Frame %lu Header. Expect %u pts.", sensor_idx, radar->frameNumber, radar->numDetPoints);
-}
-
-static void prv_can_rx_process_object_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data)
-{
-    if (!prv_can_rx_validate_dlc(rx_hdr, 8))
-    {
-        return;
-    }
-
-    radar_data_t *radar = &prv_radar_sensor_data_array[sensor_idx];
-    if (radar->pointIndex >= radar->numDetPoints || radar->pointIndex >= MAX_RADAR_DETECTED_POINTS)
-    {
-        if (radar->pointIndex >= MAX_RADAR_DETECTED_POINTS)
-        {
-            radar->numDetPoints = 0;
-        }
-        return;
-    }
-
-    can_data_union_t d_union;
-    prv_can_rx_convert_bytes_to_union(&d_union, data, rx_hdr->DLC);
-    radar->detectedPoints[radar->pointIndex][0] = d_union.floats[0];
-    radar->detectedPoints[radar->pointIndex][1] = d_union.floats[1];
-    radar->pointIndex++;
-
-    if (radar->pointIndex == radar->numDetPoints)
-    {
-        radar->new_data_ready = true;
-        DEBUG_SEND("CAN RX: S%u Frame %lu All %u pts recvd.", sensor_idx, radar->frameNumber, radar->numDetPoints);
-        prv_sensor_hw_status_array[sensor_idx] = RADAR_HW_STATUS_CHIRPING;
-        radar->status                          = RADAR_HW_STATUS_CHIRPING;
-    }
-}
-
-static void prv_can_rx_process_status_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data)
-{
-    if (!prv_can_rx_validate_dlc(rx_hdr, 1))
-    {
-        return;
-    }
-    radar_hw_status_t new_hw_status = (radar_hw_status_t)data[0];
-    if (new_hw_status >= RADAR_HW_STATUS_COUNT)
-    {
-        DEBUG_SEND("CAN RX Error: S%u invalid status code %u", sensor_idx, new_hw_status);
-        return;
-    }
-    if (prv_sensor_hw_status_array[sensor_idx] != new_hw_status)
-    {
-        prv_sensor_hw_status_array[sensor_idx]         = new_hw_status;
-        prv_radar_sensor_data_array[sensor_idx].status = new_hw_status;
-        DEBUG_SEND("CAN RX: S%u HW Status -> %d.", sensor_idx, new_hw_status);
-        if (g_debug_enabled)
-        {
-            prv_can_debug_print_radar_hw_status(new_hw_status);
-        }
-    }
-    prv_sensor_reset_attempt_counts_array[sensor_idx] = 0;
-}
-
-static void prv_can_rx_process_version_msg(uint8_t sensor_idx, const CAN_RxHeaderTypeDef *rx_hdr, const uint8_t *data)
-{
-    if (!prv_can_rx_validate_dlc(rx_hdr, 3))
-    {
-        return;
-    }
-    prv_radar_sensor_data_array[sensor_idx].version.major = data[0];
-    prv_radar_sensor_data_array[sensor_idx].version.minor = data[1];
-    prv_radar_sensor_data_array[sensor_idx].version.sub   = data[2];
-    DEBUG_SEND("CAN RX: S%u Ver: %u.%u.%u", sensor_idx, data[0], data[1], data[2]);
-    prv_sensor_reset_attempt_counts_array[sensor_idx] = 0;
-}
-
-static void prv_can_debug_print_radar_hw_status(radar_hw_status_t status)
-{
-    if (status < RADAR_HW_STATUS_COUNT && RADAR_HW_TO_SYSTEM_STATUS_MAP[status].description)
-    { // Check array bounds
-        DEBUG_SEND("  HW Status Detail: %s", RADAR_HW_TO_SYSTEM_STATUS_MAP[status].description);
+        radar_system.last_message_timestamp[sensor_idx] = HAL_GetTick();
+        radar_system.sensor_online[sensor_idx]          = true;
     }
     else
     {
-        DEBUG_SEND("  HW Status Detail: Unknown value %d", status);
+        debug_send("CAN RX ERROR");
     }
 }
 
-static uint8_t prv_can_get_sensor_idx_from_id(uint32_t can_id)
+void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_t *data)
 {
-    for (uint8_t i = 0; i < MAX_SENSORS; ++i)
+    radar_data_t *sensor = &radar_system.sensors[sensor_idx];
+
+    switch (command)
     {
-        // Check against all known message ID patterns for this sensor
-        if (can_id == CAN_MSG_ID_HEADER_SENSOR(i) || can_id == CAN_MSG_ID_OBJECT_SENSOR(i) || can_id == CAN_MSG_ID_PROFILE_SENSOR(i) || // If used
-            can_id == CAN_MSG_ID_STATUS_SENSOR(i) || can_id == CAN_MSG_ID_VERSION_SENSOR(i) || can_id == CAN_CMD_ID_SENSOR(i) /* For command ACKs */)
+    case CAN_CMD_START:
+        debug_send("S%d: Start command received", sensor_idx);
+        break;
+
+    case CAN_CMD_STOP:
+        debug_send("S%d: Stop command received", sensor_idx);
+        break;
+
+    case CAN_CMD_STATUS:
+        // Respond with current status
+        can_send(CAN_MSG_ID_STATUS_SENSOR(sensor_idx), (uint8_t)sensor->status);
+        break;
+
+    case CAN_CMD_CAL:
+        debug_send("S%d: Calibration command received", sensor_idx);
+        break;
+
+    case CAN_CMD_POWER:
+        if (data && data->bytes[1]) // Check if there's additional data
         {
-            return i;
+            uint8_t power_level = data->bytes[1];
+            debug_send("S%d: Power level set to %d%%", sensor_idx, power_level);
         }
+        break;
+
+    default:
+        debug_send("S%d: Unknown command 0x%02X", sensor_idx, command);
+        break;
     }
-    return INVALID_SENSOR_INDEX;
 }
 
-static void prv_can_calculate_snr_for_sensor_data(uint8_t sensor_idx, radar_data_t *radar_data)
+void process_complete_radar_frame(uint8_t sensor_idx)
 {
-    if (radar_data->numDetPoints == 0)
-    {
-        radar_data->maxSNR                           = 0.0f;
-        prv_sensor_signal_strength_array[sensor_idx] = 0;
-        return;
-    }
-    float   max_amp = 0.0f, sum_amp = 0.0f;
-    uint8_t N = 0;
-    for (uint8_t k = 0; k < radar_data->numDetPoints && k < MAX_RADAR_DETECTED_POINTS; ++k)
-    {
-        float x   = radar_data->detectedPoints[k][0];
-        float y   = radar_data->detectedPoints[k][1];
-        float amp = sqrtf(x * x + y * y);
-        if (amp > max_amp)
-        {
-            max_amp = amp;
-        }
-        sum_amp += amp;
-        N++;
-    }
-    if (N > 0)
-    {
-        float avg_amp                                = sum_amp / N;
-        radar_data->maxSNR                           = (avg_amp > 0.001f) ? (max_amp / avg_amp) : (max_amp > 0 ? 999.0f : 0.0f); // Simplified SNR
-        float scaled_sig                             = radar_data->maxSNR * 2.55f;
-        prv_sensor_signal_strength_array[sensor_idx] = (scaled_sig > 255.f) ? 255 : (uint8_t)scaled_sig;
-    }
-    else
-    {
-        radar_data->maxSNR                           = 0.0f;
-        prv_sensor_signal_strength_array[sensor_idx] = 0;
-    }
+    radar_data_t *sensor = &radar_system.sensors[sensor_idx];
+
+    debug_send("S%d: Frame %d complete with %d points", sensor_idx, sensor->frameNumber, sensor->numDetPoints);
+
+    // Call the simplified radar processing function
+    radar_process_measurement(sensor_idx, sensor->detectedPoints, sensor->numDetPoints);
 }
