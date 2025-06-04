@@ -71,10 +71,14 @@ bool module_init(void)
     uint32_t        timer_now      = HAL_GetTick();
 
     if (initialised)
+    {
         return true;
+    }
     static uint32_t timestamp;
     if (HAL_GetTick() < timestamp + 1000)
+    {
         return false;
+    }
     timestamp = HAL_GetTick();
 
     uart_tx_channel_set(UART_UPHOLE);
@@ -86,7 +90,9 @@ bool module_init(void)
         init_step = STEP_VER_SYNC;
     case STEP_VER_SYNC:
         if (version_sent)
+        {
             init_step = STEP_WATER_SYNC;
+        }
         else if (retries_ver < 3)
         {
             printf("@status,down,0,ver,%d,%d,%d\n", FW_VER_MAJOR, FW_VER_MINOR, FW_VER_SUB);
@@ -98,10 +104,11 @@ bool module_init(void)
             init_step = STEP_WATER_SYNC;
         }
         break;
-
     case STEP_WATER_SYNC:
         if (reserve_get())
+        {
             init_step = STEP_IMU_SYNC;
+        }
         else if (retries_water < 3 || HAL_GetTick() < 8000)
         {
             printf("@status,down,0,water\n");
@@ -116,7 +123,9 @@ bool module_init(void)
         }
     case STEP_IMU_SYNC:
         if (imu_profile_get() != 0)
+        {
             init_step = STEP_IMU_TEST;
+        }
         else if (retries_imu < 3)
         {
             printf("@status,down,0,imu\n");
@@ -131,7 +140,9 @@ bool module_init(void)
         }
     case STEP_IMU_TEST:
         if (imu_active_get() == 10)
+        {
             break;
+        }
         if (imu_active_get() == 30)
         {
             printf("@status,down,2\n"); // IMU error
@@ -173,11 +184,12 @@ bool module_init(void)
 
     case STEP_TEMP:
         init_step = STEP_FINISH;
-
     case STEP_FINISH:
         initialised = true;
         if (module_status == STATUS_SYNC)
+        {
             module_status = STATUS_OK;
+        }
         printf("@status,down,%d\n", module_status);
         return true;
     }
@@ -187,7 +199,9 @@ bool module_init(void)
 void version_ack(bool received)
 {
     if (received)
+    {
         version_sent = true;
+    }
     else
     {
         retries_ver   = 0;
@@ -231,12 +245,18 @@ void imu_validate(h_imu_t *h_imu)
         if (res[0] == IMU_TEST_ERROR)
         {
             if (res[1] == IMU_TEST_ERROR)
+            {
                 error_code = 2;
+            }
             else
+            {
                 error_code = 3;
+            }
         }
         else if (res[1] == IMU_TEST_ERROR)
+        {
             error_code = 4;
+        }
         if (error_code > 1)
         {
             module_status = error_code;
@@ -248,21 +268,35 @@ void imu_validate(h_imu_t *h_imu)
             }
         }
         if (res[0] == IMU_TEST_OK)
+        {
             imu_status[0] = true;
+        }
         else if (res[0] == IMU_TEST_ERROR)
+        {
             imu_status[0] = false;
+        }
         if (res[1] == IMU_TEST_OK)
+        {
             imu_status[1] = true;
+        }
         else if (res[1] == IMU_TEST_ERROR)
+        {
             imu_status[1] = false;
+        }
 
         // select which IMU to use based on init status
         if (imu_status[0])
+        {
             imu_active_set(0);
+        }
         else if (imu_status[1])
+        {
             imu_active_set(1);
+        }
         else
+        {
             imu_active_set(30); // invalid
+        }
         if ((res[0] == IMU_TEST_OK && imu_status[1]) || (res[1] == IMU_TEST_OK && imu_status[0]))
         {
             //				if(reserve_get() > 0) {

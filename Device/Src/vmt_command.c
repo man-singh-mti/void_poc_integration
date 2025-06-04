@@ -269,7 +269,9 @@ void cmd_find_cb(uint8_t id)
 void cmd_spi_finish(h_dev_spi_send_t *p_h_spi)
 {
     if (p_h_spi->p_tx_buff != spi_tx_buff)
+    {
         return;
+    }
 
     uart_tx_channel_set(UART_DEBUG);
     size_t   data_size = p_h_spi->data_size;
@@ -282,7 +284,9 @@ void cmd_spi_finish(h_dev_spi_send_t *p_h_spi)
     printf(",r");
     printf(",");
     for (size_t data_n = 0; data_n < data_size; data_n++)
+    {
         printf("%02X ", p_rx_buff[data_n]);
+    }
     printf("\n");
     uart_tx_channel_undo();
 }
@@ -351,7 +355,9 @@ static void cmd_fifo_multi_w_process(void)
     {
     case STEP_IDLE:
         if (ff_write_count <= 0)
+        {
             break;
+        }
 
         srand(HAL_GetTick());
         ok_count = 0;
@@ -365,7 +371,9 @@ static void cmd_fifo_multi_w_process(void)
         step = STEP_DATA_RAND;
     case STEP_DATA_RAND:
         for (size_t data_n = 0; data_n < CMD_LOG_BUFF_SIZE; data_n++)
+        {
             fifo_buff_w[data_n] = rand();
+        }
 
         //		if (check_count >= 12286)
         //			h_flash_fifo_1.h_debug.b_write = true;
@@ -388,7 +396,9 @@ static void cmd_fifo_multi_w_process(void)
         break;
     case STEP_WRITE_WAIT:
         if (h_flash_fifo_1.h_write.b_busy)
+        {
             break;
+        }
         res = h_flash_fifo_1.h_write.res;
         if (res == FLASH_FIFO_RES_OK)
         {
@@ -396,7 +406,9 @@ static void cmd_fifo_multi_w_process(void)
             if (--ff_write_count > 0)
             {
                 step = STEP_DATA_RAND;
-                break;
+                {
+                    break;
+                }
             }
         }
         step = STEP_FINISH;
@@ -432,7 +444,9 @@ static void cmd_fifo_check_process(void)
     {
     case STEP_IDLE:
         if (b_ff_check == false)
+        {
             break;
+        }
 
         ok_count  = 0;
         check_seq = h_flash_fifo_1.fifo_front;
@@ -490,8 +504,9 @@ static void cmd_fifo_multi_d_process(void)
     {
     case STEP_IDLE:
         if (ff_delete_count <= 0)
+        {
             break;
-
+        }
         srand(HAL_GetTick());
         ok_count = 0;
 
@@ -522,7 +537,9 @@ static void cmd_fifo_multi_d_process(void)
         break;
     case STEP_DELETE_WAIT:
         if (h_flash_fifo_1.b_delete_busy)
+        {
             break;
+        }
         ok_count++;
         if (--ff_delete_count > 0)
         {
@@ -585,7 +602,9 @@ static void cmd_sensor(h_str_pointers_t *str_p)
 {
     uart_tx_channel_set(cmd_uart_ch);
     if (str_p->part[1] == NULL)
+    {
         return;
+    }
     // printf("@db,sensor: %c\n",str_p->part[1][0]);
     switch (str_p->part[1][0])
     {
@@ -617,7 +636,9 @@ static void cmd_start(h_str_pointers_t *str_p)
     state_set(measure_state);
     uart_tx_channel_set(cmd_uart_ch);
     if (dev_log_save_enable_set(auto_log))
+    {
         printf("@db,Log starting\n");
+    }
     dev_dump_printf_set(true);
     dev_water_det_printf_set(true);
 
@@ -660,7 +681,9 @@ static void cmd_connect(h_str_pointers_t *str_p)
         printf("@status,down,%d,ver,%d,%d,%d\n", module_status_get(), FW_VER_MAJOR, FW_VER_MINOR, FW_VER_SUB);
         state_set(stopped_state);
         if (device_init_finish_get())
+        {
             imu_test_reset();
+        }
         uart_tx_channel_undo();
         return;
     }
@@ -678,9 +701,13 @@ static void cmd_initial(h_str_pointers_t *str_p)
         do
         {
             if (str_p->part[1][1] == '?')
+            {
                 break;
+            }
             if (str_p->part[2] == NULL)
+            {
                 return;
+            }
             bool b_active = atoi(str_p->part[2]) != 0;
             imu_g_log_en_set(0, b_active);
             imu_g_log_en_set(1, b_active);
@@ -692,9 +719,13 @@ static void cmd_initial(h_str_pointers_t *str_p)
     else if (strcmp(str_p->part[1], "ver") == 0)
     {
         if (strcmp(str_p->part[2], "ack") == 0)
+        {
             version_ack(true);
+        }
         else
+        {
             version_ack(false);
+        }
     }
     else if (strstr("all", str_p->part[1]) != NULL)
     {
@@ -737,7 +768,9 @@ static void cmd_echo(h_str_pointers_t *str_p)
     for (uint8_t part_n = 1; part_n < STR_SECTION_MAX; part_n++)
     {
         if (str_p->part[part_n] == NULL)
+        {
             break;
+        }
         printf(",%s", str_p->part[part_n]);
     }
     printf("\n");
@@ -750,16 +783,24 @@ static void cmd_spi(h_str_pointers_t *str_p)
     //	printf("cmd_spi\r\n");
 
     if (str_p->part[1] == NULL)
+    {
         return;
+    }
     if (str_p->part[2] == NULL)
+    {
         return;
+    }
     if (str_p->part[3] == NULL)
+    {
         return;
+    }
 
     uint8_t channel       = atoi(str_p->part[1]);
     size_t  spi_data_size = atoi(str_p->part[2]);
     if (spi_data_size > CMD_SPI_BUFF_SIZE)
+    {
         spi_data_size = CMD_SPI_BUFF_SIZE;
+    }
     atox_n(str_p->part[3], spi_tx_buff, spi_data_size);
 
     printf("%s", cmd_str_spi);
@@ -774,7 +815,9 @@ static void cmd_spi(h_str_pointers_t *str_p)
     printf(",");
     //	printf("\r\n");
     for (size_t data_n = 0; data_n < spi_data_size; data_n++)
+    {
         printf("%02X", spi_tx_buff[data_n]);
+    }
     //	printf(",%d", res);
     printf("\r\n");
 
@@ -791,7 +834,9 @@ static void cmd_spi(h_str_pointers_t *str_p)
         };
         res = dev_spi_send(&h_spi);
         if (res != DEV_RES_SUCCESS)
+        {
             break;
+        }
         //		b_res = true;
     }
     while (0);
@@ -804,7 +849,9 @@ static void cmd_log(h_str_pointers_t *str_p)
     //	printf("cmd_log\r\n");
 
     if (str_p->part[1] == NULL)
+    {
         return;
+    }
 
     if (strstr(str_p->part[1], "save") != NULL)
     {
@@ -812,9 +859,13 @@ static void cmd_log(h_str_pointers_t *str_p)
         {
             /* data log save enable set */
             if (dev_log_save_enable_set(atoi(str_p->part[2])))
+            {
                 printf("@db,Log enabled\n");
+            }
             else
+            {
                 printf("@db,Log disabled\n");
+            }
         }
         cmd_print_log_save(cmd_uart_ch);
     }
@@ -840,9 +891,13 @@ static void cmd_log(h_str_pointers_t *str_p)
         auto_log = atoi(str_p->part[2]);
         printf("@db,Auto log ");
         if (auto_log)
+        {
             printf("enabled\n");
+        }
         else
+        {
             printf("disabled\n");
+        }
     }
     uart_tx_channel_undo();
 }
@@ -853,7 +908,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
     //	printf("cmd_flash_fifo\r\n");
 
     if (str_p->part[1] == NULL)
+    {
         return;
+    }
 
     switch (str_p->part[1][0])
     {
@@ -904,7 +961,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
         }
         size_t data_len = atoi(str_p->part[2]);
         if (data_len > CMD_LOG_BUFF_SIZE)
+        {
             data_len = CMD_LOG_BUFF_SIZE;
+        }
 
         if (str_p->part[3] != NULL)
         {
@@ -925,7 +984,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
         {
             srand(HAL_GetTick());
             for (size_t data_n = 0; data_n < data_len; data_n++)
+            {
                 fifo_buff_w[data_n] = rand();
+            }
         }
 
         flash_fifo_res_t res;
@@ -940,7 +1001,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
             b_ff_write_busy           = true;
             res                       = flash_fifo_write(&h_flash_fifo_1, &h_flash_fifo_w);
             if (res != FLASH_FIFO_RES_OK)
+            {
                 b_ff_write_busy = false;
+            }
         }
         //		printf("fifo_write");
         printf("%s,w", cmd_str_flash_fifo);
@@ -949,7 +1012,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
         //		printf("\r\n");
         printf(",");
         for (size_t data_n = 0; data_n < data_len; data_n++)
+        {
             printf("%02X ", fifo_buff_w[data_n]);
+        }
         printf("\n");
     }
     break;
@@ -1005,7 +1070,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
             printf(",");
             data_len = h_header.data_size;
             for (size_t data_n = 0; data_n < data_len; data_n++)
+            {
                 printf("%02X ", fifo_buff_r[data_n]);
+            }
         }
         printf("\n");
     }
@@ -1039,9 +1106,13 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
     case 'm':
     {
         if (str_p->part[2] == NULL)
+        {
             break;
+        }
         if (str_p->part[3] == NULL)
+        {
             break;
+        }
         size_t           seq  = atoi(str_p->part[2]);
         uint8_t          mark = atoi(str_p->part[3]);
         flash_fifo_res_t res;
@@ -1056,7 +1127,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
             b_ff_mark_set_busy = true;
             res                = flash_fifo_mark_set(&h_flash_fifo_1, &h_ff_mark);
             if (res != FLASH_FIFO_RES_OK)
+            {
                 b_ff_mark_set_busy = false;
+            }
         }
         printf("%s,m", cmd_str_flash_fifo);
         printf(",%d", seq);
@@ -1094,7 +1167,9 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
                 res = flash_fifo_delete_seq(&h_flash_fifo_1, ff_delete_seq);
             }
             if (res != FLASH_FIFO_RES_OK)
+            {
                 b_ff_delete_busy = false;
+            }
         }
         printf("%s,d", cmd_str_flash_fifo);
         printf(",%d", seq);
@@ -1147,17 +1222,23 @@ static void cmd_flash(h_str_pointers_t *str_p)
     //	printf("cmd_flash\r\n");
 
     if (str_p->part[1] == NULL)
+    {
         return;
+    }
 
     switch (str_p->part[1][0])
     {
     case 'e':
     {
         if (str_p->part[2] == NULL)
+        {
             break;
+        }
         uint8_t sector = atoi(str_p->part[2]);
         if (sector > FLASH_SECTOR_7)
+        {
             break;
+        }
         flash_res_t res = flash_erase_sector(sector);
         //		printf("erase");
         printf("%s", cmd_str_flash);
@@ -1179,16 +1260,22 @@ static void cmd_flash(h_str_pointers_t *str_p)
             return;
         }
         if (str_p->part[2] == NULL)
+        {
             return;
+        }
         if (str_p->part[3] == NULL)
+        {
             return;
+        }
 
         char  *p_str = str_p->part[2];
         size_t addr  = FLASH_BASE + strtol(p_str, &p_str, 16);
 
         size_t len = atoi(str_p->part[3]);
         if (len > CMD_FLASH_BUFF_LEN)
+        {
             len = CMD_FLASH_BUFF_LEN;
+        }
 
         if (str_p->part[4] != NULL)
         {
@@ -1209,7 +1296,9 @@ static void cmd_flash(h_str_pointers_t *str_p)
         {
             srand(HAL_GetTick());
             for (size_t data_n = 0; data_n < len; data_n++)
+            {
                 flash_buff[data_n] = rand();
+            }
         }
 
         flash_res_t res = flash_program_data(addr, flash_buff, len);
@@ -1233,15 +1322,20 @@ static void cmd_flash(h_str_pointers_t *str_p)
     break;
     case 'r':
         if (str_p->part[2] == NULL)
+        {
             return;
+        }
         if (str_p->part[3] == NULL)
+        {
             return;
-
+        }
         char    *p_str = str_p->part[2];
         uint8_t *ptr   = (void *)(FLASH_BASE + strtol(p_str, &p_str, 16));
         size_t   len   = atoi(str_p->part[3]);
         if (len > CMD_FLASH_BUFF_LEN)
+        {
             len = CMD_FLASH_BUFF_LEN;
+        }
 
         if (str_p->part[4] != NULL)
         {
@@ -1285,9 +1379,13 @@ static void cmd_void(h_str_pointers_t *str_p)
     bool void_detected = atoi(str_p->part[1]);
     uart_tx_channel_set(UART_DEBUG);
     if (void_detected)
+    {
         printf("@db,Void detected\n");
+    }
     else
+    {
         printf("@db,Void ended\n");
+    }
     uart_tx_channel_set(UART_UPHOLE);
     printf("%s,%s\n", str_p->part[0], str_p->part[1]);
 }
@@ -1297,7 +1395,9 @@ static void cmd_debug(h_str_pointers_t *str_p)
     uart_tx_channel_set(cmd_uart_ch);
     //	printf("cmd_debug\r\n");
     if (str_p->part[1] == NULL)
+    {
         return;
+    }
     if (strstr(str_p->part[1], "dev") != NULL)
     {
         h_dev_debug_t h_flag;
@@ -1434,9 +1534,13 @@ void cmd_print_log_report_busy(uart_select_t channel)
     //	printf(",%d", dev_log_report_busy_get());
     //	printf("\n");
     if (dev_log_report_busy_get())
+    {
         printf("@db,Exporting flash\n");
+    }
     else
+    {
         printf("@da,done\n"); // data export complete
+    }
     uart_tx_channel_undo();
 }
 
@@ -1483,7 +1587,9 @@ void cmd_print_wake(uart_select_t channel)
 void cmd_print_flash_fifo_write_finish(uart_select_t channel)
 {
     if (b_ff_write_busy == false)
+    {
         return;
+    }
     b_ff_write_busy = false;
     uart_tx_channel_set(channel);
     printf("%s", cmd_str_flash);
@@ -1506,7 +1612,9 @@ void cmd_print_flash_fifo_write_finish(uart_select_t channel)
 void cmd_print_flash_fifo_delete_finish(uart_select_t channel)
 {
     if (b_ff_delete_busy == false)
+    {
         return;
+    }
     b_ff_delete_busy = false;
     uart_tx_channel_set(channel);
     printf("%s,df", cmd_str_flash_fifo);
@@ -1518,7 +1626,9 @@ void cmd_print_flash_fifo_delete_finish(uart_select_t channel)
 void cmd_print_flash_fifo_mark_finish(uart_select_t channel)
 {
     if (b_ff_mark_set_busy == false)
+    {
         return;
+    }
     b_ff_mark_set_busy = false;
     uart_tx_channel_set(channel);
     printf("%s,mf", cmd_str_flash_fifo);

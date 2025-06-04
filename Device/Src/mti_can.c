@@ -63,10 +63,11 @@ bool can_send(uint32_t ID, uint8_t message)
     txHeader.TransmitGlobalTime = DISABLE;
 
     debug_send("CAN TX (0x%02X) 0x%02X", ID, message);
-
     uint8_t csend[1] = { message };
     if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox) == HAL_OK)
+    {
         return true;
+    }
 #endif
     return false;
 }
@@ -90,7 +91,9 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
     debug_send("CAN TX (0x%02X) 0x%s", ID, data_hex);
 
     if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, message, &canMailbox) == HAL_OK)
+    {
         return true;
+    }
 #endif
     return false;
 }
@@ -99,7 +102,9 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
 bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return false;
+    }
 
     uint32_t sensor_id = base_id + CAN_SENSOR_OFFSET(sensor_idx);
     return can_send(sensor_id, message);
@@ -122,7 +127,9 @@ uint8_t get_sensor_index_from_can_id(uint32_t can_id)
     {
         uint8_t sensor_idx = can_id & 0x0F;
         if (sensor_idx < MAX_RADAR_SENSORS)
+        {
             return sensor_idx;
+        }
     }
 
     // Handle data messages (0xA0-0xC4 range)
@@ -131,7 +138,9 @@ uint8_t get_sensor_index_from_can_id(uint32_t can_id)
         uint8_t offset     = can_id & 0x0F;
         uint8_t sensor_idx = offset >> 4; // Extract sensor index from upper nibble of offset
         if (sensor_idx < MAX_RADAR_SENSORS)
+        {
             return sensor_idx;
+        }
     }
 
     return 0xFF; // Invalid sensor index

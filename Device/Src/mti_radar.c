@@ -48,7 +48,9 @@ void radar_system_process(void)
 void radar_sensor_start(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return;
+    }
 
     // Remove this debug message - silent operation
     // debug_send("Starting radar sensor %d (angle %d deg)", sensor_idx, sensor_angles[sensor_idx]);
@@ -60,7 +62,9 @@ void radar_sensor_start(uint8_t sensor_idx)
 void radar_sensor_stop(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return;
+    }
 
     // Send stop command to specific sensor
     can_send(CAN_CMD_BASE + sensor_idx, CAN_CMD_STOP);
@@ -69,7 +73,9 @@ void radar_sensor_stop(uint8_t sensor_idx)
 void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADAR_DETECTED_POINTS][2], uint8_t numPoints)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return;
+    }
 
     radar_measurement_t *measurement = &radar_round_robin.measurements[sensor_idx];
 
@@ -150,27 +156,35 @@ void radar_switch_to_next_sensor(void)
 radar_measurement_t *radar_get_measurement(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return NULL;
+    }
     return &radar_round_robin.measurements[sensor_idx];
 }
 
 bool radar_has_valid_data(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return false;
+    }
     return radar_round_robin.measurements[sensor_idx].data_valid;
 }
 
 uint16_t radar_get_distance_mm(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return 0;
+    }
     return radar_round_robin.measurements[sensor_idx].distance_mm;
 }
 
 uint16_t radar_get_angle_deg(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
         return 0;
+    }
     return sensor_angles[sensor_idx];
 }

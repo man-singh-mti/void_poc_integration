@@ -54,15 +54,18 @@ bool uart_rx_update(uart_select_t uart_channel)
     static uint32_t       uart_sr;
     static h_uart_rx_t   *p_h_uart;
     static uint8_t        data;
-
     p_reg   = h_uart[uart_channel].p_reg;
     uart_sr = p_reg->ISR;
     if ((uart_sr & uart_sr_rx_it) == 0x0)
+    {
         return false;
+    }
 
     data = p_reg->RDR;
     if ((uart_sr & UART_FLAG_RXNE) == 0x0)
+    {
         return false;
+    }
 
     p_h_uart = &h_uart[uart_channel].h_rx;
 
@@ -76,7 +79,9 @@ bool uart_tx_update(uart_select_t uart_channel)
 {
     USART_TypeDef *p_reg = h_uart[uart_channel].p_reg;
     if ((p_reg->ISR & UART_FLAG_TC) == 0x0)
+    {
         return false;
+    }
 
     h_uart_tx_t *p_h_uart = &h_uart[uart_channel].h_tx;
 
@@ -111,7 +116,9 @@ void uart_init(void)
 void uart_init_it(UART_HandleTypeDef *huart)
 {
     if (huart == NULL)
+    {
         return;
+    }
     __HAL_UART_FLUSH_DRREGISTER(huart);
     huart->Instance->CR1 |= USART_CR1_RXNEIE;
 }
@@ -119,7 +126,9 @@ void uart_init_it(UART_HandleTypeDef *huart)
 void uart_deinit(void)
 {
     for (uart_select_t i = UART_FIRST; i < UART_NUMBER; i++)
+    {
         HAL_UART_DeInit(h_uart[i].p_h_hal);
+    }
 }
 
 void uart_tx_channel_set(uart_select_t ch)
@@ -141,11 +150,12 @@ uart_select_t uart_tx_channel_undo(void)
 
 bool uart_tx_enqueue(uart_select_t uart_channel, uint8_t data)
 {
-    h_uart_tx_t *p_h_uart = &h_uart[uart_channel].h_tx;
-
-    size_t back_next = (p_h_uart->back + 1) % p_h_uart->buff_size;
+    h_uart_tx_t *p_h_uart  = &h_uart[uart_channel].h_tx;
+    size_t       back_next = (p_h_uart->back + 1) % p_h_uart->buff_size;
     if (back_next == p_h_uart->front)
+    {
         return false;
+    }
 
     p_h_uart->back %= p_h_uart->buff_size;
     p_h_uart->p_buff[p_h_uart->back] = data;
@@ -158,7 +168,9 @@ bool uart_tx_enqueue(uart_select_t uart_channel, uint8_t data)
 bool uart_tx_front_add(uart_select_t ch, size_t *p_front, size_t gain)
 {
     if (ch >= UART_NUMBER)
+    {
         return false;
+    }
 
     *p_front = (*p_front + gain) % h_uart[ch].h_tx.buff_size;
     return true;
@@ -176,14 +188,18 @@ void uart_tx_wait_sent(uart_select_t ch, uint32_t timeout)
     while (uart_tx_data_len_get(ch))
     {
         if (HAL_GetTick() - time > timeout)
+        {
             break;
+        }
     }
 }
 
 void uart_tx_en_set(uart_select_t ch, bool b_enalbe)
 {
     if (ch >= UART_NUMBER)
+    {
         return;
+    }
 
     if (b_enalbe)
     {
@@ -205,15 +221,20 @@ void uart_tx_en_set(uart_select_t ch, bool b_enalbe)
 bool uart_rx_dequeue_it(uart_select_t ch, size_t front, uint8_t *ptr, size_t len, size_t *p_index)
 {
     if (ch >= UART_NUMBER)
+    {
         return false;
+    }
     h_uart_rx_t *p_h_uart = &h_uart[ch].h_rx;
-
     if (front >= p_h_uart->buff_size)
+    {
         front = 0;
+    }
     for (*p_index = 0; *p_index < len; (*p_index)++)
     {
         if (p_h_uart->back == front)
+        {
             break;
+        }
         ptr[*p_index] = p_h_uart->p_buff[front];
         front         = (front + 1) % p_h_uart->buff_size;
     }
@@ -230,22 +251,30 @@ bool uart_rx_dequeue_it(uart_select_t ch, size_t front, uint8_t *ptr, size_t len
 bool uart_rx_dequeue_dma(uart_select_t ch, size_t front, uint8_t *ptr, size_t len, size_t *p_index)
 {
     if (ch >= UART_NUMBER)
+    {
         return false;
+    }
     h_uart_t    *p_h_uart  = &h_uart[ch];
     h_uart_rx_t *p_h_rx    = &p_h_uart->h_rx;
     size_t       buff_size = p_h_rx->buff_size;
 
     size_t q_back = buff_size - __HAL_DMA_GET_COUNTER(p_h_uart->p_dma_rx);
     if (q_back >= buff_size)
+    {
         q_back = 0;
+    }
     uint8_t *p_buff = p_h_rx->p_buff;
     size_t   index  = *p_index;
     for (index = 0; index < len; index++)
     {
         if (front >= buff_size)
+        {
             front = 0;
+        }
         if (q_back == front)
+        {
             break;
+        }
         ptr[index] = p_buff[front];
         front++;
     }
@@ -257,7 +286,9 @@ bool uart_rx_dequeue_dma(uart_select_t ch, size_t front, uint8_t *ptr, size_t le
 bool uart_rx_front_add(uart_select_t ch, size_t *p_front, size_t gain)
 {
     if (ch >= UART_NUMBER)
+    {
         return false;
+    }
 
     *p_front = (*p_front + gain) % h_uart[ch].h_rx.buff_size;
     return true;
@@ -266,14 +297,18 @@ bool uart_rx_front_add(uart_select_t ch, size_t *p_front, size_t gain)
 size_t uart_rx_back_get(uart_select_t ch)
 {
     if (ch >= UART_NUMBER)
+    {
         return 0;
+    }
     return h_uart[ch].h_rx.back;
 }
 
 void uart_rx_en_set(uart_select_t ch, bool b_enalbe)
 {
     if (ch >= UART_NUMBER)
+    {
         return;
+    }
 
     if (b_enalbe)
     {
@@ -302,14 +337,18 @@ PUTCHAR_PROTOTYPE
         {
             //			HAL_UART_Transmit(h_uart[select].p_h_hal, (uint8_t*) &ch, 1, 2);
             while (!uart_tx_enqueue(select, ch))
+            {
                 ;
+            }
         }
     }
     else
     {
         //		HAL_UART_Transmit(h_uart[uart_channel].p_h_hal, (uint8_t*) &ch, 1, 2);
         while (!uart_tx_enqueue(uart_channel, ch))
+        {
             ;
+        }
     }
 
     return ch;

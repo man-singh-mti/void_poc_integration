@@ -281,7 +281,9 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     uint8_t channel = h_spi.channel;
     if (channel >= DEV_SPI_CH_NUM)
+    {
         return;
+    }
 
     h_dev_spi_t  *p_h_dev_spi_ch = &h_dev_spi[channel];
     GPIO_TypeDef *p_cs_port      = p_h_dev_spi_ch->p_cs_port;
@@ -289,7 +291,9 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
     HAL_GPIO_WritePin(p_cs_port, cs_pin, GPIO_PIN_SET);
 
     if (h_spi.finish_cb != NULL)
+    {
         h_spi.finish_cb(&h_spi);
+    }
 }
 
 void adc_sample_finish_cb(adc_seq_t sequence)
@@ -303,14 +307,18 @@ void adc_sample_finish_cb(adc_seq_t sequence)
     if (p_h_adc->b_level)
     {
         if (voltage <= p_h_adc->thre_l)
+        {
             p_h_adc->b_level = false;
+        }
         // p_h_adc->thre_h = voltage*water_threshold_ratio;
         // printf("thre_h = %lf\n",p_h_adc->thre_h);
     }
     else
     {
         if (voltage >= p_h_adc->thre_h)
+        {
             p_h_adc->b_level = true;
+        }
         // p_h_adc->thre_l = voltage/water_threshold_ratio;
         // printf("thre_l = %lf\n",p_h_adc->thre_l);
     }
@@ -369,7 +377,9 @@ static void dev_icm_pin_set_cb(uint8_t id, icm20948_pin_t pin, bool b_status)
 static bool dev_icm_spi_sent_cb(uint8_t id, h_icm20948_spi_t *p_h_spi)
 {
     if (id >= DEV_IMU_NUM)
+    {
         return false;
+    }
     h_dev_spi_send_t h_spi_sent = {
         .channel   = id,
         .p_tx_buff = p_h_spi->p_tx_buff,
@@ -384,7 +394,9 @@ static void dev_icm_spi_finish_cb(h_dev_spi_send_t *p_h_spi)
 {
     uint8_t id = p_h_spi->channel;
     if (id >= DEV_IMU_NUM)
+    {
         return;
+    }
     icm20948_sent_finish(&h_icm20948[id], ICM20948_RES_OK);
 }
 
@@ -394,7 +406,9 @@ static void dev_icm_sample_finish_cb(uint8_t id)
     static uint8_t retry;
 
     if (id >= DEV_IMU_NUM)
+    {
         return;
+    }
     h_imu_t *p_h_imu   = &h_imu[id];
     size_t   data_size = ICM20948_DATA_NUM * sizeof(int16_t);
     memcpy(p_h_imu->data, h_icm20948[id].raw_data, data_size);
@@ -414,13 +428,19 @@ static void dev_icm_sample_finish_cb(uint8_t id)
         { // second IMU read complete
             imu_validate(h_imu);
             if (live_imu)
+            {
                 imu_compare(&h_imu[0], &h_imu[1]);
+            }
             if (state_get() == measure_state || live_imu)
             {
                 if (imu_active_get() == 0)
+                {
                     bottom_detect(&h_imu[0]);
+                }
                 else if (imu_active_get() == 1)
+                {
                     bottom_detect(&h_imu[1]);
+                }
             }
         }
     }
@@ -469,16 +489,21 @@ void imu_update_finish_cb(void)
                     flash_value.amplitude     = abs(flash_value.acc_x);
                     flash_value.amplitude_max = abs(flash_value.acc_x_max);
                     if (flash_value.amplitude > flash_value.amplitude_max)
+                    {
                         flash_value.acc_x_max = flash_value.acc_x;
+                    }
                     flash_value.amplitude     = abs(flash_value.acc_y);
                     flash_value.amplitude_max = abs(flash_value.acc_y_max);
                     if (flash_value.amplitude > flash_value.amplitude_max)
+                    {
                         flash_value.acc_y_max = flash_value.acc_y;
+                    }
                     flash_value.amplitude     = abs(flash_value.acc_z);
                     flash_value.amplitude_max = abs(flash_value.acc_z_max);
                     if (flash_value.amplitude > flash_value.amplitude_max)
+                    {
                         flash_value.acc_z_max = flash_value.acc_z;
-
+                    }
                     p_h_log_imu_ch->acc_x = flash_value.acc_x_max;
                     p_h_log_imu_ch->acc_y = flash_value.acc_y_max;
                     p_h_log_imu_ch->acc_z = flash_value.acc_z_max;
@@ -495,7 +520,9 @@ void imu_update_finish_cb(void)
             }
             log_save_q_new = log_save_q_update;
             if (++log_save_q_update >= DEV_LOG_SAVE_Q_LEN)
+            {
                 log_save_q_update = 0;
+            }
             b_log_save_trigger = true;
         }
     }
@@ -513,7 +540,9 @@ void flash_data_reset(void)
 void dev_spi_init(uint8_t channel)
 {
     if (channel >= DEV_SPI_CH_NUM)
+    {
         return;
+    }
 
     h_dev_spi_t *p_h_spi    = &h_dev_spi[channel];
     uint32_t     clk_source = p_h_spi->clk_source_get();
@@ -523,7 +552,9 @@ void dev_spi_init(uint8_t channel)
     {
         spi_freq = clk_source >> (prescaler + 1);
         if (spi_freq <= ICM20948_SPI_FREQ_MAX)
+        {
             break;
+        }
     }
     prescaler &= 0x7;
 
@@ -644,7 +675,9 @@ bool dev_init_process(void)
     {
     case STEP_IDLE:
         if (b_init_finish)
+        {
             break;
+        }
 
         b_imu_init = false;
 
@@ -703,13 +736,19 @@ bool dev_init_process(void)
         step = STEP_FLASH;
     case STEP_FLASH:
         if (h_flash_fifo_1.b_init_finish == false)
+        {
             break;
+        }
         step = STEP_ICM20948;
     case STEP_ICM20948:
         if (h_icm20948[0].b_init_finish == false)
+        {
             break;
+        }
         if (h_icm20948[1].b_init_finish == false)
+        {
             break;
+        }
 
         b_imu_init = false;
         // math_pi = acos(-1.0);
@@ -744,7 +783,9 @@ bool dev_init_process(void)
     }
 
     if (h_flash_fifo_1.b_init_finish == false)
+    {
         flash_fifo_process(&h_flash_fifo_1);
+    }
     if (b_imu_init)
     {
         HAL_GPIO_WritePin(PWR_IMU_GPIO_Port, PWR_IMU_Pin, GPIO_PIN_SET);
@@ -785,7 +826,9 @@ static bool imu_process(h_imu_t *p_h_imu)
             break;
         }
         if (p_h_imu->b_update == false)
+        {
             break;
+        }
         p_h_imu->step = STEP_VECTOR_LEN;
     case STEP_VECTOR_LEN:
     {
@@ -827,7 +870,9 @@ static bool imu_process(h_imu_t *p_h_imu)
             int16_t    *p_data     = p_h_vector->data_org;
             int64_t     dot        = 0;
             for (uint8_t axis_n = 0; axis_n < DEV_IMU_VECTOR_AXIS_N; axis_n++)
+            {
                 dot += p_data[axis_n] * p_gravity[axis_n];
+            }
             // double cos = (double) dot / (p_h_vector->len * p_h_imu->gravity_len);
             double cos        = (p_h_imu->accel_y / p_h_imu->h_accel.len);
             p_h_vector->angle = 180.0 * acos(cos) / math_pi;
@@ -836,7 +881,9 @@ static bool imu_process(h_imu_t *p_h_imu)
             p_data     = p_h_vector->data_org;
             dot        = 0;
             for (uint8_t axis_n = 0; axis_n < DEV_IMU_VECTOR_AXIS_N; axis_n++)
+            {
                 dot += p_data[axis_n] * p_gravity[axis_n];
+            }
             cos = (double)dot / (p_h_vector->len * p_h_imu->gravity_len);
 
             p_h_vector->angle = 180.0 * acos(cos) / math_pi;
@@ -870,8 +917,10 @@ static bool imu_process(h_imu_t *p_h_imu)
     case STEP_GRAVITY_UPDATE:
     {
         if (p_h_imu->b_update == false)
+        {
             // printf("IMU: %d | update %d\n",p_h_imu->id,p_h_imu->b_update);
             break;
+        }
         h_moving_avg_i16_t **pp_h_g_squ_avg = p_h_imu->p_h_g_squ_avg;
         bool                 b_update       = p_h_imu->b_g_log_en;
         b_update &= pp_h_g_squ_avg[0]->data_len < DEV_IMU_AVG_SAMPLE_NUM;
@@ -937,7 +986,9 @@ static bool log_save_process(void)
         step = STEP_IDLE;
     case STEP_IDLE:
         if (b_log_save_trigger == false)
+        {
             return false;
+        }
         h_log_flash_order.p_data = &h_log_save_q[log_save_q_new];
         b_log_save_trigger       = false;
 
@@ -947,7 +998,9 @@ static bool log_save_process(void)
         flash_fifo_res_t res;
         res = flash_fifo_write(&h_flash_fifo_1, &h_log_flash_order);
         if (res == FLASH_FIFO_RES_BUSY)
+        {
             break;
+        }
 
         if (res != FLASH_FIFO_RES_OK)
         {
@@ -1018,7 +1071,9 @@ static bool log_load_process(void)
         }
 
         if (++seq_load >= h_flash_fifo_1.h_cfg.pack_in_memory)
+        {
             seq_load = 0;
+        }
     }
     break;
     default:
@@ -1041,10 +1096,14 @@ static void dev_debug_process(void)
             //				printf(",%d", adc_value_org_get(seq));
             //			printf("\r\n");
             for (adc_seq_t seq = ADC_SEQ_BEGIN; seq < ADC_SEQ_NUM; seq++)
+            {
                 printf(",%6.3f", h_sensor.h_adc[seq].volt);
+            }
             printf("\r\n");
             for (adc_seq_t seq = ADC_SEQ_BEGIN; seq < ADC_SEQ_NUM; seq++)
+            {
                 printf(",%d", h_sensor.h_adc[seq].b_level);
+            }
             printf("\r\n");
         }
     }
@@ -1062,7 +1121,9 @@ static void dev_debug_process(void)
             h_imu_t *p_h_imu = &h_imu[0];
             int16_t *p_buff  = p_h_imu->data;
             for (uint8_t data_n = 0; data_n < ICM20948_DATA_NUM; data_n++)
+            {
                 printf(",%6d", p_buff[data_n]);
+            }
             printf(",%f", p_h_imu->h_accel.angle);
             printf(",%f", p_h_imu->h_gyro.angle);
             //			printf(",%f", p_h_imu->h_accel.variance);
@@ -1071,7 +1132,9 @@ static void dev_debug_process(void)
             p_h_imu = &h_imu[1];
             p_buff  = p_h_imu->data;
             for (uint8_t data_n = 0; data_n < ICM20948_DATA_NUM; data_n++)
+            {
                 printf(",%6d", p_buff[data_n]);
+            }
             printf(",%f", p_h_imu->h_accel.angle);
             printf(",%f", p_h_imu->h_gyro.angle);
             //			printf(",%f", p_h_imu->h_accel.variance);
@@ -1120,8 +1183,9 @@ dev_res_t dev_spi_send(h_dev_spi_send_t *p_h_spi)
 {
     uint8_t channel = p_h_spi->channel;
     if (channel >= DEV_SPI_CH_NUM)
+    {
         return DEV_RES_ERROR_PARA;
-
+    }
     switch (HAL_SPI_GetState(p_h_spi_hal[channel]))
     {
     case HAL_SPI_STATE_READY:
@@ -1213,7 +1277,9 @@ void imu_sample_rate_set(double sample_rate)
 void imu_g_log_en_set(uint8_t imu_select, bool b_enable)
 {
     if (imu_select >= DEV_IMU_NUM)
+    {
         return;
+    }
     h_imu[imu_select].b_g_log_en = b_enable;
 }
 
@@ -1228,14 +1294,18 @@ bool imu_g_log_busy_get(uint8_t imu_select)
 bool imu_overflow_get(uint8_t imu_select)
 {
     if (imu_select >= DEV_IMU_NUM)
+    {
         return false;
+    }
     return h_imu[imu_select].b_overflow == false;
 }
 
 void imu_overflow_clear(uint8_t imu_select)
 {
     if (imu_select >= DEV_IMU_NUM)
+    {
         return;
+    }
     h_imu[imu_select].b_overflow = false;
 }
 
@@ -1244,8 +1314,10 @@ bool dev_log_erase_all_set(void)
 {
     b_log_erase_all_printf = true;
     flash_fifo_res_t res   = flash_fifo_erase_all(&h_flash_fifo_1);
-    if (res != FLASH_FIFO_RES_OK) /* flash fifo is busy */
+    if (res != FLASH_FIFO_RES_OK)
+    { /* flash fifo is busy */
         return false;
+    }
     dev_log_save_enable_set(false);
     return true;
 }
@@ -1258,7 +1330,9 @@ bool dev_log_erase_busy_get(void)
 bool dev_log_save_enable_set(bool b_enable)
 {
     if (flash_fifo_pack_n_get_free(&h_flash_fifo_1) <= 0)
+    {
         b_enable = false;
+    }
     if (b_enable)
     {
         b_log_save_overflow = false;
@@ -1295,7 +1369,9 @@ void dev_log_report_uart_ch_set(uart_select_t channel)
 bool dev_log_report_enable_set(bool b_enable)
 {
     if (flash_fifo_pack_n_get_saved(&h_flash_fifo_1) <= 0)
+    {
         b_enable = false;
+    }
     b_log_report_act = b_enable;
     return b_enable;
 }
@@ -1399,7 +1475,9 @@ void dev_sleep(void)
 void moving_avg_f_update(h_moving_avg_f_t *p_h_avg, float new_data)
 {
     if (p_h_avg->p_buff == NULL)
+    {
         return;
+    }
     p_h_avg->data_n %= p_h_avg->buff_len;
     p_h_avg->p_buff[p_h_avg->data_n] = new_data;
     p_h_avg->data_n                  = (p_h_avg->data_n + 1) % p_h_avg->buff_len;
@@ -1428,7 +1506,9 @@ void moving_avg_f_reset(h_moving_avg_f_t *p_h_avg)
 void moving_avg_i16_update(h_moving_avg_i16_t *p_h_avg, int16_t new_data)
 {
     if (p_h_avg->p_buff == NULL)
+    {
         return;
+    }
     p_h_avg->data_n %= p_h_avg->buff_len;
     p_h_avg->p_buff[p_h_avg->data_n] = new_data;
     p_h_avg->data_n                  = (p_h_avg->data_n + 1) % p_h_avg->buff_len;
