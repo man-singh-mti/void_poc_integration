@@ -2,6 +2,7 @@
 #include "mti_can.h"
 #include "vmt_uart.h"
 #include "mti_system.h"
+#include "mti_radar.h"
 #include <string.h>
 
 CAN_RxHeaderTypeDef rxHeader;
