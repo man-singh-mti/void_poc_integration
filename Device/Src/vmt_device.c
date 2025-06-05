@@ -1,6 +1,7 @@
 #include "vmt_device.h"
 #include "mti_can.h"
 #include "mti_radar.h"
+#include "mti_temp.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -610,6 +611,7 @@ void device_process(void)
     cmd_process();
 
     radar_system_process(); // Add this line only
+    temp_system_process();
 
     // water_detect();
     icm20948_process(&h_icm20948[0]);

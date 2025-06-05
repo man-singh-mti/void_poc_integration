@@ -14,6 +14,7 @@
 #include "mti_imu.h"
 #include "mti_water.h"
 #include "mti_system.h"
+#include "mti_temp.h" // Add include
 
 /* type define */
 #define CMD_STR_LEN_MAX   (255)
@@ -54,6 +55,7 @@ static void cmd_flash(h_str_pointers_t *str_p);
 static void cmd_debug(h_str_pointers_t *str_p);
 static void cmd_imu(h_str_pointers_t *str_p);
 static void cmd_void(h_str_pointers_t *str_p);
+static void cmd_temp(h_str_pointers_t *str_p); // Add command handler function
 /* variable */
 // static const char cmd_str_example[] = "@example";
 static const char cmd_str_detect[]     = "@dt";
@@ -74,6 +76,7 @@ static const char cmd_str_flash[]      = "@flash";
 static const char cmd_str_imu[]        = "@imu";
 static const char cmd_str_debug[]      = "@cmd";
 static const char cmd_str_void[]       = "!void";
+static const char cmd_str_temp[]       = "@temp"; // Add to command strings
 
 static h_str_cmd_t h_str_cmd_debug[] = {
     {
@@ -127,6 +130,10 @@ static h_str_cmd_t h_str_cmd_debug[] = {
     {
         .ptr      = (char *)cmd_str_imu,
         .callback = cmd_imu,
+    },
+    {
+        .ptr      = (char *)cmd_str_temp,
+        .callback = cmd_temp, // Add to command handlers
     },
 };
 
@@ -182,6 +189,10 @@ static h_str_cmd_t h_str_cmd_uphole[] = {
     {
         .ptr      = (char *)cmd_str_imu,
         .callback = cmd_imu,
+    },
+    {
+        .ptr      = (char *)cmd_str_temp,
+        .callback = cmd_temp, // Add to command handlers
     },
 };
 
@@ -1488,6 +1499,63 @@ static void cmd_imu(h_str_pointers_t *str_p)
     imu_value_set(str_p->part[1], str_p->part[2]);
 }
 
+static void cmd_temp(h_str_pointers_t *str_p)
+{
+    uart_tx_channel_set(cmd_uart_ch);
+
+    if (str_p->part[1] == NULL)
+    {
+        // Default to status query
+        handle_temp_status_command();
+        uart_tx_channel_undo();
+        return;
+    }
+
+    if (strcmp(str_p->part[1], "status") == 0)
+    {
+        handle_temp_status_command();
+    }
+    else if (strcmp(str_p->part[1], "get") == 0)
+    {
+        // Get current temperature reading
+        temp_status_t status;
+        temp_get_latest_status(&status);
+        printf("&temp,value,%d\n", status.current_temperature);
+    }
+    else if (strcmp(str_p->part[1], "config") == 0)
+    {
+        if (str_p->part[2] != NULL)
+        {
+            if (strcmp(str_p->part[2], "high") == 0 && str_p->part[3] != NULL)
+            {
+                int16_t threshold = atoi(str_p->part[3]);
+                temp_set_high_threshold(threshold);
+                printf("&temp,config,high,ack,%d\n", threshold);
+            }
+            else if (strcmp(str_p->part[2], "low") == 0 && str_p->part[3] != NULL)
+            {
+                int16_t threshold = atoi(str_p->part[3]);
+                temp_set_low_threshold(threshold);
+                printf("&temp,config,low,ack,%d\n", threshold);
+            }
+            else
+            {
+                printf("&temp,config,nack\n");
+            }
+        }
+        else
+        {
+            // Show current thresholds
+            printf("&temp,thresholds,%d,%d\n", temp_get_high_threshold(), temp_get_low_threshold());
+        }
+    }
+    else
+    {
+        printf("&temp,error,unknown_command\n");
+    }
+
+    uart_tx_channel_undo();
+}
 void cmd_print_bottom(uart_select_t channel)
 {
     uart_tx_channel_set(channel);

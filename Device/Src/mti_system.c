@@ -4,6 +4,7 @@
 #include "mti_water.h"
 #include "mti_can.h"
 #include "mti_radar.h"
+#include "mti_temp.h"
 
 bool           debug = true;
 bool           initialised;
@@ -183,7 +184,17 @@ bool module_init(void)
         break;
 
     case STEP_TEMP:
+        // Initialize temperature module
+        if (temp_init())
+        {
+            printf("@db,Temperature module initialized\n");
+        }
+        else
+        {
+            printf("@status,down,7\n"); // Temperature initialization error
+        }
         init_step = STEP_FINISH;
+        break;
     case STEP_FINISH:
         initialised = true;
         if (module_status == STATUS_SYNC)
