@@ -519,6 +519,11 @@
               <FileType>1</FileType>
               <FilePath>..\Device\Src\mti_radar.c</FilePath>
             </File>
+            <File>
+              <FileName>mti_temp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Src\mti_temp.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -2479,6 +2484,11 @@
               <FileName>mti_radar.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Src\mti_radar.c</FilePath>
+            </File>
+            <File>
+              <FileName>mti_temp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Src\mti_temp.c</FilePath>
             </File>
           </Files>
         </Group>

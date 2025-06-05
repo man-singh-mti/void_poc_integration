@@ -4,6 +4,7 @@
 #include "main.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h> // Add for atoi function
 
 /* Private variables */
 static temp_status_t prv_temp_current_status = { 0 };
@@ -138,21 +139,58 @@ int16_t temp_get_low_threshold(void)
 /* Command interface functions */
 void handle_temp_status_command(void)
 {
-    uart_tx_channel_set(UART_DEBUG);
+    // Remove hardcoded UART channel - let caller handle channel selection
     printf("&temp,status,%d,%d,%d,%d\n",
            prv_temp_current_status.current_temperature,
            prv_temp_current_status.high_temp_alert ? 1 : 0,
            prv_temp_current_status.low_temp_alert ? 1 : 0,
            prv_temp_current_status.system_ready ? 1 : 0);
-    uart_tx_channel_undo();
 }
 
 void handle_temp_config_command(const char *params)
 {
-    // Implementation for configuration commands
-    uart_tx_channel_set(UART_DEBUG);
-    printf("&temp,config,ack\n");
-    uart_tx_channel_undo();
+    if (params == NULL)
+    {
+        // Show current thresholds when no parameters provided
+        printf("&temp,thresholds,%d,%d\n", prv_temp_high_threshold, prv_temp_low_threshold);
+        return;
+    }
+
+    // Parse the parameters string
+    // Expected format: "high,85" or "low,-10"
+    char param_copy[64];
+    strncpy(param_copy, params, sizeof(param_copy) - 1);
+    param_copy[sizeof(param_copy) - 1] = '\0';
+
+    char *command   = strtok(param_copy, ",");
+    char *value_str = strtok(NULL, ",");
+
+    if (command == NULL)
+    {
+        printf("&temp,config,error,invalid_format\n");
+        return;
+    }
+
+    if (strcmp(command, "high") == 0 && value_str != NULL)
+    {
+        int16_t threshold = atoi(value_str);
+        temp_set_high_threshold(threshold);
+        printf("&temp,config,high,ack,%d\n", threshold);
+    }
+    else if (strcmp(command, "low") == 0 && value_str != NULL)
+    {
+        int16_t threshold = atoi(value_str);
+        temp_set_low_threshold(threshold);
+        printf("&temp,config,low,ack,%d\n", threshold);
+    }
+    else if (strcmp(command, "get") == 0)
+    {
+        printf("&temp,thresholds,%d,%d\n", prv_temp_high_threshold, prv_temp_low_threshold);
+    }
+    else
+    {
+        printf("&temp,config,nack,unknown_command\n");
+    }
 }
 
 /* Initialize temperature system */

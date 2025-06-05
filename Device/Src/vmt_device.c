@@ -1170,6 +1170,24 @@ static void dev_debug_process(void)
             printf("\r\n");
         }
     }
+
+    // Add temperature debug - every 2 seconds
+    if (h_dev_debug.b_temp_sample)
+    {
+        static uint32_t temp_time_log = 0;
+        uint32_t        time_now      = HAL_GetTick();
+        if (time_now - temp_time_log >= 2000)
+        {
+            temp_time_log = time_now;
+            temp_status_t status;
+            temp_get_latest_status(&status);
+            printf("> dev_temp: %d°C, alerts: H%d L%d, ready: %d\r\n",
+                   status.current_temperature,
+                   status.high_temp_alert ? 1 : 0,
+                   status.low_temp_alert ? 1 : 0,
+                   status.system_ready ? 1 : 0);
+        }
+    }
 }
 
 void dev_printf_debug_set(h_dev_debug_t *p_h_flag)

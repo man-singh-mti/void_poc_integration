@@ -1487,6 +1487,40 @@ static void cmd_debug(h_str_pointers_t *str_p)
             can_send(CAN_CMD_BASE, CAN_CMD_CAL);
         }
     }
+    else if (strstr(str_p->part[1], "temp") != NULL)
+    {
+        if (str_p->part[2] != NULL)
+        {
+            // Control temperature debug flag
+            if (strcmp(str_p->part[2], "on") == 0)
+            {
+                h_dev_debug_t h_flag;
+                dev_printf_debug_get(&h_flag);
+                h_flag.b_temp_sample = true;
+                dev_printf_debug_set(&h_flag);
+                printf("@db,Temperature debug enabled\r\n");
+            }
+            else if (strcmp(str_p->part[2], "off") == 0)
+            {
+                h_dev_debug_t h_flag;
+                dev_printf_debug_get(&h_flag);
+                h_flag.b_temp_sample = false;
+                dev_printf_debug_set(&h_flag);
+                printf("@db,Temperature debug disabled\r\n");
+            }
+        }
+        else
+        {
+            // Show current status
+            temp_status_t status;
+            temp_get_latest_status(&status);
+            printf("@db,Temperature: %d°C, alerts: %d,%d, ready: %d\r\n",
+                   status.current_temperature,
+                   status.high_temp_alert ? 1 : 0,
+                   status.low_temp_alert ? 1 : 0,
+                   status.system_ready ? 1 : 0);
+        }
+    }
 
     uart_tx_channel_undo();
 }
@@ -1685,23 +1719,26 @@ void cmd_print_flash_fifo_delete_finish(uart_select_t channel)
     }
     b_ff_delete_busy = false;
     uart_tx_channel_set(channel);
-    printf("%s,df", cmd_str_flash_fifo);
-    printf(",%d", ff_delete_seq);
-    printf("\n");
     uart_tx_channel_undo();
 }
 
-void cmd_print_flash_fifo_mark_finish(uart_select_t channel)
+void cmd_print_temp_status(uart_select_t channel)
 {
-    if (b_ff_mark_set_busy == false)
-    {
-        return;
-    }
-    b_ff_mark_set_busy = false;
     uart_tx_channel_set(channel);
-    printf("%s,mf", cmd_str_flash_fifo);
-    printf(",%d", h_ff_mark.seq);
-    printf(",%d", h_ff_mark.mark);
-    printf("\n");
+    temp_status_t status;
+    temp_get_latest_status(&status);
+    printf("&temp,status,%d,%d,%d,%d\n", status.current_temperature, status.high_temp_alert ? 1 : 0, status.low_temp_alert ? 1 : 0, status.system_ready ? 1 : 0);
+    uart_tx_channel_undo();
+}
+
+void cmd_print_temp_alert(uart_select_t channel)
+{
+    uart_tx_channel_set(channel);
+    temp_status_t status;
+    temp_get_latest_status(&status);
+    if (status.high_temp_alert || status.low_temp_alert)
+    {
+        printf("!temp,alert,%d,%d\n", status.high_temp_alert ? 1 : 0, status.low_temp_alert ? 1 : 0);
+    }
     uart_tx_channel_undo();
 }
