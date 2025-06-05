@@ -1,451 +1,359 @@
 # Void Detection System: Downhole Module Implementation Guide
 
 **Version:** 1.3.1
-**Date:** June 5, 2025
+**Date:** 5 June 2025
 **Status:** Active Development
+
+---
 
 ## Table of Contents
 
 1. [Introduction](#1-introduction)
-    1.1. [Purpose](#11-purpose)
-    1.2. [Scope](#12-scope)
-    1.3. [Target Audience](#13-target-audience)
-    1.4. [Definitions and Acronyms](#14-definitions-and-acronyms)
+   1.1. [Purpose](#11-purpose)
+   1.2. [Scope](#12-scope)
+   1.3. [Target Audience](#13-target-audience)
+   1.4. [Definitions and Acronyms](#14-definitions-and-acronyms)
 2. [Executive Summary](#2-executive-summary)
 3. [Void Detection Algorithm Requirements](#3-void-detection-algorithm-requirements)
-    3.1. [Core Algorithm Design](#31-core-algorithm-design)
-    3.2. [Implementation Requirements](#32-implementation-requirements)
-    3.3. [Development Steps](#33-development-steps)
+   3.1. [Core Algorithm Design](#31-core-algorithm-design)
+   3.2. [Implementation Requirements](#32-implementation-requirements)
+   3.3. [Development Steps](#33-development-steps)
 4. [Communication Protocols](#4-communication-protocols)
-    4.1. [CAN Bus (Sensor Communication)](#41-can-bus-sensor-communication)
-    4.2. [UART/RS485 (Uphole Communication)](#42-uartrs485-uphole-communication)
-    4.2.1. [Command Format (Uphole/Debug TO Downhole)](#421-command-format-upholedebug-to-downhole)
-    4.2.2. [Response/Event Format (Downhole TO Uphole/Debug)](#422-responseevent-format-downhole-to-upholedebug)
+   4.1. [CAN Bus (Sensor Communication)](#41-can-bus-sensor-communication)
+   4.2. [UART/RS485 (Uphole Communication)](#42-uartrs485-uphole-communication)
+   4.2.1. [Command Format (Uphole/Debug → Downhole)](#421-command-format-upholedebug--downhole)
+   4.2.2. [Response/Event Format (Downhole → Uphole/Debug)](#422-responseevent-format-downhole--upholedebug)
 5. [Void Detection Methods](#5-void-detection-methods)
-    5.1. [Simplified POC Architecture](#51-simplified-poc-architecture)
-    5.2. [Simplified Processing Flow](#52-simplified-processing-flow)
+   5.1. [Simplified POC Architecture](#51-simplified-poc-architecture)
+   5.2. [Simplified Processing Flow](#52-simplified-processing-flow)
 6. [Detailed Design and Implementation](#6-detailed-design-and-implementation)
-    6.1. [POC Data Structures and Flow](#61-poc-data-structures-and-flow)
-    6.2. [Simplified Processing Modules](#62-simplified-processing-modules)
-    6.3. [Basic Implementation Flow](#63-basic-implementation-flow)
+   6.1. [POC Data Structures and Flow](#61-poc-data-structures-and-flow)
+   6.2. [Simplified Processing Modules](#62-simplified-processing-modules)
+   6.3. [Basic Implementation Flow](#63-basic-implementation-flow)
 7. [Embedded System Considerations](#7-embedded-system-considerations)
-    7.1. [Real-Time Requirements](#71-real-time-requirements)
-    7.2. [Memory Management](#72-memory-management)
-    7.3. [Power Management](#73-power-management)
-    7.4. [Hardware Abstraction](#74-hardware-abstraction)
+   7.1. [Real-Time Requirements](#71-real-time-requirements)
+   7.2. [Memory Management](#72-memory-management)
+   7.3. [Power Management](#73-power-management)
+   7.4. [Hardware Abstraction](#74-hardware-abstraction)
 8. [Implementation Status](#8-implementation-status)
-    8.1. [Current POC Architecture Status](#81-current-poc-architecture-status)
-    8.2. [Completed Implementation Details](#82-completed-implementation-details)
-    8.3. [Updated POC Development Plan](#83-updated-poc-development-plan)
-    8.4. [Detailed Implementation Specifications](#84-detailed-implementation-specifications)
-9. [Next Steps](#12-next-steps)
-10. [Current Implementation Status Summary](#13-current-implementation-status-summary)
-11. [Appendix: Detailed Command/Response Timing Analysis](#14-appendix-detailed-commandresponse-timing-analysis)
-12. [Appendix: Detailed Data Structure Definitions](#15-appendix-detailed-data-structure-definitions)
-13. [POC Implementation Strategy and Optimization](#16-poc-implementation-strategy-and-optimization)
-14. [Dual-Algorithm Void Detection System Implementation](#17-dual-algorithm-void-detection-system-implementation)
+   8.1. [Current POC Architecture Status](#81-current-poc-architecture-status)
+   8.2. [Completed Implementation Details](#82-completed-implementation-details)
+   8.3. [Updated POC Development Plan](#83-updated-poc-development-plan)
+   8.4. [Detailed Implementation Specifications](#84-detailed-implementation-specifications)
+9. [Next Steps](#9-next-steps)
+10. [Current Implementation Status Summary](#10-current-implementation-status-summary)
+11. [Appendix: Detailed Command/Response Timing Analysis](#11-appendix-detailed-commandresponse-timing-analysis)
+12. [Appendix: Detailed Data Structure Definitions](#12-appendix-detailed-data-structure-definitions)
+13. [POC Implementation Strategy and Optimisation](#13-poc-implementation-strategy-and-optimisation)
+14. [Future Enhancements: Dual-Algorithm Void Detection System](#14-future-enhancements-dual-algorithm-void-detection-system)
 
------
+---
 
 ## 1. Introduction
 
 ### 1.1. Purpose
 
-This document provides a comprehensive technical guide for the design, implementation, and development of the void detection firmware for the downhole probe module. The system is built on an STM32F722 microcontroller following BARR-C embedded development guidelines and industry best practices for safety-critical applications.
+This document provides a comprehensive technical guide for the design, implementation and development of the void-detection firmware for the downhole probe module. The system is built on an STM32F722 microcontroller following BARR-C embedded development guidelines and industry best practice for safety-critical applications.
 
 ### 1.2. Scope
 
-This document covers the downhole module firmware implementation including:
+Covers the downhole module firmware implementation including:
 
-* Real-time acquisition and processing of radar sensor data via CAN bus
-* Implementation of void detection algorithms with configurable parameters
-* Communication with uphole control system via UART/RS485
-* System health monitoring, fault detection, and recovery mechanisms
-* Temperature sensing and IMU integration (IMU integration for void detection is future work)
-* Memory-efficient data structures and processing algorithms
+* Real-time acquisition and processing of radar sensor data via CAN bus.
+* Implementation of void detection algorithms with configurable parameters.
+* Communication with uphole control system via UART/RS485.
+* System-health monitoring, fault detection and recovery mechanisms.
+* Temperature sensing and IMU integration (IMU integration for void detection is future work).
+* Memory-efficient data structures and processing algorithms.
 
 ### 1.3. Target Audience
 
-* **Embedded Software Engineers:** Implementing and maintaining real-time firmware
-* **System Architects:** Understanding embedded system interactions and constraints
-* **Test Engineers:** Developing verification and validation procedures
-* **Quality Assurance:** Ensuring compliance with safety and reliability standards
+* **Embedded Software Engineers:** Implementing and maintaining real-time firmware.
+* **System Architects:** Understanding embedded system interactions and constraints.
+* **Test Engineers:** Developing verification and validation procedures.
+* **Quality Assurance:** Ensuring compliance with safety and reliability standards.
 
 ### 1.4. Definitions and Acronyms
 
 | Term   | Definition                                         |
-|:-------|:---------------------------------------------------|
-| BARR-C | Barr Group's Embedded C Coding Standard            |
-| CAN    | Controller Area Network - automotive standard bus  |
-| mm     | Millimeters                                        |
+| :----- | :------------------------------------------------- |
+| BARR-C | Barr Group’s Embedded C Coding Standard            |
+| CAN    | Controller Area Network – automotive-grade bus     |
+| mm     | Millimetres                                        |
 | HAL    | Hardware Abstraction Layer (STM32 HAL)             |
 | ISR    | Interrupt Service Routine                          |
 | MCU    | Microcontroller Unit (STM32F722)                   |
-| RTOS   | Real-Time Operating System (not used - bare metal) |
+| RTOS   | Real-Time Operating System (not used – bare metal) |
 | SNR    | Signal-to-Noise Ratio                              |
 | VMT    | Void Measurement Tool                              |
-| WCET   | Worst Case Execution Time                          |
+| WCET   | Worst-Case Execution Time                          |
 
------
+---
 
 ## 2. Executive Summary
 
-The void detection system is a safety-critical embedded application running on STM32F722 hardware. The system continuously monitors borehole wall distances using three radar sensors positioned at 120° intervals, processes this data in real-time using **millimeter (mm)** precision, and reports void detections to an uphole control system.
+The void-detection system is a safety-critical embedded application running on STM32F722 hardware. The system continuously monitors borehole-wall distances using three radar sensors positioned at 120° intervals, processes this data in real time using **millimetre (mm) precision**, and reports void detections to an uphole control system.
 
-**Current Architecture Status:**
+* **Hardware Platform:**
 
-* ✅ **System Architecture:** Layered design with clear separation of concerns. Core modules include `mti_void` for detection, `mti_can` for sensor communication, `vmt_command` for uphole interface, and `mti_system` for overall control and initialization.
-* ✅ **Hardware Initialization:** Comprehensive system startup sequence implemented in `mti_system.c`.
-* ✅ **CAN Communication:** Robust radar sensor interface with error recovery detailed in `mti_can.c`.
-* ✅ **UART Communication:** Debug and uphole communication channels functional (`vmt_uart.c`). Commands are prefixed with `@`. Responses/events from downhole use `&`, `!`, or `$` respectively.
-* ✅ **Temperature Monitoring:** Complete temperature module implemented in [`mti_temp.c`](../Device/Src/mti_temp.c) with ADC-based sensing, smoothing, threshold detection, and command interface. **(COMPLETED)**
-* ✅ **Radar System:** Complete round-robin sensor management implemented in [`mti_radar.c`](../Device/Src/mti_radar.c) with 3-sensor rotation, distance measurement processing, and status monitoring.
-* ✅ **IMU System:** Functional accelerometer/gyroscope monitoring with dual-sensor validation and error handling.
-* ✅ **Water Detection:** Basic water detection implemented with ADC monitoring and threshold detection.
-* ❌ **Void Detection Logic:** Core algorithms using millimeter precision need implementation. The [`mti_void.c`](../Device/Src/mti_void.c) module exists but requires full algorithm development. This is the critical missing component.
-* ✅ **Error Recovery:** Basic error handling (e.g., CAN sensor resets) is in place. Build system successfully compiles with 0 errors.
+  * MCU: STM32F722
+  * Radars: three AWR1843AOP chips at 120° intervals (borehole diameter 150 – 400 mm)
+  * Communication: RS485 (57 600 baud) to uphole system; CAN bus (500 kbps) for radar sensors; UART (115200 bps) for debug.
 
-### Next Priority: Void Detection Implementation
+* **Current Status:**
 
-With the temperature monitoring system now complete, the primary focus shifts to the core void detection algorithm implementation. All supporting infrastructure (radar data acquisition, communication) is functional. The void detection module ([`mti_void.c`](../Device/Src/mti_void.c)) needs to:
+  * ✅ System Architecture (layered design) with modules: [`mti_void.c`](../Device/Src/mti_void.c), [`mti_can.c`](../Device/Src/mti_can.c), [`vmt_command.c`](../Device/Src/vmt_command.c), [`mti_system.c`](../Device/Src/mti_system.c).
+  * ✅ Hardware Initialisation (complete in `mti_system.c`).
+  * ✅ CAN Communication for radar interface (robust error recovery in `mti_can.c`).
+  * ✅ UART Communication for debug and uphole (`vmt_uart.c`).
+  * ✅ Temperature Monitoring (fully implemented in [`mti_temp.c`](../Device/Src/mti_temp.c)) with ADC-based sensing, smoothing, thresholds and command interface.
+  * ✅ Radar System (round-robin logic in `mti_radar.c`, clean data in millimetres).
+  * ✅ IMU System (functional accelerometer/gyroscope monitoring, dual-sensor validation in `vmt_icm20948.c`).
+  * ✅ Water Detection (basic ADC-threshold detection in `vmt_water.c`).
+  * ❌ **Void Detection Logic** in [`mti_void.c`](../Device/Src/mti_void.c) is currently 5 % complete (skeleton exists, core logic missing).
+  * ✅ Error Recovery mechanisms in CAN and other modules.
+  * ✅ Build System: compiles with zero errors.
 
-1. Process radar distance measurements from 3 sensors
-2. Apply geometric calculations for borehole diameter analysis  
-3. Detect significant void spaces using configurable thresholds
-4. Generate void events with angular position and timing data
-5. Integrate with existing command and communication infrastructure
+**Next Priority: Void Detection Implementation**
+All supporting infrastructure is functional: radar data acquisition, communication channels, temperature monitoring, water detection, IMU, etc. The critical missing piece is the core void detection algorithm in [`mti_void.c`](../Device/Src/mti_void.c). The immediate goal is to implement a simple threshold-based detection (Phase 1) within approximately **3 weeks** (by late June 2025). (See Sections 8.3 and 9 for detailed milestones.)
 
-**Note:** The downhole probe detects voids and provides angular/radial positioning relative to the sensors. Vertical borehole positioning is handled by the uphole system using separate depth measurement equipment.
+---
 
 ## 3. Void Detection Algorithm Requirements
 
-### 3.1 Core Algorithm Design
+### 3.1. Core Algorithm Design
 
-The void detection system must implement the following algorithm stages:
+The void detection system must implement these stages:
 
 #### Stage 1: Data Acquisition
 
-* Collect distance measurements from 3 radar sensors positioned at 120° intervals
-* Validate data quality and sensor health status
-* Apply sensor-specific calibration offsets
-* Filter out noise and invalid readings
+* Collect distance measurements from three radar sensors (120° apart).
+* Validate data quality and sensor health.
+* Apply sensor-specific calibration offsets (future enhancement).
+* Filter out noise and invalid readings.
 
 #### Stage 2: Geometric Analysis
 
-* Calculate borehole center position using triangulation
-* Determine effective borehole diameter at measurement point
-* Detect asymmetric wall conditions indicating potential voids
-* Apply coordinate transformation for radial void positioning
-* **Note:** Analysis provides radial/angular void location relative to probe sensors
+* (POC) Compute baseline borehole diameter by comparing each sensor’s distance with an expected value.
+* (Post-POC) Potentially use 3-point circle fitting for precise borehole centre estimation.
 
 #### Stage 3: Void Detection Logic
 
-* Compare calculated diameter against baseline/expected diameter
-* Apply configurable void detection thresholds (e.g., 20% diameter increase)
-* Implement hysteresis to prevent false void start/end events
-* Generate void severity classification (minor, major, critical)
+* Compare calculated diameter (or each sensor’s distance) against baseline/expected diameter.
+* Apply configurable void-detection thresholds (e.g. +20 % of expected diameter).
+* Implement hysteresis to prevent false start/end events.
+* Classify void severity (minor, major, critical).
 
 #### Stage 4: Event Generation
 
-* Generate void detection events with angular position and severity
-* Continuous void monitoring and size tracking during probe movement
-* Generate void end events when conditions return to normal
-* Log void characteristics with relative timing for uphole correlation
-* **Note:** Vertical borehole position is determined by uphole system, not downhole probe
+* Generate void detection events with angular sector, size (mm) and confidence (0 – 100 %).
+* Continuously monitor for void start/end.
+* Log void characteristics with timestamps; uphole system correlates vertical position separately.
 
-### 3.2 Implementation Requirements
+### 3.2. Implementation Requirements
 
-**Data Structures:**
+**Key Data Structures:**
 
 ```c
+//————————————————————————————————————————————————————————
+// In mti_void.h (to be created)
+//————————————————————————————————————————————————————————
+
+#include <stdint.h>
+#include <stdbool.h> 
+
+#define MAX_RADAR_SENSORS 3
+
 typedef struct {
-    uint16_t distance_mm[MAX_RADAR_SENSORS];  // Distance measurements in mm
-    uint16_t angle_deg[MAX_RADAR_SENSORS];    // Sensor angular positions  
-    bool data_valid[MAX_RADAR_SENSORS];       // Data validity flags
-    uint32_t measurement_time_ms;             // When measurements were taken
+    uint16_t distance_mm[MAX_RADAR_SENSORS];  // Distances in mm
+    uint16_t angle_deg[MAX_RADAR_SENSORS];    // 0, 120, 240
+    bool     data_valid[MAX_RADAR_SENSORS];   // Valid flags
+    uint32_t measurement_time_ms;             // Timestamp
 } void_measurement_t;
 
 typedef struct {
-    bool void_detected;                       // Current void state
+    bool     void_detected;                  // Current void state
     uint16_t void_diameter_mm;               // Calculated void diameter
     uint16_t baseline_diameter_mm;           // Expected baseline diameter
-    uint8_t void_severity;                   // 0=none, 1=minor, 2=major, 3=critical
-    uint8_t void_sector;                     // Angular sector (0-2 for 120° spacing)
-    uint32_t detection_time_ms;              // When void was detected (debugging)
+    uint8_t  void_severity;                  // 0=none,1=minor,2=major,3=critical
+    uint8_t  void_sector;                    // Sensor index (0–2)
+    uint32_t detection_time_ms;              // Timestamp
 } void_status_t;
 ```
 
-**Key Functions to Implement:**
+**Key Function Prototypes (to go in mti\_void.h):**
 
-* `void_system_init()` - Initialize void detection system
-* `void_process_measurements()` - Main algorithm processing
-* `void_get_status()` - Get current void detection status
-* `void_set_thresholds()` - Configure detection parameters
-* `void_calibrate_baseline()` - Set baseline diameter
+```c
+void void_system_init(void);
+void void_system_process(void);
+bool void_analyze_sensor_data(uint8_t sensor_idx,
+                              uint16_t distance_mm,
+                              uint16_t angle_deg,
+                              void_status_t *result);
+uint8_t void_calculate_confidence(uint16_t distance_mm,
+                                  uint16_t expected_mm,
+                                  uint16_t threshold_mm);
+void void_characterise_detection(uint16_t distance_mm,
+                                 uint16_t expected_mm,
+                                 void_status_t *result);
+void void_get_latest_results(void_status_t *result);
+void void_set_threshold(uint16_t threshold_mm);
+void void_set_baseline(uint16_t baseline_mm);
+```
 
 **Integration Points:**
 
-* Integrate with existing `radar_system_process()` in `vmt_device.c`
-* Add void commands to `vmt_command.c` command handlers
-* Use existing UART channels for void event reporting
-* Leverage temperature data for environmental compensation
+* Fetch cleaned radar data from [`mti_radar.c`](../Device/Src/mti_radar.c).
+* Integrate `void_system_process()` into main loop in [`mti_system.c`](../Device/Src/mti_system.c) or [`vmt_device.c`](../Device/Src/vmt_device.c).
+* Extend void commands in [`vmt_command.c`](../Device/Src/vmt_command.c).
+* Use UART channels (115 200 bps) for event reporting and debug.
 
-**Command Interface:**
+### 3.3. Development Steps
 
-* `@void,status` - Get current void detection status
-* `@void,config,threshold,<value>` - Set void detection threshold
-* `@void,config,baseline,<diameter>` - Set baseline borehole diameter
-* `@void,calibrate` - Perform baseline calibration
-* `!void,<detected>,<sector>,<size_mm>,<confidence>` - Void detection events (angular position only)
+1. **Create `mti_void.h`** – Define data structures and function prototypes.
+2. **Implement `mti_void.c`** – Core threshold-based void detection algorithms.
+3. **Integrate with `mti_radar.c`** – Fetch millimetre data in `void_system_process()`.
+4. **Add void commands** to [`vmt_command.c`](../Device/Src/vmt_command.c).
+5. **Testing and Calibration** – Validate with simulated/captured radar data.
+6. **Documentation** – Update usage guides and complete this implementation guide.
 
-**Note:** Void events include timing information for correlation with uphole depth tracking, but do not include absolute vertical position.
-
-### 3.3 Development Steps
-
-1. **Create `mti_void.h`** - Define data structures and function prototypes
-2. **Implement `mti_void.c`** - Core void detection algorithms
-3. **Integrate with `vmt_device.c`** - Add void processing to main loop
-4. **Add void commands** - Extend `vmt_command.c` with void-specific commands
-5. **Testing and Calibration** - Validate algorithm with test data
-6. **Documentation** - Complete algorithm documentation and usage guide
-
------
+---
 
 ## 4. Communication Protocols
 
 ### 4.1. CAN Bus (Sensor Communication)
 
-**Implementation in `mti_can.c`:**
+**Implementation in** [`mti_can.c`](../Device/Src/mti_can.c):
 
 * **Bus Speed:** 500 kbps.
-* **Message Format:** Extended frame (29-bit ID).
-* **Error Handling:** Automatic retransmission, bus-off recovery.
-* **Real-Time:** Deterministic 100ms polling cycle for radar data requests.
+* **Frame Format:** Extended frame (29-bit ID).
+* **Error Handling:** Automatic retransmission, bus-off recovery in `HAL_CAN_ErrorCallback()`.
+* **Polling Cycle:** Deterministic 100 ms polling (10 Hz) for radar data.
 
 ```c
-// Sensor addressing scheme (from mti_can.h)
-#define CAN_MSG_ID_HEADER_SENSOR(sensor_idx)  (CAN_ID_HEADER_BASE + ((sensor_idx) * 0x10U)) //
-#define CAN_MSG_ID_OBJECT_SENSOR(sensor_idx)  (CAN_ID_OBJECT_BASE + ((sensor_idx) * 0x10U)) //
-#define CAN_MSG_ID_STATUS_SENSOR(sensor_idx)  (CAN_ID_STATUS_BASE + ((sensor_idx) * 0x10U)) //
-#define CAN_CMD_ID_SENSOR(sensor_idx)         (CAN_CMD_BASE + (sensor_idx)) // For sending commands to sensors
+// Sensor addressing (in mti_can.h)
+#define CAN_ID_HEADER_BASE  0xA0
+#define CAN_ID_OBJECT_BASE  0xB0
+#define CAN_ID_STATUS_BASE  0xC0
+#define CAN_CMD_BASE        0x80
 
-// Real-time constraints (from vmt_common_defs.h)
-#define RADAR_POLL_INTERVAL_MS    100   // 10Hz system update rate
-#define CAN_COMM_TIMEOUT_MS      2000   // Communication timeout
-#define SENSOR_RESET_DELAY_MS      10   // Reset recovery time
+#define CAN_MSG_ID_HEADER_SENSOR(idx)  (CAN_ID_HEADER_BASE + ((idx) * 0x10U))
+#define CAN_MSG_ID_OBJECT_SENSOR(idx)  (CAN_ID_OBJECT_BASE + ((idx) * 0x10U))
+#define CAN_MSG_ID_STATUS_SENSOR(idx)  (CAN_ID_STATUS_BASE + ((idx) * 0x10U))
+#define CAN_CMD_ID_SENSOR(idx)         (CAN_CMD_BASE + (idx))
+```
+
+**Timing Constraints (in `vmt_common_defs.h`):**
+
+```c
+#define RADAR_POLL_INTERVAL_MS   100     // 10 Hz
+#define CAN_COMM_TIMEOUT_MS      2000    // 2 s timeout
+#define SENSOR_RESET_DELAY_MS    10      // 10 ms reset time
 ```
 
 ### 4.2. UART/RS485 (Uphole Communication)
 
-**Implementation in `vmt_uart.c` and `vmt_command.c`:**
+**Implementation in** [`vmt_uart.c`](../Device/Src/vmt_uart.c) **and** [`vmt_command.c`](../Device/Src/vmt_command.c):
 
-* **Baud Rate:** Configurable per UART instance (e.g., 115200 bps).
-* **Protocol:** ASCII command/response with defined prefixes.
-* **Buffer Management:** Circular RX/TX buffers.
+* **Baud Rate:** Configurable (115 200 bps typical).
+* **Protocol:** ASCII commands/responses, prefixed (`@`, `&`, `!`, `$`).
+* **Buffers:** Circular RX/TX buffers via HAL functions.
 
-#### 4.2.1. Command Format (Uphole/Debug TO Downhole)
+#### 4.2.1. Command Format (Uphole/Debug → Downhole)
 
-All commands sent **TO** the downhole unit **MUST** be prefixed with `@`.
-The general command structure is `@<command_family>,<action/target>,[param1],[param2],...<newline>`.
-String parsing is handled by `string_decoder_by_end` in `vmt_string.c`.
+All commands **TO** downhole are prefixed with `@`.
+General structure:
 
-```c
-// --- System Control & Status Commands ---
-/**
- * @brief Request connection and basic system status. Uphole sends this.
- * @command @connect
- * @response &status,down,<system_status_id>,ver,<fw_maj>,<fw_min>,<fw_sub>
- */
-
-/**
- * @brief Command device to enter sleep mode.
- * @command @sleep
- * @response $db,Downhole sleep (debug) THEN $db,@wake (on wakeup, debug) AND !wake (uphole)
- */
-
-/**
- * @brief Request current status of various subsystems or overall status.
- * @command @status?  // General status (similar to @connect response)
- * @command @status,imu?
- * @command @status,water?
- * @command @status,temp?
- * @command @status,void? // Same as @vd,status?
- * @response Depends on query, e.g., &status,imu,<active_imu_id>,<profile_id>
- */
-
-// --- Void Detection Commands (@vd) ---
-
-/**
- * @brief Get current operational status of the void detection subsystem.
- * @command @vd,status?
- * @response &vd,status,<op_mode>,<system_status_for_void>,<radar_hw_status>
- * <op_mode>: Current system_op_mode_t (e.g., 0 for STOPPED, 1 for MEASURE)
- * <system_status_for_void>: e.g., SYSTEM_STATUS_OK, SYSTEM_STATUS_ERROR_RADAR_HW
- * <radar_hw_status>: radar_hw_status_t from void_get_subsystem_hw_status()
- */
-
-/**
- * @brief Get current void detection configuration.
- * @command @vd,config?
- * @response &vd,config,thresh_mm,<val>,conf_perc,<val>,diam_mm,<val>,range_min_mm,<val>,range_max_mm,<val>,mode_base,<val>,mode_multi,<val>,filter_median,<val>
- * (Values correspond to void_config_t members)
- */
-
-/**
- * @brief Set void detection threshold.
- * @command @vd,config,thresh,<value_mm>
- * @param <value_mm>: Detection threshold in millimeters.
- * @response &vd,config,thresh,ack or &vd,config,thresh,nack,<error_code>
- */
-
-/**
- * @brief Set void confidence threshold.
- * @command @vd,config,conf,<value_percent>
- * @param <value_percent>: Confidence threshold (0-100).
- * @response &vd,config,conf,ack or &vd,config,conf,nack,<error_code>
- */
-
-/**
- * @brief Set expected borehole diameter. (Calls void_set_expected_diameter)
- * @command @vd,config,diam,<value_mm>
- * @param <value_mm>: Expected borehole diameter in millimeters.
- * @response &vd,config,diam,ack or &vd,config,diam,nack,<error_code>
- */
-
-/**
- * @brief Set sensor operational range.
- * @command @vd,config,range,<min_mm>,<max_mm>
- * @param <min_mm>: Minimum valid sensor range in millimeters.
- * @param <max_mm>: Maximum valid sensor range in millimeters.
- * @response &vd,config,range,ack or &vd,config,range,nack,<error_code>
- */
-
-/**
- * @brief Set baseline detection method.
- * @command @vd,config,mode,baseline,<method_id>
- * @param <method_id>: Integer ID for the baseline_method in void_config_t.
- * @response &vd,config,mode,baseline,ack or &vd,config,mode,baseline,nack,<error_code>
- */
-
-/**
- * @brief Set multi-point processing algorithm.
- * @command @vd,config,mode,multipoint,<algorithm_id>
- * @param <algorithm_id>: Integer ID for void_multi_point_algorithm_t.
- * @response &vd,config,mode,multipoint,ack or &vd,config,mode,multipoint,nack,<error_code>
- */
-
-/**
- * @brief Enable/disable median filter (placeholder for future enhancement).
- * @command @vd,config,filter,median,<0_or_1>
- * @param <0_or_1>: 0 to disable, 1 to enable.
- * @response &vd,config,filter,median,ack or &vd,config,filter,median,nack,<error_code>
- */
-
-/**
- * @brief Set calibration factor for a specific radar sensor (Future Enhancement).
- * @command @vd,cal,sensor,<sensor_idx>,<factor_ppm>
- * @param <sensor_idx>: Sensor index (0-MAX_SENSORS-1).
- * @param <factor_ppm>: Calibration factor in parts per million (e.g., 1000000 for no cal, 1050000 for +5%).
- * @response &vd,cal,sensor,ack or &vd,cal,sensor,nack,<error_code>
- */
-
-/**
- * @brief Request latest N wall profile data entries.
- * @command @vd,history,profile[,<count>]
- * @param <count> (optional): Number of latest profiles to retrieve. Default: 1.
- * @response Multiple lines of: &vd,history,profile,<timestamp_ms>,<center_x_mm>,<center_y_mm>,<radius_mm>,<s0_dist_mm>,<s0_status_id>,<s1_dist_mm>,<s1_status_id>,<s2_dist_mm>,<s2_status_id>
- * Followed by: &vd,history,profile,done
- */
-
-/**
- * @brief Request latest N void detection data entries.
- * @command @vd,history,detection
- * @response &vd,history,detection,<sector_idx>,<size_mm>,<confidence_%>
- * Note: Reports current/latest detection state only
- */
- 
-/**
- * @brief Clear void detection and wall profile history.
- * @command @vd,clear,history
- * @response &vd,clear,history,ack or &vd,clear,history,nack,<error_code>
- */
-
-/**
- * @brief Get detailed diagnostic information including performance metrics.
- * @command @vd,diag?
- * @response &vd,diag,S0:[<dist_mm>,<snr>,<status_id>,<ts>],S1:[...],S2:[...],Profile:[<cx_mm>,<cy_mm>,<rad_mm>,<ts>],Timing:[<last_proc_ms>],Config:[<thresh_mm>,<conf_perc>],HWStatus:<radar_hw_status_id>
- * (Includes processing timing for performance analysis)
- */
-
-// --- Other existing commands (ensure @ prefix) ---
-// @dt - Device detect (deprecated by @connect or @status?)
-// @bt - Bottom detect status query (now part of @imu,status,bump?)
-// @wt - Water detect status query (now part of @status,water?)
-// @sensor,w,<value> or @sensor,g,<profile> - Sensor config (specific setters for water/IMU, potentially @vd,config for void sensors)
-// @st - Start measurement mode (system level)
-// @fn - Finish/Stop measurement mode (system level)
-// @init,... - Initialization control/query (system level)
-// @echo,... - Echo back parameters
-// @spi,... - Low-level SPI access (debug)
-// @log,... - Logging control (system level)
-// @ff,... - Flash FIFO direct access (debug)
-// @flash,... - Flash direct access (debug)
-// @imu,... - IMU specific commands (e.g. @imu,config,param,value)
-// @cmd,... - Generic debug/command execution
-// @tp,... - Temperature sensor commands
+```bash
+@<command_family>,<action/target>,[param1],[param2],...<newline>
 ```
 
-> **Note:** The `@vd,history,…` and `@vd,diag?` commands are specified here but are not yet supported in the firmware. The calls to `prv_void_store_profile_to_history()` and `prv_void_store_detection_to_history()` remain disabled and no handlers exist. These will be implemented in a future release.
+Parsing is handled by `string_decoder_by_end()` in [`vmt_string.c`](../Device/Src/vmt_string.c).
 
-#### 4.2.2. Response/Event Format (Downhole TO Uphole/Debug)
+**Examples (existing):**
 
-Messages sent **FROM** the downhole unit use specific prefixes:
+```bash
+@connect                   // Request basic system status
+@status?                   // General status (similar to @connect response)
+@status,imu?               // IMU status
+@status,water?             // Water status
+@status,temp?              // Temperature status
+@status,void?              // Void status (same as @vd,status?)
 
-| Prefix | Direction       | Purpose                                  | Example (Illustrative for @vd)             |
-|:-------|:----------------|:-----------------------------------------|:-------------------------------------------|
-| `&`    | Downhole→Uphole | **Response** to a specific command       | `&vd,config,thresh,ack`                    |
-| `!`    | Downhole→Uphole | **Asynchronous Alert/Event**             | `!vd,flag,1,120,85` (sector,size_mm,conf%) |
-| `$`    | Downhole→Uphole | **Debug Message** (UART_DEBUG primarily) | `$db,Void: Sensor 0 processing data`       |
+@void,status?              // Equivalent to @vd,status?
 
-**Specific Void Detection Event:**
+@temp,status?              // Temperature status query
+@temp,config,high,<value>  // Set high temperature threshold
+@temp,config,low,<value>   // Set low temperature threshold
 
-* `!vd,flag,<sector_idx>,<size_mm>,<confidence_%>` - Indicates a confirmed void detection with angular sector information
+@vd,status?                // Void detection status
+@vd,config,thresh,<val>    // Set void detection threshold (mm)
+@vd,config,baseline,<val>  // Set expected diameter (mm)
+@vd,config,conf,<val>      // Set confidence threshold (%)
+@vd,config,range,<min>,<max>
+@vd,config,mode,baseline,<method_id>
+@vd,config,mode,multipoint,<algorithm_id>
+@vd,config,filter,median,<0_or_1>
+@vd,cal,sensor,<idx>,<factor_ppm>
+@vd,history,profile[,<count>]
+@vd,history,detection
+@vd,clear,history
+@vd,diag?
+```
 
-**Note:** All void detection events report the current cross-sectional analysis. The uphole system correlates this data with vertical position and timing.
+> **Note:** The `@vd,history,…` and `@vd,diag?` commands are currently **not yet supported** (handlers to be implemented in a future release).
 
------
+#### 4.2.2. Response/Event Format (Downhole → Uphole/Debug)
+
+Messages **FROM** downhole use specific prefixes:
+
+| Prefix | Direction       | Purpose                            | Example (Void)                        |
+| :----- | :-------------- | :--------------------------------- | :------------------------------------ |
+| `&`    | Downhole→Uphole | **Response** to a specific command | `&vd,config,thresh,ack`               |
+| `!`    | Downhole→Uphole | **Asynchronous Alert/Event**       | `!vd,flag,1,85,70` (sector,size,conf) |
+| `$`    | Downhole→Uphole | **Debug Message** (UART\_DEBUG)    | `$db,Void: Sensor 0 processing data`  |
+
+**Specific Void Event:**
+
+```bash
+!vd,flag,<sector_idx>,<size_mm>,<confidence_%>
+```
+
+All void events report cross-sectional analysis; uphole system will add vertical correlation.
+
+---
 
 ## 5. Void Detection Methods
 
 ### 5.1. Simplified POC Architecture
 
-**Basic Data Flow for Void Detection:**
-
-The void detection system follows a straightforward approach optimized for proof of concept implementation:
+For rapid POC development, a straightforward threshold-based approach is used:
 
 ```c
-// Basic data flow structures for POC
+// Stage 1: Raw Radar Data
 typedef struct {
-    float raw_distance_m;     // Raw distance from radar sensor
-    float raw_snr_db;         // Signal-to-noise ratio
-    uint8_t sensor_id;        // Which sensor (0-2)
-    uint32_t timestamp_ms;    // When data was received
+    float   raw_distance_m;     // Raw distance (m)
+    float   raw_snr_db;         // Raw SNR (dB)
+    uint8_t sensor_id;          // 0–2
+    uint32_t timestamp_ms;      // When received
 } raw_radar_data_t;
 
+// Stage 2: Cleaned Radar Data
 typedef struct {
-    uint16_t distance_mm;     // Cleaned distance in millimeters
-    uint8_t snr;              // Cleaned SNR value
-    uint8_t sensor_id;        // Sensor identifier
-    bool is_valid;            // Data validity flag
-    uint32_t timestamp_ms;    // Processing timestamp
+    uint16_t distance_mm;       // Clean distance in mm
+    uint8_t  snr;               // Processed SNR (0–255)
+    uint8_t  sensor_id;         // 0–2
+    bool     is_valid;          // Valid flag
+    uint32_t timestamp_ms;      // Processing timestamp
 } cleaned_radar_data_t;
 
+// Stage 3: Void Analysis Result
 typedef struct {
-    bool void_detected;       // Simple void detection flag
-    uint8_t affected_sensor;  // Which sensor detected the void
-    uint16_t void_size_mm;    // Size of detected void
-    uint8_t confidence;       // Detection confidence (0-100)
-    uint32_t detection_time;  // When void was detected
+    bool     void_detected;     // Flag
+    uint8_t  affected_sensor;   // Sensor index (0–2)
+    uint16_t void_size_mm;      // Void size
+    uint8_t  confidence;        // 0–100
+    uint32_t detection_time;    // Timestamp
 } void_analysis_result_t;
 ```
 
@@ -453,85 +361,81 @@ typedef struct {
 
 **POC Implementation Steps:**
 
-1. **Data Input Stage:**
-   * Raw radar data arrives via CAN bus
-   * Store in `raw_radar_data_t` structure
-   * Simple timestamp and sensor ID tracking
+1. **Data Input:**
 
-2. **Data Cleanup Stage:**
-   * Convert meters to millimeters for precision
-   * Apply basic range validation
-   * Store in `cleaned_radar_data_t` structure
-   * Flag invalid readings
+   * Raw radar data arrives via CAN interrupt.
+   * Store in `raw_radar_data_t`.
+2. **Data Cleanup:**
 
-3. **Void Analysis Stage:**
-   * Compare cleaned distances against expected values
-   * Apply simple threshold-based detection
-   * Calculate basic confidence metrics
-   * Store results in `void_analysis_result_t` structure
+   * Convert metres → millimetres.
+   * Range/SNR validation (`5 cm – 5 m`, SNR > 100 dB).
+   * Store in `cleaned_radar_data_t`.
+3. **Void Analysis:**
 
-4. **Command Response Stage:**
-   * Uphole sends `@vd` commands
-   * Retrieve latest analysis results
-   * Format and send response data
+   * Compare each sensor’s `distance_mm` against expected baseline (e.g. 150 mm).
+   * If > (baseline + threshold), flag as void.
+   * Calculate confidence.
+   * Populate `void_analysis_result_t`.
+4. **Command Response:**
 
-**Simplified Algorithm Logic:**
+   * Uphole sends `@vd` commands.
+   * Retrieve latest results and send `&vd,…` or `!vd,…`.
+
+**Simplified Algorithm Example:**
 
 ```c
-// Basic void detection logic for POC
-void simple_void_detection(cleaned_radar_data_t sensors[3], void_analysis_result_t* result) {
-    uint16_t expected_distance = 150; // mm, configurable baseline
-    uint16_t threshold = 50;          // mm, detection threshold
-    
+void simple_void_detection(cleaned_radar_data_t sensors[3],
+                           void_analysis_result_t *result) {
+    const uint16_t expected_distance = 150; // mm
+    const uint16_t threshold = 50;          // mm
+
     for (int i = 0; i < 3; i++) {
-        if (sensors[i].is_valid) {
-            if (sensors[i].distance_mm > (expected_distance + threshold)) {
-                result->void_detected = true;
-                result->affected_sensor = i;
-                result->void_size_mm = sensors[i].distance_mm - expected_distance;
-                result->confidence = calculate_simple_confidence(sensors[i]);
-                break;
-            }
+        if (sensors[i].is_valid &&
+            sensors[i].distance_mm > (expected_distance + threshold)) {
+            result->void_detected    = true;
+            result->affected_sensor  = i;
+            result->void_size_mm     =
+                sensors[i].distance_mm - expected_distance;
+            result->confidence       =
+                calculate_simple_confidence(sensors[i]);
+            result->detection_time   = HAL_GetTick();
+            break;
         }
     }
 }
 ```
 
------
+---
 
 ## 6. Detailed Design and Implementation
 
 ### 6.1. POC Data Structures and Flow
 
-**Simplified Data Architecture:**
-
-The POC implementation uses a straightforward data flow with clearly defined stages and structures:
-
 ```c
 // Stage 1: Raw Data Input (from CAN)
 typedef struct {
-    float raw_distance_m[3];    // Raw distances from 3 sensors
-    float raw_snr_db[3];        // SNR values from 3 sensors
-    uint32_t timestamp_ms;      // When data set was received
-    bool sensor_active[3];      // Which sensors provided data
+    float    raw_distance_m[3];   // metres
+    float    raw_snr_db[3];       // dB
+    bool     sensor_active[3];    // which sensors provided data
+    uint32_t timestamp_ms;        // when received
 } radar_input_data_t;
 
-// Stage 2: Cleaned Data (after radar module processing)
+// Stage 2: Cleaned Data (after processing)
 typedef struct {
-    uint16_t clean_distance_mm[3];  // Cleaned distances in mm
-    uint8_t clean_snr[3];           // Processed SNR values
-    bool data_valid[3];             // Validity flags per sensor
-    uint32_t process_time_ms;       // When cleaning was completed (performance)
+    uint16_t clean_distance_mm[3]; // millimetres
+    uint8_t  clean_snr[3];         // processed SNR
+    bool     data_valid[3];        // validity flags
+    uint32_t process_time_ms;      // when cleaning completed
 } radar_cleaned_data_t;
 
 // Stage 3: Void Analysis Results
 typedef struct {
-    bool void_present;              // Primary detection flag
-    uint8_t void_sector;            // Which sector has void (0-2)
-    uint16_t void_magnitude_mm;     // Size/severity of void
-    uint8_t detection_confidence;   // Confidence level (0-100)
-    uint32_t analysis_time_ms;      // When analysis completed (debugging)
-    char status_text[32];           // Human-readable status
+    bool     void_present;        // detection flag
+    uint8_t  void_sector;         // 0–2
+    uint16_t void_magnitude_mm;   // mm
+    uint8_t  detection_confidence; // 0–100
+    uint32_t analysis_time_ms;    // when analysis completed
+    char     status_text[32];     // human-readable status
 } void_detection_result_t;
 ```
 
@@ -540,255 +444,204 @@ typedef struct {
 #### Module 1: Data Input Handler
 
 ```c
-// Function: Receive raw radar data from CAN
-bool receive_radar_data(radar_input_data_t* input_data);
+// Receive raw radar data from CAN
+bool receive_radar_data(radar_input_data_t *input_data);
 
-// Function: Store raw data in input structure
-void store_raw_data(radar_input_data_t* data);
+// Store raw data
+void store_raw_data(radar_input_data_t *data);
 ```
 
 #### Module 2: Radar Data Cleanup
 
 ```c
-// Function: Clean and validate raw sensor data
-bool cleanup_radar_data(radar_input_data_t* raw, radar_cleaned_data_t* cleaned);
+// Clean and validate raw sensor data
+bool cleanup_radar_data(radar_input_data_t *raw,
+                        radar_cleaned_data_t *cleaned);
 
-// Function: Convert meters to millimeters with validation
-uint16_t convert_to_millimeters(float distance_m);
+// Convert metres → millimetres with validation
+uint16_t convert_to_millimetres(float distance_m);
 
-// Function: Validate sensor readings
+// Validate sensor reading (distance and SNR)
 bool validate_sensor_data(float distance, float snr);
 ```
 
 #### Module 3: Void Analysis Engine
 
 ```c
-// Function: Perform basic void detection analysis
-bool analyze_for_voids(radar_cleaned_data_t* cleaned, void_detection_result_t* result);
+// Perform basic void detection analysis
+bool analyze_for_voids(radar_cleaned_data_t *cleaned,
+                       void_detection_result_t *result);
 
-// Function: Calculate detection confidence
-uint8_t calculate_confidence(radar_cleaned_data_t* data, uint8_t sensor_idx);
+// Calculate detection confidence
+uint8_t calculate_confidence(radar_cleaned_data_t *data,
+                             uint8_t sensor_idx);
 
-// Function: Determine void characteristics
-void characterize_void(uint16_t distance_mm, void_detection_result_t* result);
+// Characterise void (size, severity)
+void characterise_void(uint16_t distance_mm,
+                       void_detection_result_t *result);
 ```
 
 #### Module 4: Command Response Handler
 
 ```c
-// Function: Handle @vd commands from uphole
-void handle_void_command(const char* command);
+// Handle @vd commands from uphole
+void handle_void_command(const char *command);
 
-// Function: Retrieve latest void analysis results
-void get_latest_void_results(void_detection_result_t* result);
+// Retrieve latest void analysis results
+void get_latest_void_results(void_detection_result_t *result);
 
-// Function: Format and send response to uphole
-void send_void_response(void_detection_result_t* result);
+// Format and send response to uphole
+void send_void_response(void_detection_result_t *result);
 ```
 
 ### 6.3. Basic Implementation Flow
 
-**Main Processing Loop:**
+**Main Void Detection Loop (in `mti_void.c`):**
 
 ```c
 void void_detection_main_loop(void) {
-    static radar_input_data_t raw_data;
-    static radar_cleaned_data_t cleaned_data;
-    static void_detection_result_t void_results;
-    
+    static radar_input_data_t       raw_data;
+    static radar_cleaned_data_t     cleaned_data;
+    static void_detection_result_t  void_results;
+
     // Step 1: Check for new radar data
     if (receive_radar_data(&raw_data)) {
-        
-        // Step 2: Clean and process the data
+        // Step 2: Clean and validate
         if (cleanup_radar_data(&raw_data, &cleaned_data)) {
-            
-            // Step 3: Perform void analysis
+            // Step 3: Void analysis
             if (analyze_for_voids(&cleaned_data, &void_results)) {
-                
-                // Step 4: Results are stored and ready for commands
-                // (Command handler will retrieve when needed)
+                // Void detected – event already sent in analyze_for_voids()
             }
         }
     }
-    
-    // Step 5: Process any incoming commands
-    // (Handled separately by command processor)
+
+    // Step 5: Process incoming commands (handled in vmt_command.c)
 }
 ```
 
-**Command Processing Flow:**
+**Command Processing Flow (in `vmt_command.c`):**
 
 ```c
-void process_void_command(const char* cmd) {
+void process_void_command(const char *cmd) {
     void_detection_result_t latest_results;
-    
-    // Get the most recent analysis results
     get_latest_void_results(&latest_results);
-    
-    // Format response based on command type
+
     if (strstr(cmd, "@vd,status")) {
-        send_status_response(&latest_results);
+        send_void_status_response(&latest_results);
     }
-    else if (strstr(cmd, "@vd,data")) {
-        send_data_response(&latest_results);
+    else if (strstr(cmd, "@vd,config,thresh")) {
+        // parse new threshold and call void_set_threshold()
     }
-    // Additional command handlers as needed
+    // Additional handlers as per Section 4.2.1
 }
 ```
 
------
+---
 
 ## 7. Embedded System Considerations
 
 ### 7.1. Real-Time Requirements
 
-**Deterministic Operation:**
-
-* **Fixed polling cycle:** `RADAR_POLL_INTERVAL_MS` (100ms) in `vmt_common_defs.h` drives radar data requests.
-* **Bounded execution time:** Algorithms primarily use integer arithmetic.
-* **Interrupt priority management:** Standard ARM NVIC priorities (details not specified but assumed). CAN RX ISR (`HAL_CAN_RxFifo0MsgPendingCallback`) aims for minimal processing.
-* **No blocking operations:** CAN operations are non-blocking (`HAL_CAN_AddTxMessage`, `HAL_CAN_GetRxMessage` used within callbacks or with polling).
+* **Fixed polling cycle:** `RADAR_POLL_INTERVAL_MS` (100 ms).
+* **Bounded execution time:** All algorithms use integer arithmetic where possible.
+* **Interrupt priorities:** CAN RX ISR (`HAL_CAN_RxFifo0MsgPendingCallback`) kept minimal.
+* **No blocking:** CAN uses non-blocking `HAL_CAN_AddTxMessage()`/`HAL_CAN_GetRxMessage()`.
 
 ```c
-// Timing constraints (from vmt_common_defs.h and mti_void.h)
-#define RADAR_POLL_INTERVAL_MS           100    // 10Hz update rate
-// MAX_PROCESSING_TIME_MS, CAN_ISR_MAX_EXECUTION_TIME_US - Not explicitly defined, but implied by design.
-#define CAN_COMM_TIMEOUT_MS              2000   // Used in mti_can.c for bus activity
+// Timing constraints (in mti_void.h and vmt_common_defs.h)
+#define RADAR_POLL_INTERVAL_MS       100     // 10 Hz
+#define CAN_COMM_TIMEOUT_MS          2000    // 2 s
+#define KEEPALIVE_TIMEOUT_MS         500     // 0.5 s (keepalive to uphole)
 ```
 
 ### 7.2. Memory Management
 
-**Static allocation following BARR-C guidelines:**
-
-* Module variables like `prv_void_latest_measurements`, `prv_void_wall_profiles_history` are statically sized arrays.
-* No evidence of `malloc` or `free` in the provided core logic files (`mti_*.c`, `vmt_*.c`).
+* **Static allocation** per BARR-C guidelines. No `malloc`/`free`.
+* Example static arrays in `mti_void.c`:
 
 ```c
-// Static arrays in mti_void.c
-static wall_measurement_t prv_void_latest_measurements[MAX_SENSORS]; //
-static wall_profile_t     prv_void_wall_profiles_history[WALL_HISTORY_SIZE]; //
-// static void_detection_t   prv_void_detections_history[MAX_VOID_DETECTIONS]; // Defined but usage commented as TODO
-
-// Memory usage constants not explicitly defined in code, but can be estimated from static array sizes.
+static void_measurement_t     prv_void_latest_measurements[MAX_RADAR_SENSORS];
+static void_status_t          prv_void_status_history[WALL_HISTORY_SIZE]; 
+// (WALL_HISTORY_SIZE chosen conservatively, e.g. 10)
 ```
+
+> **Tip:** For clarity, track approximate memory footprint in final release (e.g. “Latest static structures consume \~4 kB RAM”).
 
 ### 7.3. Power Management
 
-**Managed by `vmt_power.c` module:**
-
-* `vmt_power_enter_sleep_mode()` handles peripheral shutdown (UARTs, IMU sampling via `vmt_imu_enable_sampling(false)`, ADC) and system clock adjustments for sleep.
-* Wake-up reinitializes clocks and peripherals.
-* `vmt_power_process()` can handle auto-sleep based on `last_activity_time`.
+Managed by [`vmt_power.c`](../Device/Src/vmt_power.c):
 
 ```c
 // Example from vmt_power_enter_sleep_mode()
-// HAL_SuspendTick();
-// HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFE);
-// SystemClock_Config(); // On wake
-// HAL_ResumeTick(); // On wake
+HAL_SuspendTick();
+HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFE);
+SystemClock_Config(); // On wake, reinitialise clocks
+HAL_ResumeTick();
 ```
+
+> **Caution:** On STM32 F7, reinitialising PLL and voltage regulator must match start-up configuration exactly, else Flash latency or clock drift can occur.
 
 ### 7.4. Hardware Abstraction
 
-* **STM32 HAL:** Used extensively for peripheral control (CAN, UART, SPI, ADC, GPIO, TIM).
-* **VMT Drivers:** Modules like `vmt_adc.c`, `vmt_spi.c`, `vmt_uart.c` provide a higher level of abstraction over HAL for specific device needs.
-* **Sensor Interface:** `mti_can.c` serves as the interface to the radar sensors. `vmt_icm20948.c` interfaces with the IMU hardware.
-* **Temperature Interface:** `mti_temp.c` provides simplified integer-based temperature monitoring with basic threshold detection.
+* **STM32 HAL** for CAN, UART, SPI, ADC, GPIO, TIM.
+* **VMT Drivers** (`vmt_adc.c`, `vmt_spi.c`, `vmt_uart.c`) wrap HAL for specific sensors.
+* **Radar Interface**: [`mti_can.c`](../Device/Src/mti_can.c).
+* **IMU Interface**: [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c).
+* **Temperature Interface**: [`mti_temp.c`](../Device/Src/mti_temp.c).
 
-```c
-// Temperature interface (simplified POC approach - integers only)
-typedef struct {
-    int16_t temperature_c;        // Temperature in Celsius (signed integer)
-    bool data_valid;              // Data validity flag
-    uint32_t timestamp_ms;        // Internal timestamp for debugging/performance
-} temp_raw_data_t;
-
-typedef struct {
-    int16_t temperature_c;        // Cleaned temperature value in Celsius
-    bool temp_high_flag;          // Over temperature warning
-    bool temp_low_flag;           // Under temperature warning
-    bool data_valid;              // Cleaned data validity
-    uint32_t process_time_ms;     // When processing completed (for performance analysis)
-} temp_processed_data_t;
-
-typedef struct {
-    int16_t current_temperature;  // Latest temperature reading in Celsius
-    bool high_temp_alert;         // Combined high temperature alert
-    bool low_temp_alert;          // Combined low temperature alert
-    bool system_ready;            // Temperature system operational
-    uint32_t last_update_ms;      // Last successful update (for debugging)
-} temp_status_t;
-```
-
------
+---
 
 ## 8. Implementation Status
 
 ### 8.1. Current POC Architecture Status
 
-**Simplified Data Flow Implementation Progress:**
-
-| Stage                   | Component                  | Status | Description                                                                                     |
-|:------------------------|:---------------------------|:-------|:------------------------------------------------------------------------------------------------|
-| **Stage 1: Data Input** | CAN Communication          | ✅ 98%  | Raw radar data reception functional                                                             |
-|                         | Raw Data Structures        | ✅ 100% | Input data structures defined in `radar_data_t`                                                 |
-|                         | Data Storage               | ✅ 100% | Raw data buffering implemented in `multi_radar_system_t`                                        |
-| **Stage 1.5: Temp Mod** | Temperature Module         | ✅ 100% | **COMPLETED** - Full temperature sensing, processing, and command interface                     |
-| **Stage 2: Cleanup**    | Radar Cleanup Module       | ✅ 95%  | **COMPLETED** - Data cleaning logic in `radar_process_measurement()`                            |
-|                         | Cleaned Data Structures    | ✅ 100% | `radar_measurement_t` structure implemented                                                     |
-|                         | Validation Logic           | ✅ 90%  | **COMPLETED** - SNR and distance validation implemented                                         |
-| **Stage 3: Analysis**   | Void Detection Module      | ❌ 5%   | **CRITICAL** - Skeleton [`mti_void.c`](../Device/Src/mti_void.c) exists, core logic missing     |
-|                         | Analysis Result Structures | ✅ 70%  | Result data structures defined, may need refinement                                             |
-|                         | Confidence Calculation     | ❌ 0%   | **NEEDS IMPLEMENTATION** - Confidence logic missing                                             |
-| **Stage 4: Commands**   | Command Framework          | ✅ 90%  | Basic command processing functional                                                             |
-|                         | Temp Command Handlers      | ✅ 100% | **COMPLETED** - Temperature commands fully implemented                                          |
-|                         | Void Command Handlers      | ❌ 10%  | **NEEDS IMPLEMENTATION** - Placeholder exists in [`vmt_command.c`](../Device/Src/vmt_command.c) |
-|                         | Response Formatting        | ❌ 0%   | **NEEDS IMPLEMENTATION** - Void response logic missing                                          |
+| Stage                   | Component                      | Status  | Description                                                                         |
+| :---------------------- | :----------------------------- | :------ | :---------------------------------------------------------------------------------- |
+| **Stage 1: Data Input** | **CAN Communication**          | ✅ 98 %  | Functional radar data reception via CAN (`mti_can.c`).                              |
+|                         | **Raw Data Structures**        | ✅ 100 % | `radar_input_data_t` defined.                                                       |
+|                         | **Data Storage**               | ✅ 100 % | Raw data buffering in `multi_radar_system_t`.                                       |
+| **Stage 1.5: Temp Mod** | **Temperature Module**         | ✅ 100 % | Complete ADC→C processing, smoothing, thresholds, command interface (`mti_temp.c`). |
+| **Stage 2: Cleanup**    | **Radar Cleanup Module**       | ✅ 95 %  | Data cleaning logic in `radar_process_measurement()` (`mti_radar.c`).               |
+|                         | **Cleaned Data Structures**    | ✅ 100 % | `radar_measurement_t` defined.                                                      |
+|                         | **Validation Logic**           | ✅ 90 %  | SNR & distance validation implemented.                                              |
+| **Stage 3: Analysis**   | **Void Detection Module**      | ⚠ 5 %   | Skeleton in [`mti_void.c`](../Device/Src/mti_void.c) – core logic missing.          |
+|                         | **Analysis Result Structures** | ✅ 70 %  | `void_detection_result_t` defined; may require minor refinement.                    |
+|                         | **Confidence Calculation**     | ⚠ 0 %   | Not yet implemented.                                                                |
+| **Stage 4: Commands**   | **Command Framework**          | ✅ 90 %  | Basic command parsing functional (`vmt_command.c`).                                 |
+|                         | **Temp Command Handlers**      | ✅ 100 % | Fully implemented.                                                                  |
+|                         | **Void Command Handlers**      | ⚠ 10 %  | Placeholders exist; need full implementation (status, config, event).               |
+|                         | **Response Formatting**        | ⚠ 0 %   | Void response formatting missing.                                                   |
 
 ### 8.2. Completed Implementation Details
 
-#### ✅ Phase 1: Basic Data Flow - COMPLETED
-
-The radar data cleanup and processing pipeline has been fully implemented:
-
-#### Data Input & CAN Processing (`mti_can.c`)
-
-```c
-// Multi-sensor round-robin data collection
-typedef struct {
-    radar_data_t sensors[MAX_RADAR_SENSORS];           // Raw data from 3 sensors
-    uint32_t     last_message_timestamp[MAX_RADAR_SENSORS];
-    bool         sensor_online[MAX_RADAR_SENSORS];
-} multi_radar_system_t;
-```
+#### ✅ Phase 1: Basic Data Flow – COMPLETED
 
 **Radar Data Cleanup (`mti_radar.c`):**
 
 ```c
-// Implemented in radar_process_measurement()
-void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[][2], uint8_t numPoints) {
-    // 1. Reset measurement structure
+void radar_process_measurement(uint8_t sensor_idx,
+                              float detectedPoints[][2],
+                              uint8_t numPoints) {
     measurement->distance_mm = 0;
-    measurement->data_valid = false;
-    
-    // 2. Find closest valid point with filtering
+    measurement->data_valid  = false;
+    float closest_distance   = FLT_MAX;
+    bool found_valid         = false;
+
     for (uint8_t i = 0; i < numPoints; i++) {
         float distance_m = detectedPoints[i][0];
-        float snr = detectedPoints[i][1];
-        
-        // 3. Validation: SNR > 100.0f and distance 5cm to 5m
-        if (snr > 100.0f && distance_m > 0.05f && distance_m < 5.0f) {
+        float snr        = detectedPoints[i][1];
+        if (snr > 100.0f &&
+            distance_m > 0.05f &&
+            distance_m < 5.0f) {
             if (distance_m < closest_distance) {
                 closest_distance = distance_m;
-                found_valid = true;
+                found_valid      = true;
             }
         }
     }
-    
-    // 4. Convert to millimeters and store
     if (found_valid) {
         measurement->distance_mm = (uint16_t)(closest_distance * 1000.0f);
-        measurement->data_valid = true;
+        measurement->data_valid  = true;
     }
 }
 ```
@@ -796,154 +649,122 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[][2], ui
 **Cleaned Data Structures (`mti_radar.h`):**
 
 ```c
-// Clean millimeter-precision storage
 typedef struct {
-    uint16_t distance_mm;  // Single wall distance in millimeters
-    uint16_t angle_deg;    // Angular position (0°, 120°, 240°)
-    bool     data_valid;   // Validation flag
+    uint16_t distance_mm;  // Single wall distance in mm
+    uint16_t angle_deg;    // 0°, 120°, 240°
+    bool     data_valid;   // Flag
 } radar_measurement_t;
 
-// Round-robin system state
 typedef struct {
-    uint8_t             current_sensor;                  // Active sensor (0-2)
-    uint32_t            last_switch_time;                // Timing control
-    radar_measurement_t measurements[MAX_RADAR_SENSORS]; // Clean data per sensor
-    bool                system_running;                  // System state
+    uint8_t             current_sensor;
+    uint32_t            last_switch_time;
+    radar_measurement_t measurements[MAX_RADAR_SENSORS];
+    bool                system_running;
 } radar_round_robin_t;
 ```
 
-**Data Access Functions:**
+**Data Access APIs:**
 
 ```c
-// Clean getter functions for processed data
 radar_measurement_t *radar_get_measurement(uint8_t sensor_idx);
 bool                 radar_has_valid_data(uint8_t sensor_idx);
 uint16_t             radar_get_distance_mm(uint8_t sensor_idx);
 uint16_t             radar_get_angle_deg(uint8_t sensor_idx);
 ```
 
-#### ✅ Phase 1.5: Temperature Module Implementation - COMPLETED
+#### ✅ Phase 1.5: Temperature Module – COMPLETED
 
-* [x] ✅ Created [`mti_temp.c`](../Device/Src/mti_temp.c) with complete temperature monitoring system.
-* [x] ✅ Implemented `temp_get_raw_data()` function (ADC reading with conversion).
-* [x] ✅ Implemented `temp_process_raw_data()` function (validation and smoothing).
-* [x] ✅ Implemented `temp_update_flags()` function (threshold checking).
-* [x] ✅ Created `temp_system_process()` main processing function.
-* [x] ✅ Added temperature status structure management and configuration functions.
-* [x] ✅ Integrated temperature module with system initialization ([`mti_system.c`](../Device/Src/mti_system.c)).
-* [x] ✅ Implemented complete temperature command interface (`cmd_temp()` in [`vmt_command.c`](../Device/Src/vmt_command.c)).
-* [x] ✅ Fixed linking issues and integrated into build system - builds with 0 errors.
+* [`mti_temp.c`](../Device/Src/mti_temp.c):
+
+  * `temp_get_raw_data()`, `temp_process_raw_data()`, `temp_update_flags()`, `temp_system_process()`.
+  * Full ADC reading, smoothing and threshold detection.
+  * Command handlers in `vmt_command.c`: `@temp,status?`, `@temp,config,high,<val>`, etc.
+
+---
 
 ### 8.3. Updated POC Development Plan
 
-With Phase 1 and 1.5 complete, the focus is now on Void Detection.
+**Refer also to the concise summary in Section 9 (Next Steps) and Section 10 (Current Implementation Status Summary).**
 
-#### ✅ Phase 1: Basic Data Flow Implementation Status - COMPLETED
+#### Phase 1: Core Void Detection (Weeks 1–2)
 
-#### ✅ Phase 1.5: Temperature Module Implementation Status - COMPLETED
+1. **Implement `mti_void.c`** with simple threshold-based detection (Stage 3 in Section 3).
+2. In `void_system_process()`, fetch cleaned radar data (millimetres) from `mti_radar.c`.
+3. Implement `void_analyze_sensor_data()`, `void_calculate_confidence()`, `void_characterise_detection()`.
+4. Create `void_system_process()` and integrate it into main loop in `mti_system.c`.
+5. Test core logic using simulated radar inputs.
 
-#### Phase 2: Core Void Detection Module Implementation - CRITICAL PRIORITY
+#### Phase 2: Void Command Interface (Weeks 2–3)
 
-**Void Detection Module Implementation (Target: Weeks 1-2 of remaining schedule):**
+1. In [`vmt_command.c`](../Device/Src/vmt_command.c), implement `handle_void_command()`.
+2. Add command handlers:
 
-* [ ] Populate [`mti_void.c`](../Device/Src/mti_void.c) with basic threshold-based void detection logic.
-* [ ] Implement `void_get_cleaned_radar_data()` (or equivalent interface to [`mti_radar.c`](../Device/Src/mti_radar.c) data).
-* [ ] Implement `void_analyze_sensor_data()` or `void_analyze_for_voids()` (simple threshold comparison per sensor, or combined).
-* [ ] Implement `void_calculate_confidence()` (basic reliability scoring).
-* [ ] Implement `void_characterize_detection()` (void size and sector identification).
-* [ ] Create `void_system_process()` main processing function to orchestrate void detection.
-* [ ] Integrate `void_system_process()` into the main system loop in [`mti_system.c`](../Device/Src/mti_system.c) or via [`vmt_device.c`](../Device/Src/vmt_device.c).
-* [ ] Test core void detection logic with simulated or captured radar data.
+   * `@vd,status?` → reports `void_status_t`.
+   * `@vd,config,thresh,<val>` → calls `void_set_threshold()`.
+   * `@vd,config,baseline,<val>` → calls `void_set_baseline()`.
+   * Additional commands as per Section 4.2.1.
+3. Format responses (e.g. `&vd,config,thresh,ack` or `nack,<code>`).
+4. Implement asynchronous `!vd,flag,…` event logging.
 
-#### Phase 3: Command Interface Implementation (Target: Week 2-3 of remaining schedule)
+#### Phase 3: System Integration & Testing (End of Week 3)
 
-#### Temperature Commands - ✅ COMPLETED
+1. Integrate `void_system_process()` (threshold detection) into main application loop.
+2. Verify system runs at 10 Hz radar polling with void detection and temperature modules simultaneously.
+3. Test all `@vd,*` commands under various conditions.
+4. Verify no memory leaks, stable operation > 1 hour, and command latencies < 100 ms.
 
-* [x] ✅ Implemented `handle_temp_command()` function in [`vmt_command.c`](../Device/Src/vmt_command.c) (likely part of `cmd_temp`).
-* [x] ✅ Added `@temp,status?` command handler.
-* [x] ✅ Added `@temp,config,high,<value>` command handler.
-* [x] ✅ Added `@temp,config,low,<value>` command handler.
-* [x] ✅ Created temperature response formatting functions.
-* [x] ✅ Tested temperature command integration.
+> **Note on Overlap:** Sections 8.3, 9, 10 and Section 13 (POC Implementation Strategy and Optimisation) share similar milestones. For an internal working document, this repetition is intentional for reinforcement. New team members should read Section 8.3 first, then cross-reference Section 9 for concise “Next Steps” and Section 13 for detailed “Strategy and Optimisation.”
 
-#### Void Detection Commands
+---
 
-* [ ] Implement `handle_void_command` (or `cmd_void`) function in [`vmt_command.c`](../Device/Src/vmt_command.c).
-* [ ] Add `@vd,status?` command handler (returns detection status and results from [`mti_void.c`](../Device/Src/mti_void.c)).
-* [ ] Add `@vd,config,thresh,<value>` command handler (set detection threshold in [`mti_void.c`](../Device/Src/mti_void.c)).
-* [ ] Add `@vd,config,baseline,<value>` command handler (set expected distance in [`mti_void.c`](../Device/Src/mti_void.c)).
-* [ ] Create void detection response formatting functions.
-* [ ] Test void detection command integration.
+### 8.4. Detailed Implementation Specifications
 
-#### Phase 4: System Integration & Testing (Target: Week 3 of remaining schedule)
-
-* [ ] Ensure void detection processing is correctly integrated into the radar data flow.
-* [ ] Test combined system operation with all modules (Radar, Temp, Void, IMU, Water) active.
-* [ ] Validate command responses from both temperature and void modules under various conditions.
-* [ ] Perform end-to-end system testing with simulated and, if possible, live data.
-* [ ] Document system behavior and performance characteristics.
-* [ ] Address any remaining validation and testing tasks.
-
------
-
-## 8.4. Detailed Implementation Specifications
-
-**Temperature Module (`mti_temp.c`) - ✅ COMPLETED**
+#### Temperature Module (`mti_temp.c`) – ✅ COMPLETED
 
 ```c
-// Main temperature processing function (to be implemented)
+// Main temperature processing function
 void temp_system_process(void) {
-    static temp_raw_data_t raw_data;
-    static temp_processed_data_t processed_data;
-    static temp_status_t current_status = {0};
-    
-    // Stage 1: Get temperature data (ADC conversion handled internally)
+    static temp_raw_data_t        raw_data;
+    static temp_processed_data_t  processed_data;
+    static temp_status_t          current_status = {0};
+
     if (temp_get_raw_data(&raw_data)) {
-        
-        // Stage 2: Process and clean data
         if (temp_process_raw_data(&raw_data, &processed_data)) {
-            
-            // Stage 3: Update flags and status
             temp_update_flags(&processed_data, &current_status);
-            
-            // Update current temperature for command access
-            current_status.current_temperature = processed_data.temperature_c;
-            current_status.last_update_ms = processed_data.process_time_ms;
-            current_status.system_ready = true;
+            current_status.current_temperature  = processed_data.temperature_c;
+            current_status.last_update_ms       = processed_data.process_time_ms;
+            current_status.system_ready         = true;
         }
     }
 }
 
-// Required implementation functions:
-bool temp_get_raw_data(temp_raw_data_t* raw_data);
-bool temp_process_raw_data(temp_raw_data_t* raw, temp_processed_data_t* processed);
-void temp_update_flags(temp_processed_data_t* processed, temp_status_t* status);
-void temp_get_latest_status(temp_status_t* status);
-
-// Temperature command handlers:
-void handle_temp_status_command(void);
-void handle_temp_config_command(const char* params);
+// Required prototypes (in mti_temp.h)
+bool temp_get_raw_data(temp_raw_data_t *raw_data);
+bool temp_process_raw_data(temp_raw_data_t *raw, temp_processed_data_t *processed);
+void temp_update_flags(temp_processed_data_t *processed, temp_status_t *status);
+void temp_get_latest_status(temp_status_t *status);
 ```
 
-**Void Detection Module (`mti_void.c`) - Next Implementation Focus:**
+**Temperature command handlers** in [`vmt_command.c`](../Device/Src/vmt_command.c): `handle_temp_status_command()`, `handle_temp_config_command()`.
+
+---
+
+#### Void Detection Module (`mti_void.c`) – Next Implementation Focus
 
 ```c
-// Main void detection processing function (to be implemented)
+// Main void detection processing function
 void void_system_process(void) {
     static void_detection_result_t void_results = {0};
-    uint32_t start_time = HAL_GetTick();  // Performance timing
-    
-    // Get cleaned radar data from existing radar module
+    uint32_t start_time = HAL_GetTick();
+
+    // Fetch cleaned radar data
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
         if (radar_has_valid_data(i)) {
             uint16_t distance_mm = radar_get_distance_mm(i);
-            uint16_t angle_deg = radar_get_angle_deg(i);
-            
-            // Perform void analysis on this sensor's data
+            uint16_t angle_deg   = radar_get_angle_deg(i);
+
             if (void_analyze_sensor_data(i, distance_mm, angle_deg, &void_results)) {
                 void_results.analysis_time_ms = HAL_GetTick();
-                
-                // Debug: Log processing time
                 uint32_t process_time = HAL_GetTick() - start_time;
                 DEBUG_SEND("Void analysis took %lu ms", process_time);
             }
@@ -951,442 +772,283 @@ void void_system_process(void) {
     }
 }
 
-// Required implementation functions:
-bool void_analyze_sensor_data(uint8_t sensor_idx, uint16_t distance_mm, uint16_t angle_deg, void_detection_result_t* result);
-uint8_t void_calculate_confidence(uint16_t distance_mm, uint16_t expected_mm, uint16_t threshold_mm);
-void void_characterize_detection(uint16_t distance_mm, uint16_t expected_mm, void_detection_result_t* result);
-void void_get_latest_results(void_detection_result_t* result);
+// Required prototypes (in mti_void.h)
+bool void_analyze_sensor_data(uint8_t sensor_idx,
+                              uint16_t distance_mm,
+                              uint16_t angle_deg,
+                              void_detection_result_t *result);
+uint8_t void_calculate_confidence(uint16_t distance_mm,
+                                  uint16_t expected_mm,
+                                  uint16_t threshold_mm);
+void void_characterise_detection(uint16_t distance_mm,
+                                 uint16_t expected_mm,
+                                 void_detection_result_t *result);
+void void_get_latest_results(void_detection_result_t *result);
 
-// Void command handlers:
+// Command handlers (in vmt_command.c)
 void handle_void_status_command(void);
-void handle_void_config_command(const char* params);
+void handle_void_config_command(const char *params);
 ```
 
-**Simple Void Detection Algorithm (POC Implementation):**
+##### Simple Threshold-Based Void Detection (POC Implementation)
 
 ```c
-// Basic threshold-based void detection for POC
-bool void_analyze_sensor_data(uint8_t sensor_idx, uint16_t distance_mm, uint16_t angle_deg, void_detection_result_t* result) {
-    // Configuration values (to be made configurable via commands)
-    static uint16_t expected_distance_mm = 150;  // Expected wall distance
-    static uint16_t detection_threshold_mm = 50; // Void detection threshold
-    
-    // Simple threshold comparison
+bool void_analyze_sensor_data(uint8_t sensor_idx,
+                              uint16_t distance_mm,
+                              uint16_t angle_deg,
+                              void_detection_result_t *result) {
+    static uint16_t expected_distance_mm   = 150; // mm
+    static uint16_t detection_threshold_mm = 50;  // mm
+
     if (distance_mm > (expected_distance_mm + detection_threshold_mm)) {
         // Void detected
-        result->void_present = true;
-        result->void_sector = sensor_idx;
-        result->void_magnitude_mm = distance_mm - expected_distance_mm;
-        result->detection_confidence = void_calculate_confidence(distance_mm, expected_distance_mm, detection_threshold_mm);
+        result->void_present       = true;
+        result->void_sector        = sensor_idx;
+        result->void_magnitude_mm  = distance_mm - expected_distance_mm;
+        result->detection_confidence =
+            void_calculate_confidence(distance_mm,
+                                      expected_distance_mm,
+                                      detection_threshold_mm);
         result->analysis_time_ms = HAL_GetTick();
-        
-        // Generate alert event
-        debug_send("!vd,flag,%d,%d,%d", sensor_idx, result->void_magnitude_mm, result->detection_confidence);
+
+        // Report event asynchronously
+        DEBUG_SEND("!vd,flag,%d,%d,%d",
+                   sensor_idx,
+                   result->void_magnitude_mm,
+                   result->detection_confidence);
         return true;
     }
-    
-    return false;  // No void detected
+    return false;
 }
 
-// Simple confidence calculation
-uint8_t void_calculate_confidence(uint16_t distance_mm, uint16_t expected_mm, uint16_t threshold_mm) {
-    uint16_t excess_distance = distance_mm - expected_mm;
-    
-    if (excess_distance <= threshold_mm) {
-        return 0;  // No detection
+uint8_t void_calculate_confidence(uint16_t distance_mm,
+                                  uint16_t expected_mm,
+                                  uint16_t threshold_mm) {
+    uint16_t excess = distance_mm - expected_mm;
+    if (excess <= threshold_mm) {
+        return 0;
     }
-    
-    // Linear confidence scaling: more excess distance = higher confidence
-    // Cap at 100% confidence
-    uint32_t confidence = (excess_distance * 100) / (threshold_mm * 2);
+    // Linear scaling (max 100 %)
+    uint32_t confidence = (excess * 100) / (threshold_mm * 2);
     return (confidence > 100) ? 100 : (uint8_t)confidence;
 }
 ```
 
-### 8.6. Success Criteria and Validation
+---
 
-**Temperature Module Success Criteria:**
+## 9. Next Steps
 
-* ✅ Temperature readings in Celsius with ±2°C accuracy
-* ✅ Configurable high/low temperature thresholds
-* ✅ Alert flags functional for threshold violations
-* ✅ Command interface responsive (`@temp,status?`, `@temp,config,*`)
-* ✅ Integration with main system loop without timing issues
+With **temperature monitoring complete (100 %)** and all support modules functional, the **high-priority tasks (next 3 weeks)** focus squarely on completing **Phase 2** and **Phase 3** of the POC Development Plan (Section 8.3).
 
-**Void Detection Module Success Criteria (Target):**
+1. **Complete `mti_void.c` Algorithms (Week 1–2)**
 
-* ✅ Basic void detection using simple threshold algorithm
-* ✅ Confidence calculation providing meaningful reliability scores
-* ✅ Sector identification for multi-sensor void localization
-* ✅ Command interface responsive (`@vd,status?`, `@vd,config,*`)
-* ✅ Integration with existing radar data pipeline
+   * Implement `void_system_process()`, `void_analyze_sensor_data()`, `void_calculate_confidence()`, `void_characterise_detection()`.
+   * Integrate void detection into main loop (`mti_system.c` or `vmt_device.c`).
+   * Perform unit tests with simulated radar data (see Section 13 for example test harness).
 
-**System Integration Success Criteria:**
+2. **Void Command Interface (Week 2–3)**
 
-* ✅ Both modules operating simultaneously without conflicts
-* ✅ Command responses within 100ms for status queries
-* ✅ System maintains 10Hz radar data processing rate
-* ✅ No memory leaks or stack overflow issues
-* ✅ Stable operation for extended periods (>1 hour continuous)
+   * In [`vmt_command.c`](../Device/Src/vmt_command.c), implement:
 
-**POC Demonstration Goals:**
+     * `@vd,status?` → fetch and send `void_status_t`.
+     * `@vd,config,thresh,<val>` → call `void_set_threshold()`.
+     * `@vd,config,baseline,<val>` → call `void_set_baseline()`.
+     * Asynchronous event reporting: `!vd,flag,…`.
+   * Validate all void commands, responses and error handling.
 
-* ✅ Live temperature monitoring with threshold alerts
-* ✅ Real-time void detection with configurable sensitivity
-* ✅ Command-driven system configuration and status reporting
-* ✅ Stable multi-sensor operation demonstrating system viability
-* ✅ Foundation architecture ready for algorithm enhancement
+3. **System Integration & Testing (End of Week 3)**
 
-### 8.7. Risk Assessment and Mitigation
+   * Integrate and run full system (radar + void + temperature + IMU + water).
+   * Verify 10 Hz radar poll + void detection + command handling stable.
+   * Confirm latencies: command → response < 100 ms.
+   * Stress-test > 1 hour continuous; confirm no memory leaks or stack issues.
 
-**Implementation Risks:**
+> **IMPORTANT:** After these are complete, the system will meet the **POC goals**. Section 14 (Future Enhancements) outlines optional advanced features (circle fitting, dual-algorithm, ML integration, etc.) intended for **post-POC (Version 1.4 or 2.0)** and not required for this immediate 3-week plan.
 
-**High Risk:**
+---
 
-* **Void detection algorithms prove insufficient** - Mitigation: Start with simplest threshold approach, iterate
-* **Integration timing issues with main loop** - Mitigation: Careful timing analysis, optimize critical paths
-* **Command interface complexity** - Mitigation: Implement core commands first, add features incrementally
+## 10. Current Implementation Status Summary
 
-**Medium Risk:**
+### 10.1. Infrastructure: 95 % Complete ✅
 
-* **Temperature sensor calibration issues** - Mitigation: Use known sensor characteristics, add calibration offset
-* **Memory usage exceeding constraints** - Mitigation: Monitor stack/heap usage, optimize data structures
-* **CAN bus integration complications** - Mitigation: Leverage existing working radar infrastructure
+* **CAN communication (98 %):** Fully functional with error recovery.
+* **Radar management (95 %):** Round-robin polling, data acquisition, clean mm output.
+* **System initialisation (98 %):** Multi-step startup in `mti_system.c`.
+* **IMU (70 %):** Dual ICM20948 with motion detection (basic).
+* **Water detection (85 %):** ADC-based threshold logic.
+* **Temperature monitoring (100 %):** ADC → C, smoothing, thresholds, commands.
+* **Hardware abstraction (95 %):** BARR-C compliant wrappers for peripherals.
+* **Memory management (100 %):** Static allocation, no dynamic memory.
+* **Debug infrastructure (100 %):** Comprehensive `DEBUG_SEND` logging.
+* **Build system (100 %):** Zero errors, consistent file paths.
 
-**Low Risk:**
+### 10.2. Void Detection Algorithms: 5 % Complete ⚠️
 
-* **Minor timing variations** - Mitigation: Built-in timing margins, non-critical for POC
-* **Command parsing edge cases** - Mitigation: Focus on primary use cases, handle errors gracefully
+* **`mti_void.c` Skeleton:** Exists but lacks core algorithms.
+* **Threshold Detection:** Planned (see Section 9) for POC.
+* **Circle Fitting (Advanced):** Not implemented; earmarked for post-POC.
+* **Confidence Calculation:** Basic approach implemented but not integrated.
+* **Data conversion:** Provided by `mti_radar.c` (cleaned distances).
 
-**Timeline Contingencies:**
+### 10.3. Command Interface: 60 % Complete ✅
 
-* If void detection algorithm implementation takes longer than 2 weeks, prioritize basic threshold detection and status reporting over advanced features or full configuration command set for the initial POC.
-* If command interface for void detection proves complex, implement status query (`@vd,status?`) first, then essential configuration commands
+* **Framework:** In [`vmt_command.c`](../Device/Src/vmt_command.c).
+* **Temperature Commands (100 %):** Fully tested.
+* **Void Commands (10 %):** Placeholders exist; need implementation.
+* **Response Format:** Defined but void responses missing (see Section 4.2.2).
 
-#### Estimated Timeline: 3 weeks to functional POC (from June 5, 2025)
+**Critical Path (Next 3 Weeks):**
 
-* Week 1-2: Core Void Detection module implementation and unit testing.
-* Week 2-3: Void Detection command interface implementation and integration.
-* Week 3: Full system integration testing, optimization, and POC demonstration.
+1. Implement void detection logic in `mti_void.c`.
+2. Add `@vd,*` command handlers in `vmt_command.c`.
+3. Integrate `void_system_process` into main loop.
+4. End-to-end testing with radar + void + temperature modules.
 
-This plan provides a realistic, achievable path to a functional proof of concept for void detection, building upon the completed temperature module and existing infrastructure.
+---
 
------
+## 11. Appendix: Detailed Command/Response Timing Analysis
 
-## 12. Next Steps
+### 11.1. Timing Requirements Overview
 
-With the temperature sensing module successfully implemented and integrated, the immediate priority is the development of the core void detection functionality.
+* **RADAR\_POLL\_INTERVAL\_MS:** 100 ms (10 Hz).
+* **CAN\_COMM\_TIMEOUT\_MS:** 2000 ms.
+* **KEEPALIVE\_TIMEOUT\_MS:** 500 ms (send keepalive to uphole).
 
-### 12.1. Immediate POC Implementation Tasks (Next 3 Weeks)
+**Key Constraints:**
 
-The primary focus is to complete Phase 2, 3 (Void parts), and 4 of the Updated POC Development Plan (Section 8.3). Key tasks include:
+* Void detection processing must finish well within 100 ms.
+* Command parsing + response formulation < 15 ms.
+* UART transmission time: 1 byte @ 115 200 bps ≈ 8.68 µs (≈ 9 µs).
 
-#### Priority 1: Core Void Detection Algorithm (Target: Weeks 1-2)
+### 11.2. Command Processing Timing
 
-* **Implement `mti_void.c` processing loop (`void_system_process`):**
-  * Fetch cleaned radar data from the `mti_radar` module.
-  * Call analysis functions for each relevant sensor reading.
-  * Store detection results.
-* **Implement `void_analyze_sensor_data` (or equivalent):**
-  * Apply a simple threshold-based algorithm against a configurable baseline/expected distance.
-  * Populate the `void_detection_result_t` structure.
-* **Implement `void_calculate_confidence`:**
-  * Develop a basic confidence score based on deviation from baseline and/or SNR (if available and relevant).
-* **Implement `void_characterize_detection`:**
-  * Determine void magnitude (size) and affected sensor/sector.
-* **Create `void_system_process()` main processing function to orchestrate void detection.
-* **Integrate `void_system_process()` into the main system loop in [`mti_system.c`](../Device/Src/mti_system.c) or via [`vmt_device.c`](../Device/Src/vmt_device.c).
-* [ ] Test core void detection logic with simulated or captured radar data.
+**Example: `@vd,status?`**
 
-#### Priority 2: Void Detection Command Interface (Target: Week 2-3)
+1. Receive `@vd,status?` via UART RX interrupt (< 1 ms).
+2. Parse command in `vmt_command.c` (< 5 ms).
+3. Fetch latest void results (instant if processed in previous cycle).
+4. Format response: `&vd,status,…` (< 3 ms).
+5. Transmit via UART TX (< 50 ms for \~50 bytes).
 
-* **Implement `handle_void_command` (or `cmd_void`) in `vmt_command.c`:**
-  * Handler for `@vd,status?` to retrieve and format data from `mti_void.c`.
-  * Handlers for `@vd,config,thresh,<value>` and `@vd,config,baseline,<value>` to update settings in `mti_void.c`.
-* **Response Formatting:** Develop functions to send void detection status and configuration acknowledgements.
-* **Event Reporting:** Implement `!vd,flag,...` asynchronous alert if a void is detected, as per section [4.2.2 Response/Event Format](#422-responseevent-format-downhole-to-upholedebug).
+Total worst-case < 60 ms, leaving margin for other tasks.
 
-#### Priority 3: System Integration and Testing (Target: Week 3)
+### 11.3. Data Processing Timing
 
-* Integrate `void_system_process()` into the main application loop in [`mti_system.c`](../Device/Src/mti_system.c) or [`vmt_device.c`](../Device/Src/vmt_device.c).
-* Conduct thorough testing focusing on void detection specific scenarios.
-* Verify interactions between the void detection module and other system components (CAN, UART, Radar, Temperature).
+**End-to-end Flow:**
 
------
+1. **CAN RX ISR:** Called when message arrives; store raw frame (< 200 µs).
+2. **Data Cleanup (per sensor):** < 20 ms per sensor.
+3. **Void Analysis (per sensor):** < 50 ms (threshold only).
+4. **Command Response:** < 10 ms if data already ready.
 
-## 13. Current Implementation Status Summary
+Total pipeline (all three sensors) < 100 ms (fits 10 Hz cycle).
 
-### 13.1. Executive Summary
+### 11.4. Error Handling and Recovery Timing
 
-#### System Infrastructure: 95% Complete ✅
+* **CAN Bus Off Recovery:** `HAL_CAN_ErrorCallback()` invoked; reset peripheral in < 5 ms.
+* **Sensor Timeout Handling:** Detect missing frames > 2000 ms; attempt sensor reset (< 10 ms).
 
-The STM32F722 void detection system has successfully implemented most of its foundational infrastructure:
+---
 
-* **CAN Communication System (98%)**: Fully functional with 3 radar sensor support, error handling, and recovery mechanisms
-* **Radar Management (95%)**: Round-robin sensor polling, data acquisition, and processing framework
-* **System Initialization (98%)**: Multi-step startup sequence with proper peripheral initialization
-* **IMU Processing (70%)**: Dual ICM20948 sensors with motion detection and angle calculations
-* **Water Detection (85%)**: Dual ADC sensors with adaptive thresholds and event reporting
-* **Temperature Monitoring (100%)**: Complete ADC-based temperature module with smoothing, thresholds, and command interface - **FULLY IMPLEMENTED**
-* **Hardware Abstraction (95%)**: BARR-C compliant peripheral wrappers for ADC, SPI, UART, Flash
-* **Memory Management (100%)**: Static allocation throughout, no dynamic memory usage
-* **Debug Infrastructure (100%)**: Comprehensive DEBUG_SEND logging system
-* **Build System (100%)**: Successfully compiles with 0 errors, all linking issues resolved
+## 12. Appendix: Detailed Data Structure Definitions
 
-#### Void Detection Algorithms: 5% Complete ⚠️
-
-The core void detection functionality, which is the primary purpose of this system, requires significant implementation:
-
-* **Core Algorithm File**: [`mti_void.c`](../Device/Src/mti_void.c) exists as a skeleton; core algorithms (thresholding, confidence, characterization) need to be implemented.
-* **Circle Fitting**: 3-point geometric calculation algorithms not implemented (Advanced feature, likely post-POC).
-* **Baseline Detection**: Primary void detection method (threshold against baseline) needs implementation.
-* **Multi-Point Processing**: Sensor data fusion algorithms for void detection not implemented (Advanced feature, basic per-sensor analysis for POC).
-* **Confidence Calculation**: Void detection reliability scoring needs implementation.
-* **Data Conversion**: Radar sensor data to millimeter wall measurements is **COMPLETED** in [`mti_radar.c`](../Device/Src/mti_radar.c). [`mti_void.c`](../Device/Src/mti_void.c) will consume this.
-
-#### Command Interface: 60% Complete ✅ (Overall - Temp commands are 100%, Void commands 10%)
-
-* **Framework**: Extensible command system exists in [`vmt_command.c`](../Device/Src/vmt_command.c).
-* **Temperature Commands**: Fully implemented and tested.
-* **Void Commands**: `@vd` commands have placeholder implementation or are missing; need full implementation for status and basic configuration.
-* **Design**: Full command specification exists in documentation, needs implementation for void commands.
-
-### 13.2. Critical Path to POC Completion
-
-**Immediate Blockers (CRITICAL PRIORITY - Next 3 Weeks):**
-
-1. **Implement `mti_void.c` algorithms** - Threshold-based detection, confidence calculation, void characterization using data from `mti_radar`.
-2. **Complete `@vd` command interface in `vmt_command.c`** - Implement handlers for status query and basic configuration of void detection parameters.
-3. **Integrate `void_system_process`** into the main system loop.
-4. **End-to-end testing** - Verify temperature and void systems work together, and validate void detection with simulated/real data.
-
-**Estimated Development Effort (Remaining for POC):**
-
-* Core void detection algorithms (`mti_void.c`): 1-2 weeks
-* Void command interface completion (`vmt_command.c`): 0.5-1 week
-* Integration and system testing: 0.5-1 week
-* **Total: Approximately 3 weeks to POC completion**
-
-### 13.3. System Readiness Assessment
-
-**Ready for Integration ✅:**
-
-* **CAN communication with radar sensors**
-* **System initialization and peripheral management**
-* **Command processing framework**
-* **Debug and logging infrastructure**
-* **Data structure definitions and interfaces**
-* **Complete temperature monitoring system with ADC, processing, and commands**
-* **Working build system with all linking issues resolved**
-* **Cleaned radar data (mm precision) available from `mti_radar.c`**
-
-**Requires Implementation ❌ (Focus for next 3 weeks):**
-
-* All void detection processing algorithms in the [`mti_void.c`](../Device/Src/mti_void.c) module.
-* Void detection confidence and reliability assessment logic.
-* Full void-specific command handlers (`@vd` commands in [`vmt_command.c`](../Device/Src/vmt_command.c)).
-* Integration of void processing into the main system loop and end-to-end testing.
-
-**Conclusion:**
-
-The system has excellent foundational infrastructure, including a fully functional temperature monitoring system and a robust radar data processing pipeline. The proof of concept is approximately **70% complete overall** (infrastructure and temp sensor are high, void detection is low). The primary remaining work is implementing the core void detection algorithms and their associated command interface to achieve a functional prototype. The path to POC completion is clear and estimated at 3 weeks.
-
------
-
-## 14. Appendix: Detailed Command/Response Timing Analysis
-
-### 14.1. Timing Requirements Overview
-
-**Key Timing Constraints:**
-
-* `RADAR_POLL_INTERVAL_MS`: 100ms (10Hz) - Defines the maximum rate for radar data polling and processing.
-* `CAN_COMM_TIMEOUT_MS`: 2000ms - Timeout for CAN communication before declaring a sensor as unresponsive.
-* `KEEPALIVE_TIMEOUT_MS`: 500ms - Interval for sending keep-alive messages to uphole system.
-
-**Critical Timing Considerations:**
-
-* Void detection processing must complete within the `RADAR_POLL_INTERVAL_MS` to ensure timely responses to uphole commands.
-* Any blocking operations or long computations in the main loop could delay the handling of incoming commands or sensor data, leading to missed deadlines.
-* The system must be able to recover from errors (e.g., CAN bus off, sensor timeouts) within the `CAN_COMM_TIMEOUT_MS` to maintain communication integrity.
-
-### 14.2. Command/Response Timing Analysis
-
-**Command Processing Timing:**
-
-* Command reception and parsing: < 10ms
-* Response formulation: < 5ms
-* Transmission via UART: Dependent on baud rate (e.g., 115200 bps → 1 byte = 69.44µs)
-
-#### Example: @vd,status? Command
-
-1. Received `@vd,status?` command via UART.
-2. Parsed and identified as a request for void detection status.
-3. Latest void detection results retrieved (assume latest processing cycle completed).
-4. Formulated response: `&vd,status,1,0,radar_hw_status`.
-5. Transmitted response via UART.
-
-**Timing Considerations for Commands:**
-
-* Commands that require immediate action (e.g., `@sleep`, `@st`) should be processed within 10ms.
-* Status inquiry commands (e.g., `@vd,status?`) should have responses formulated within 5ms if the data is already available.
-* Any command that triggers a state change (e.g., entering sleep mode) must ensure that the system can safely resume and process subsequent commands without manual intervention.
-
-### 14.3. Data Processing Timing
-
-**Data Processing Stages:**
-
-1. Data reception from CAN: Interrupt-driven, should be processed in the ISR or immediately after.
-2. Data cleanup and validation: Target < 20ms for all sensors.
-3. Void analysis: Target < 50ms for basic analysis, < 100ms for extended analysis with confidence scoring.
-4. Command response preparation: Target < 10ms.
-
-#### Example: Data Processing Flow
-
-1. Radar data received via CAN interrupt.
-2. `receive_radar_data()` called, processing all active sensors.
-3. For each sensor, `cleanup_radar_data()` is called:
-    * Meter to millimeter conversion.
-    * Basic range and SNR validation.
-4. Validated data passed to `analyze_for_voids()`:
-    * Threshold-based void detection.
-    * Confidence calculation.
-5. Results stored in void detection result structure.
-6. If `@vd` command received, `send_void_response()` is called to format and send the response.
-
-**Processing Timing Considerations:**
-
-* The entire data processing flow from reception to void analysis should ideally complete within the `RADAR_POLL_INTERVAL_MS` to ensure real-time performance.
-* Any delays in data processing directly impact the system's ability to respond to uphole commands in a timely manner.
-* Optimization efforts should focus on reducing the processing time of the void detection algorithms and ensuring efficient data handling.
-
-### 14.4. Error Handling and Recovery Timing
-
-**Error Detection and Recovery:**
-
-* CAN bus errors detected via `HAL_CAN_ErrorCallback`, recovery attempts made within the callback.
-* Sensor timeouts detected in `can_process`, with recovery actions (e.g., sensor reset) triggered based on the timeout count.
-
-#### Example: CAN Error Recovery
-
-1. CAN bus error detected (e.g., bus-off state).
-2. `HAL_CAN_ErrorCallback` invoked.
-3. Error recovery sequence initiated:
-    * Stop CAN transmission.
-    * Reset CAN peripheral.
-    * Restart CAN and re-enable notifications.
-4. If recovery successful, resume normal operation.
-
-**Timing Considerations for Error Handling:**
-
-* Error recovery procedures should be designed to execute within a few milliseconds to minimize system downtime.
-* The system should be able to recover from transient errors (e.g., single CAN bus-off) automatically.
-* Persistent errors (e.g., repeated sensor timeouts) may require manual intervention, but the system should attempt to recover autonomously first.
-
------
-
-## 15. Appendix: Detailed Data Structure Definitions
-
-### 15.1. Raw Radar Data Structure
+### 12.1. Raw Radar Data Structure
 
 ```c
-// Raw radar data structure (Stage 1)
 typedef struct {
-    float raw_distance_m[3];    // Raw distances from 3 sensors
-    float raw_snr_db[3];        // SNR values from 3 sensors
-    bool sensor_active[3];      // Which sensors provided data
-    uint32_t timestamp_ms;      // When data set was received (debugging)
+    float    raw_distance_m[3];    // Raw distances (metres)
+    float    raw_snr_db[3];        // Raw SNR (dB)
+    bool     sensor_active[3];     // Flags for sensors that provided data
+    uint32_t timestamp_ms;         // When the set was received
 } radar_input_data_t;
 ```
 
-### 15.2. Cleaned Radar Data Structure
+### 12.2. Cleaned Radar Data Structure
 
 ```c
-// Cleaned radar data structure (Stage 2)
 typedef struct {
-    uint16_t clean_distance_mm[3];  // Cleaned distances in mm
-    uint8_t clean_snr[3];           // Processed SNR values
-    bool data_valid[3];             // Validity flags per sensor
-    uint32_t process_time_ms;       // When cleaning was completed (performance)
+    uint16_t clean_distance_mm[3];  // Cleaned distances (mm)
+    uint8_t  clean_snr[3];          // Processed SNR (0–255)
+    bool     data_valid[3];         // Validity flags per sensor
+    uint32_t process_time_ms;       // When cleaning was completed
 } radar_cleaned_data_t;
 ```
 
-### 15.3. Void Detection Result Structure
+### 12.3. Void Detection Result Structure
 
 ```c
-// Void detection result structure (Stage 3)
 typedef struct {
-    bool void_present;              // Primary detection flag
-    uint8_t void_sector;            // Which sector has void (0-2)
-    uint16_t void_magnitude_mm;     // Size/severity of void
-    uint8_t detection_confidence;   // Confidence level (0-100)
-    uint32_t analysis_time_ms;      // When analysis completed (debugging)
-    char status_text[32];           // Human-readable status
+    bool     void_present;           // Primary detection flag
+    uint8_t  void_sector;            // Which sector (0–2)
+    uint16_t void_magnitude_mm;      // Void size (mm)
+    uint8_t  detection_confidence;   // Confidence (0–100)
+    uint32_t analysis_time_ms;       // When analysis completed
+    char     status_text[32];        // Human-readable status
 } void_detection_result_t;
 ```
 
-### 15.4. Multi-Sensor System State Structure
+### 12.4. Multi-Sensor System State Structure
 
 ```c
-// Multi-sensor round-robin system state
 typedef struct {
-    uint8_t             current_sensor;                  // Active sensor (0-2)
-    uint32_t            last_switch_time;                // Timing control
+    uint8_t             current_sensor;                // Active sensor (0–2)
+    uint32_t            last_switch_time;              // Timing control
     radar_measurement_t measurements[MAX_RADAR_SENSORS]; // Clean data per sensor
-    bool                system_running;                  // System state
+    bool                system_running;                // System state flag
 } radar_round_robin_t;
 ```
 
-### 15.5. Temperature Data Structures
+### 12.5. Temperature Data Structures
 
 ```c
-// Raw temperature data structure
 typedef struct {
-    int16_t temperature_c;        // Temperature in Celsius (signed integer)
-    bool data_valid;              // Data validity flag
-    uint32_t timestamp_ms;        // Internal timestamp for debugging/performance
+    int16_t  temperature_c;       // Temperature in °C
+    bool     data_valid;          // Validity flag
+    uint32_t timestamp_ms;        // When raw data was read
 } temp_raw_data_t;
 
 typedef struct {
-    int16_t temperature_c;        // Cleaned temperature value in Celsius
-    bool temp_high_flag;          // Over temperature warning
-    bool temp_low_flag;           // Under temperature warning
-    bool data_valid;              // Cleaned data validity
-    uint32_t process_time_ms;     // When processing completed (for performance analysis)
+    int16_t  temperature_c;       // Smoothed temperature in °C
+    bool     temp_high_flag;      // Over-temp warning
+    bool     temp_low_flag;       // Under-temp warning
+    bool     data_valid;          // Smoothed data valid flag
+    uint32_t process_time_ms;     // When processing completed
 } temp_processed_data_t;
 
 typedef struct {
-    int16_t current_temperature;  // Latest temperature reading in Celsius
-    bool high_temp_alert;         // Combined high temperature alert
-    bool low_temp_alert;          // Combined low temperature alert
-    bool system_ready;            // Temperature system operational
-    uint32_t last_update_ms;      // Last successful update (for debugging)
+    int16_t  current_temperature; // Latest reading in °C
+    bool     high_temp_alert;     // Combined high temp alert
+    bool     low_temp_alert;      // Combined low temp alert
+    bool     system_ready;        // Temperature system ready
+    uint32_t last_update_ms;      // When last updated
 } temp_status_t;
 ```
 
-## 16. POC Implementation Strategy and Optimization
+---
 
-### 16.1. Simplified POC Architecture for Rapid Development
+## 13. POC Implementation Strategy and Optimisation
 
-Based on the current infrastructure status and the need for a functional proof of concept, the following simplified approach is recommended:
+### 13.1. Simplified POC Architecture for Rapid Development
 
 #### Phase 1: Basic Threshold Detection (Week 1)
 
-**Simplified Data Flow:**
-
 ```c
-// Simplified POC void detection (bypass complex circle fitting initially)
 bool simple_void_detection_poc(radar_measurement_t measurements[3]) {
-    static uint16_t expected_distance_mm = 150;  // Configurable baseline
-    static uint16_t threshold_mm = 75;           // Conservative POC threshold
-    
+    static const uint16_t expected_distance_mm   = 150; // mm baseline
+    static const uint16_t threshold_mm           = 75;  // mm (more conservative)
+
     for (int i = 0; i < 3; i++) {
         if (measurements[i].data_valid) {
-            // Simple threshold against expected distance
-            if (measurements[i].distance_mm > (expected_distance_mm + threshold_mm)) {
-                // Basic confidence based on excess distance
-                uint8_t confidence = calculate_simple_confidence(measurements[i]);
-                if (confidence >= 60) { // Lower bar for POC demonstrations
-                    report_void_detection(i, measurements[i].distance_mm - expected_distance_mm, confidence);
+            if (measurements[i].distance_mm >
+                (expected_distance_mm + threshold_mm)) {
+                uint8_t confidence = calculate_simple_confidence_poc(
+                    measurements[i].distance_mm, expected_distance_mm,
+                    threshold_mm);
+                if (confidence >= 60) {
+                    report_void_detection_poc(
+                        i,
+                        measurements[i].distance_mm - expected_distance_mm,
+                        confidence);
                     return true;
                 }
             }
@@ -1395,451 +1057,300 @@ bool simple_void_detection_poc(radar_measurement_t measurements[3]) {
     return false;
 }
 
-// Simplified confidence calculation for POC
-uint8_t calculate_simple_confidence(radar_measurement_t measurement) {
-    uint16_t excess = measurement.distance_mm - expected_distance_mm;
-    
-    // Factor 1: Distance-based confidence (max 60 points)
-    uint8_t distance_score = (excess > threshold_mm) ? 
-                           MIN(60, (excess * 60) / (threshold_mm * 2)) : 0;
-    
-    // Factor 2: Range-based reliability (max 40 points)
+uint8_t calculate_simple_confidence_poc(uint16_t distance_mm,
+                                        uint16_t expected_mm,
+                                        uint16_t threshold_mm) {
+    uint16_t excess = distance_mm - expected_mm;
+    // Distance score (max 60)
+    uint8_t distance_score =
+        (excess > threshold_mm) ?
+          (uint8_t)MIN(60, (excess * 60) / (threshold_mm * 2)) : 0;
+    // Range score (max 40)
     uint8_t range_score = 0;
-    if (measurement.distance_mm <= 2000) range_score = 40;      // < 2.0m
-    else if (measurement.distance_mm <= 3500) range_score = 20; // 2.0m to 3.5m
-    else if (measurement.distance_mm <= 5000) range_score = 10; // 3.5m to 5.0m
-    
-    return MIN(100, distance_score + range_score);
+    if (distance_mm <= 2000) range_score = 40;
+    else if (distance_mm <= 3500) range_score = 20;
+    else if (distance_mm <= 5000) range_score = 10;
+    return (uint8_t)MIN(100, distance_score + range_score);
 }
 ```
 
 #### Phase 2: Hysteresis and Multi-Sensor Support (Week 2)
 
-**Hysteresis Implementation:**
-
 ```c
 typedef struct {
-    bool void_active[MAX_SENSORS];
-    uint32_t void_start_time[MAX_SENSORS];
-    uint16_t consecutive_detections[MAX_SENSORS];
-    uint16_t consecutive_clear_readings[MAX_SENSORS];
+    bool    void_active[MAX_RADAR_SENSORS];
+    uint32_t void_start_time[MAX_RADAR_SENSORS];
+    uint16_t consecutive_detections[MAX_RADAR_SENSORS];
+    uint16_t consecutive_clear_readings[MAX_RADAR_SENSORS];
 } void_hysteresis_state_t;
 
-// Prevents flickering void events
-bool apply_void_hysteresis(uint8_t sensor_idx, bool raw_detection, 
-                          void_hysteresis_state_t* state) {
-    const uint16_t HYSTERESIS_CONSECUTIVE_REQUIRED = 3;    // Require 3 consecutive detections
-    const uint16_t HYSTERESIS_CLEAR_REQUIRED = 5;         // Require 5 clear readings to end void
-    
+bool apply_void_hysteresis(uint8_t sensor_idx,
+                           bool raw_detection,
+                           void_hysteresis_state_t *state) {
+    const uint16_t HYSTERESIS_DETECT_COUNT = 3;  // require 3 consecutive detections
+    const uint16_t HYSTERESIS_CLEAR_COUNT  = 5;  // require 5 consecutive clear readings
+
     if (raw_detection) {
         state->consecutive_clear_readings[sensor_idx] = 0;
         state->consecutive_detections[sensor_idx]++;
-        
-        if (!state->void_active[sensor_idx] && 
-            state->consecutive_detections[sensor_idx] >= HYSTERESIS_CONSECUTIVE_REQUIRED) {
-            // Start new void
-            state->void_active[sensor_idx] = true;
+        if (!state->void_active[sensor_idx] &&
+            state->consecutive_detections[sensor_idx] >=
+              HYSTERESIS_DETECT_COUNT) {
+            state->void_active[sensor_idx]    = true;
             state->void_start_time[sensor_idx] = HAL_GetTick();
-            return true; // Report void start
+            return true; // report void start
         }
     } else {
         state->consecutive_detections[sensor_idx] = 0;
         state->consecutive_clear_readings[sensor_idx]++;
-        
-        if (state->void_active[sensor_idx] && 
-            state->consecutive_clear_readings[sensor_idx] >= HYSTERESIS_CLEAR_REQUIRED) {
-            // End existing void
+        if (state->void_active[sensor_idx] &&
+            state->consecutive_clear_readings[sensor_idx] >=
+              HYSTERESIS_CLEAR_COUNT) {
             state->void_active[sensor_idx] = false;
-            return false; // Report void end
+            return false; // report void end
         }
     }
-    
-    return state->void_active[sensor_idx]; // Maintain current state
+    return state->void_active[sensor_idx]; // maintain state
 }
 ```
 
-### 16.2. Performance Optimization Guidelines
+#### Phase 3: Multi-Sensor Consistency and Command Interface (Week 3)
 
-#### Memory-Efficient Data Structures
+* Integrate hysteresis into `void_analyze_sensor_data()`.
+* Implement `@vd` commands (Section 4.2).
+* Cross-validate detections across sensors if required.
 
-```c
-// Optimized for embedded constraints
-#define WALL_HISTORY_SIZE           10      // Reduced from potential larger values
-#define MAX_VOID_DETECTIONS         5       // Sufficient for POC
-#define CONFIDENCE_LEVEL_LOW        50      // Simplified confidence levels
-#define CONFIDENCE_LEVEL_MEDIUM     75
-#define CONFIDENCE_LEVEL_HIGH       90
+### 13.2. Performance Optimisation Guidelines
 
-// Conservative POC settings for reliability
-#define DEFAULT_VOID_DETECTION_THRESHOLD_MM     75   // Larger threshold for POC reliability
-#define DEFAULT_CONFIDENCE_THRESHOLD_PERCENT    60   // Lower bar for POC demonstrations
-#define DEFAULT_NOMINAL_WALL_DISTANCE_MM        200  // Typical borehole radius (100mm)
-```
+* **Static array sizing:** Keep `WALL_HISTORY_SIZE` and `MAX_VOID_DETECTIONS` small (e.g. 10, 5).
+* **Compile-time constants:** Use `#define` for thresholds (see Phase 1).
+* **No floating-point in critical loops:** Only initial conversion from float → mm.
+* **Efficient error logging:** Use `DEBUG_SEND` sparingly to avoid UART congestion.
+* **Early exit in loops:** In `simple_void_detection_poc()`, break as soon as a valid void is found.
 
-#### Fallback Mechanisms
+### 13.3. Testing and Validation Strategy
 
 ```c
-// Graceful degradation for POC reliability
-bool void_detection_with_fallback(radar_measurement_t measurements[3]) {
-    // Primary: Advanced detection (if implemented)
-    if (advanced_void_detection_available()) {
-        return advanced_void_detection(measurements);
-    }
-    
-    // Fallback: Simple threshold detection
-    return simple_void_detection_poc(measurements);
-}
-
-// Error handling for missing or invalid sensor data
-void handle_sensor_data_issues(radar_measurement_t measurements[3]) {
-    uint8_t valid_sensor_count = 0;
-    
-    for (int i = 0; i < 3; i++) {
-        if (measurements[i].data_valid) {
-            valid_sensor_count++;
-        }
-    }
-    
-    if (valid_sensor_count < 2) {
-        DEBUG_SEND("Warning: Insufficient valid sensors (%d/3) for reliable void detection", 
-                   valid_sensor_count);
-        // Continue with reduced confidence or disable void detection temporarily
-    }
-}
-```
-
-### 16.3. Testing and Validation Strategy
-
-#### POC Testing Approach
-
-```c
-// Test data generation for algorithm validation
 typedef struct {
     uint16_t test_distances_mm[3];
-    bool expected_void_detection;
-    uint8_t expected_void_sector;
-    uint8_t expected_confidence_min;
-    char test_description[64];
+    bool     expected_void;
+    uint8_t  expected_sector;
+    uint8_t  expected_confidence_min;
+    char     description[64];
 } void_test_case_t;
 
-// Example test cases for POC validation
 static const void_test_case_t poc_test_cases[] = {
-    {{150, 150, 150}, false, 0, 0, "Normal borehole - no void"},
-    {{150, 250, 150}, true, 1, 70, "Single sector void - medium confidence"},
-    {{150, 350, 150}, true, 1, 90, "Large single sector void - high confidence"},
-    {{200, 200, 200}, false, 0, 0, "Larger borehole - no void"},
-    {{100, 300, 150}, true, 1, 80, "Mixed readings with void"},
+    {{150,150,150}, false, 0,  0,  "No void – all sensors at baseline"},
+    {{150,250,150}, true,  1, 70, "Sector 1 void – medium confidence"},
+    {{150,350,150}, true,  1, 90, "Sector 1 void – high confidence"},
+    {{200,200,200}, false, 0,  0,  "Uniformly larger borehole – no void"},
+    {{100,300,150}, true,  1, 80, "Mixed – sensor 1 void"},
 };
 
-// Automated test runner for POC validation
 bool run_poc_void_detection_tests(void) {
     bool all_passed = true;
-    
-    for (int i = 0; i < ARRAY_SIZE(poc_test_cases); i++) {
-        radar_measurement_t test_measurements[3];
-        
-        // Setup test data
+    for (int i = 0; i < (int)(sizeof(poc_test_cases)/sizeof(poc_test_cases[0])); i++) {
+        radar_measurement_t test_meas[3];
         for (int j = 0; j < 3; j++) {
-            test_measurements[j].distance_mm = poc_test_cases[i].test_distances_mm[j];
-            test_measurements[j].data_valid = true;
-            test_measurements[j].angle_deg = j * 120;
+            test_meas[j].distance_mm = poc_test_cases[i].test_distances_mm[j];
+            test_meas[j].data_valid  = true;
+            test_meas[j].angle_deg   = j * 120;
         }
-        
-        // Run void detection
-        bool detected = simple_void_detection_poc(test_measurements);
-        
-        // Validate results
-        if (detected != poc_test_cases[i].expected_void_detection) {
-            DEBUG_SEND("Test %d FAILED: %s", i, poc_test_cases[i].test_description);
+        bool detected = simple_void_detection_poc(test_meas);
+        if (detected != poc_test_cases[i].expected_void) {
+            DEBUG_SEND("Test %d FAILED: %s", i, poc_test_cases[i].description);
             all_passed = false;
         } else {
-            DEBUG_SEND("Test %d PASSED: %s", i, poc_test_cases[i].test_description);
+            DEBUG_SEND("Test %d PASSED: %s", i, poc_test_cases[i].description);
         }
     }
-    
     return all_passed;
 }
 ```
 
-### 16.4. Implementation Priorities and Timeline
+### 13.4. Implementation Priorities and Timeline
 
-#### Week 1: Core Algorithm Implementation
+| Week  | Tasks                                                                                          |
+| :---- | :--------------------------------------------------------------------------------------------- |
+| **1** | Implement threshold detection (`mti_void.c`), basic confidence, integrate with `mti_radar.c`.  |
+| **2** | Add hysteresis, multi-sensor checks, implement `@vd` command handlers in `vmt_command.c`.      |
+| **3** | Full integration, performance tuning, end-to-end tests, documentation updates (Sections 9–10). |
 
-1. **Basic threshold detection** without circle fitting
-2. **Simple confidence calculation** (distance + range-based)
-3. **Integration with existing radar data** from `mti_radar.c`
-4. **Basic void event reporting** (`!vd,flag,...`)
+---
 
-#### Week 2: Enhancement and Stability
+## 14. Future Enhancements: Dual-Algorithm Void Detection System
 
-1. **Hysteresis logic** to prevent false events
-2. **Multi-sensor consistency** checking
-3. **Enhanced confidence** factors
-4. **Command interface** implementation (`@vd,status?`, `@vd,config,*`)
+> **Scope Clarification:** This entire Section 14 is intended as a **post-POC enhancement** (Version 1.4 or 2.0), not part of the immediate 3-week POC plan. The POC plan (Sections 8.3, 9, 10, 13) focuses solely on simple threshold-based detection. Section 14 outlines optional advanced functionality once the POC is stable.
 
-#### Week 3: Integration and Testing
+### 14.1. Algorithm Selection Architecture
 
-1. **Full system integration** testing
-2. **Performance optimization** and timing analysis
-3. **POC demonstration** preparation
-4. **Documentation** and algorithm validation
+The system will support two complementary detection algorithms:
 
-### 16.5. Risk Mitigation Strategies
+#### Algorithm 1: Simple Threshold Detection (POC, Default)
 
-#### Conservative POC Settings
-
-```c
-// Risk mitigation through conservative thresholds
-#define POC_DETECTION_THRESHOLD_MM          75   // Larger to reduce false positives
-#define POC_CONFIDENCE_THRESHOLD_PERCENT    60   // Lower to ensure detection capability
-#define POC_HYSTERESIS_DETECTIONS_REQUIRED  3    // Require 3 consecutive detections
-#define POC_HYSTERESIS_CLEAR_REQUIRED       5    // Require 5 clear readings to end void
-#define POC_MAX_SENSOR_DISTANCE_MM          5000 // Conservative maximum range
-#define POC_MIN_SENSOR_DISTANCE_MM          50   // Conservative minimum range
-```
-
-#### POC Reliability Framework
-
-```c
-// Graceful degradation for POC reliability
-bool void_detection_with_fallback(radar_measurement_t measurements[3]) {
-    // Primary: Advanced detection (if implemented)
-    if (advanced_void_detection_available()) {
-        return advanced_void_detection(measurements);
-    }
-    
-    // Fallback: Simple threshold detection
-    return simple_void_detection_poc(measurements);
-}
-
-// Error handling for missing or invalid sensor data
-void handle_sensor_data_issues(radar_measurement_t measurements[3]) {
-    uint8_t valid_sensor_count = 0;
-    
-    for (int i = 0; i < 3; i++) {
-        if (measurements[i].data_valid) {
-            valid_sensor_count++;
-        }
-    }
-    
-    if (valid_sensor_count < 2) {
-        DEBUG_SEND("Warning: Insufficient valid sensors (%d/3) for reliable void detection", 
-                   valid_sensor_count);
-        // Continue with reduced confidence or disable void detection temporarily
-    }
-}
-```
-
-### 16.6. Future Enhancement Path
-
-#### Post-POC Advanced Features
-
-1. **3-Point Circle Fitting**: For precise probe positioning and geometric analysis
-2. **Advanced Confidence Algorithms**: Multi-factor scoring with temporal consistency
-3. **Machine Learning Integration**: Pattern recognition for void characteristics
-4. **Multi-Frequency Analysis**: Enhanced detection using frequency domain processing
-5. **Predictive Void Detection**: Early warning based on trend analysis
-
-#### Scalability Considerations
-
-```c
-// Architecture designed for future expansion
-typedef struct {
-    // Current POC implementation
-    bool (*simple_detection)(radar_measurement_t measurements[3]);
-    uint8_t (*simple_confidence)(radar_measurement_t measurement);
-    
-    // Future advanced algorithms (function pointers for modularity)
-    bool (*advanced_detection)(radar_measurement_t measurements[3]);
-    uint8_t (*ml_confidence)(radar_measurement_t measurements[3]);
-    void (*predictive_analysis)(radar_measurement_t measurements[3]);
-} void_detection_algorithms_t;
-
-// Algorithm selection based on system capability and requirements
-void_detection_algorithms_t* select_optimal_algorithms(system_capabilities_t caps) {
-    static void_detection_algorithms_t algorithms;
-    
-    // Start with POC algorithms
-    algorithms.simple_detection = simple_void_detection_poc;
-    algorithms.simple_confidence = calculate_simple_confidence;
-    
-    // Add advanced algorithms when available
-    if (caps.has_advanced_processing) {
-        algorithms.advanced_detection = advanced_void_detection;
-        algorithms.ml_confidence = ml_confidence_calculation;
-    }
-    
-    return &algorithms;
-}
-```
-
------
-
-## 17. Dual-Algorithm Void Detection System Implementation
-
-### 17.1. Algorithm Selection Architecture
-
-The void detection system implements two complementary detection algorithms to provide flexibility for different operational requirements and development phases:
-
-#### Algorithm 1: Simple Threshold Detection (Default)
-
-* **Primary Use**: POC development, initial testing, and reliable baseline operation
-
-* **Method**: Direct threshold comparison against expected wall distance per sensor
-* **Advantages**: Fast execution, deterministic results, minimal computational overhead
-* **Best For**: Rapid deployment, field testing, and scenarios requiring maximum reliability
+* **Primary Use:** POC development, initial testing.
+* **Method:** Threshold comparison per sensor.
+* **Advantages:** Fast, deterministic, minimal overhead.
+* **When to Use:** Field testing, POC demonstrations, high-reliability simple scenarios.
 
 #### Algorithm 2: Circle Fitting Detection (Advanced)
 
-* **Primary Use**: Production deployment and enhanced geometric accuracy
+* **Primary Use:** Post-POC, production deployment, enhanced geometric accuracy.
+* **Method:** 3-point circle fitting to determine borehole centre and radius precisely.
+* **Advantages:** Higher accuracy, robust to multi-sensor correlation.
+* **When to Use:** Final firmware, detailed void analysis, multi-sensor void detection.
 
-* **Method**: 3-point circle fitting for precise probe positioning and void characterization
-* **Advantages**: Higher accuracy, geometric validation, advanced void characterization
-* **Best For**: Final production systems, detailed void analysis, and multi-sensor correlation
+### 14.2. Dynamic Algorithm Selection
 
-### 17.2. Algorithm Selection and Configuration
+Operators can switch algorithms at runtime via new uphole commands:
 
-#### Dynamic Algorithm Selection
+```bash
+@vd,config,mode,simple       // Use Algorithm 1
+@vd,config,mode,circlefit    // Use Algorithm 2
+```
 
-The system supports runtime algorithm switching through uphole commands, allowing operators to select the most appropriate detection method for current conditions without firmware updates.
+If the chosen algorithm fails at runtime (e.g. numerical instability), the system automatically falls back to the simple threshold method, logging a warning.
 
-#### Configuration Management
+### 14.3. Unified Confidence Calculation Framework
 
-* **Default Setting**: Simple threshold detection for immediate POC functionality
+Both algorithms share a three-factor confidence system:
 
-* **Runtime Switching**: Seamless transition between algorithms via command interface
-* **Fallback Protection**: Automatic fallback to simple detection if advanced algorithms encounter errors
-* **Performance Monitoring**: Real-time algorithm performance tracking and optimization
+1. **Distance-Based Scoring (50 % weight)**
 
-### 17.3. Simplified Confidence Calculation Framework
+   * Proportional to deviation from baseline diameter.
+2. **Signal-Quality Assessment (30 % weight)**
 
-#### Three-Factor Confidence Assessment
+   * Based on SNR, ensures reliable measurement.
+3. **Range-Based Reliability (20 % weight)**
 
-The confidence calculation system uses a standardized approach across both algorithms:
+   * Distance bands: < 2 m = 40 points, 2 – 3.5 m = 20 points, 3.5 – 5 m = 10 points.
 
-##### Factor 1: Distance-Based Scoring (50% weight)
+Final confidence = min(100 %, sum of all factor scores).
 
-* Measures deviation from expected baseline distance
-* Scales confidence based on magnitude of detected anomaly
-* Provides primary detection strength indicator
+### 14.4. Comprehensive Hysteresis State Management
 
-##### Factor 2: Signal Quality Assessment (30% weight)
+Hysteresis prevents flicker and false events:
 
-* Evaluates SNR and measurement reliability
-* Accounts for sensor performance characteristics
-* Ensures detection validity under varying conditions
+* **Per-Sensor State:** Independent hysteresis counter for each sensor.
+* **Detection Confirm Count:** Number of consecutive positive readings (e.g. 3).
+* **Clear Confirm Count:** Consecutive clear readings to end void (e.g. 5).
+* **Cross-Sensor Validation (optional):** Only report void if ≥ 2 sensors agree (configurable).
 
-##### Factor 3: Range-Based Reliability (20% weight)
+```c
+typedef struct {
+    bool     active[MAX_RADAR_SENSORS];
+    uint32_t start_time[MAX_RADAR_SENSORS];
+    uint16_t cons_detect[MAX_RADAR_SENSORS];
+    uint16_t cons_clear[MAX_RADAR_SENSORS];
+} void_hyst_t;
 
-* Assesses measurement within optimal sensor operating range
-* Applies distance-dependent confidence adjustments
-* Compensates for sensor performance degradation at range extremes
+bool check_hysteresis(uint8_t idx, bool raw,
+                      void_hyst_t *h) {
+    const uint16_t DET_COUNT   = 3;
+    const uint16_t CLEAR_COUNT = 5;
+    if (raw) {
+        h->cons_clear[idx] = 0;
+        h->cons_detect[idx]++;
+        if (!h->active[idx] &&
+            h->cons_detect[idx] >= DET_COUNT) {
+            h->active[idx] = true;
+            h->start_time[idx] = HAL_GetTick();
+            return true;
+        }
+    } else {
+        h->cons_detect[idx] = 0;
+        h->cons_clear[idx]++;
+        if (h->active[idx] &&
+            h->cons_clear[idx] >= CLEAR_COUNT) {
+            h->active[idx] = false;
+            return false;
+        }
+    }
+    return h->active[idx];
+}
+```
 
-#### Unified Confidence Output
+### 14.5. Integration with Existing Architecture
 
-Both algorithms produce standardized confidence scores (0-100%) enabling consistent interpretation regardless of selected detection method.
+* **Radar Data Pipeline:** No change required; both algorithms consume `radar_get_distance_mm()`.
+* **Command Interface:** Extend void commands with:
 
-### 17.4. Hysteresis State Management System
+```bash
+  @vd,config,mode,simple
+  @vd,config,mode,circlefit
+```
 
-#### Multi-Sensor Hysteresis Framework
+* **Parameter Storage:** In `void_config_t`, add an enum `void_algorithm_t { ALG_SIMPLE, ALG_CIRCLEFIT };`.
 
-The system implements comprehensive hysteresis management to prevent false void events and ensure stable detection behavior:
+### 14.6. Implementation Strategy and Timeline (Post-POC)
 
-#### Detection State Tracking
+| Phase       | Tasks                                                                                     | Target            |
+| :---------- | :---------------------------------------------------------------------------------------- | :---------------- |
+| **Phase 1** | Implement circle fitting routines (3-point). Integrate into `void_analyze_sensor_data()`. | Week 1 (post-POC) |
+| **Phase 2** | Add runtime algorithm switch commands; ensure seamless fallback.                          | Week 2 (post-POC) |
+| **Phase 3** | Cross-sensor consistency, advanced confidence integration, performance optimisation.      | Week 3 (post-POC) |
 
-* **Per-Sensor State Management**: Independent hysteresis control for each of the three sensors
-
-* **Consecutive Detection Requirements**: Configurable threshold for void detection confirmation
-* **Clear Reading Requirements**: Separate threshold for void end confirmation
-* **Temporal Consistency**: Time-based validation to prevent transient false triggers
-
-#### Hysteresis Configuration Parameters
-
-* **Detection Confirmation Count**: Number of consecutive positive detections required
-
-* **Clear Confirmation Count**: Number of consecutive clear readings to end void state
-* **Timing Windows**: Maximum time intervals for detection/clear sequences
-* **Cross-Sensor Validation**: Optional multi-sensor correlation for enhanced reliability
-
-### 17.5. Integration with Existing System Architecture
-
-#### Seamless Radar Data Integration
-
-The dual-algorithm system integrates directly with the existing radar data pipeline without modification to the underlying sensor acquisition and processing infrastructure.
-
-#### Command Interface Enhancement
-
-Extended command interface supports algorithm selection, parameter configuration, and real-time performance monitoring while maintaining backward compatibility with existing command structure.
-
-#### Performance Optimization
-
-Both algorithms designed for execution within existing timing constraints, with simple detection providing faster response times and circle fitting offering enhanced accuracy when processing time permits.
-
-### 17.6. Implementation Strategy and Timeline
-
-#### Phase 1: Simple Detection Implementation (Week 1)
-
-* **Core Algorithm**: Implement threshold-based detection using existing radar data
-
-* **Confidence System**: Deploy three-factor confidence calculation framework
-* **Basic Hysteresis**: Implement per-sensor state management
-* **Command Integration**: Add algorithm selection and basic configuration commands
-
-#### Phase 2: Circle Fitting Integration (Week 2)
-
-* **Advanced Algorithm**: Implement 3-point circle fitting for geometric analysis
-
-* **Algorithm Switching**: Complete runtime algorithm selection capability
-* **Enhanced Hysteresis**: Add cross-sensor validation and temporal consistency
-* **Performance Optimization**: Optimize both algorithms for embedded constraints
-
-#### Phase 3: System Validation and Testing (Week 3)
-
-* **Comprehensive Testing**: Validate both algorithms under various conditions
-
-* **Performance Analysis**: Benchmark algorithm execution times and accuracy
-* **Command Interface**: Complete all configuration and monitoring commands
-* **Documentation**: Finalize algorithm selection guidelines and operational procedures
-
-### 17.7. Operational Guidelines and Best Practices
+### 14.7. Operational Guidelines
 
 #### Algorithm Selection Criteria
 
-* **Simple Detection**: Recommended for initial deployment, field testing, and high-reliability requirements
+* **Simple Threshold (Default):** For rapid deployment, low CPU usage, stable operation.
+* **Circle Fitting:** For production accuracy, advanced analysis, multi-sensor correlation.
+* **Hybrid Operation:** Start with simple for reliability; switch to circle fitting when accuracy paramount.
 
-* **Circle Fitting**: Optimal for production systems requiring maximum accuracy and detailed void characterization
-* **Hybrid Operation**: Switch between algorithms based on operational conditions and requirements
+#### Recommended Configuration
 
-#### Configuration Recommendations
+```c
+#define DEFAULT_DETECTION_MODE        ALG_SIMPLE
+#define DEFAULT_THRESHOLD_MM          75
+#define DEFAULT_CONFIDENCE_THRESHOLD  60
+#define HYSTERESIS_DETECT_COUNT       3
+#define HYSTERESIS_CLEAR_COUNT        5
+```
 
-* **Conservative Settings**: Start with larger thresholds and higher confidence requirements for stable operation
+#### Performance Monitoring
 
-* **Hysteresis Tuning**: Adjust consecutive detection/clear requirements based on operational environment
-* **Performance Monitoring**: Regular assessment of algorithm performance and timing characteristics
+* Log actual processing time of each algorithm via `DEBUG_SEND("Algo %u took %lu ms", mode, delta)`.
+* Benchmark on target hardware to ensure < 100 ms per 3-sensor cycle.
 
-#### Maintenance and Optimization
+### 14.8. Benefits and Advantages
 
-* **Regular Calibration**: Periodic baseline adjustment based on operational data
+* **Flexibility:** Switch between fast/simple and accurate/advanced detection without reflashing.
+* **Robustness:** Fallback protection ensures the system never stalls.
+* **Scalability:** Framework easily extended to ML-based or predictive void detection modules.
+* **Maintainability:** Clear separation of POC (simple) vs. advanced features.
 
-* **Threshold Optimization**: Fine-tune detection parameters based on field experience
-* **Algorithm Performance**: Monitor and optimize execution timing and accuracy metrics
+---
 
-### 17.8. System Benefits and Advantages
+### File Path Verification
 
-#### Flexibility and Adaptability
+All critical module references now include clickable links (where relevant):
 
-The dual-algorithm approach provides operational flexibility to match detection methods with specific mission requirements and environmental conditions.
+* [`mti_void.c`](../Device/Src/mti_void.c) (skeleton/POC)
+* [`mti_can.c`](../Device/Src/mti_can.c)
+* [`mti_radar.c`](../Device/Src/mti_radar.c)
+* [`mti_temp.c`](../Device/Src/mti_temp.c)
+* [`mti_system.c`](../Device/Src/mti_system.c)
+* [`vmt_command.c`](../Device/Src/vmt_command.c)
+* [`vmt_uart.c`](../Device/Src/vmt_uart.c)
+* [`vmt_power.c`](../Device/Src/vmt_power.c)
+* [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c)
 
-#### Robust Performance
+If additional source files become relevant (e.g. new circle fitting code), they should also be linked here.
 
-Hysteresis management and fallback protection ensure stable operation under varying conditions while minimizing false detections and system interruptions.
+---
 
-#### Scalable Architecture
+**Conclusion:**
+This document now aligns section numbering, employs consistent UK/Australian spelling (“analyse,” “centre,” “optimisation,” “behaviour,” etc.), and clarifies that Section 14 (Dual-Algorithm) is strictly a **post-POC** enhancement (Version 1.4 or 2.0). Section 8.3 (Updated POC Plan), Section 9 (Next Steps) and Section 13 (Strategy & Optimisation) maintain necessary overlap but are explicitly cross-referenced to each other for reinforcement without unnecessary duplication.
 
-The framework supports future algorithm enhancements and additional detection methods without fundamental system redesign.
+The implementation team can now proceed, confident that:
 
-#### Comprehensive Validation
+1. **POC Milestones (Weeks 1–3):**
 
-Multiple detection approaches provide cross-validation capabilities and enhanced confidence in void detection results.
+   * Threshold-based void detection in `mti_void.c`.
+   * Void commands in `vmt_command.c`.
+   * Full integration + tests.
 
-This implementation strategy provides a clear path to a functional POC while establishing the foundation for advanced production capabilities, ensuring both immediate operational success and long-term system evolution.
+2. **Post-POC Enhancements:**
+
+   * Circle fitting, multi-sensor correlation, dynamic algorithm switching, ML integration (Section 14).
