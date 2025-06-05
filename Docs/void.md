@@ -12,9 +12,10 @@
     1.3. [Target Audience](#13-target-audience)
     1.4. [Definitions and Acronyms](#14-definitions-and-acronyms)
 2. [Executive Summary](#2-executive-summary)
-3. [System Overview](#3-system-overview)
-    3.1. [Core Functionality](#31-core-functionality)
-    3.2. [Simplified Data Flow Architecture](#32-simplified-data-flow-architecture)
+3. [Void Detection Algorithm Requirements](#3-void-detection-algorithm-requirements)
+    3.1. [Core Algorithm Design](#31-core-algorithm-design)
+    3.2. [Implementation Requirements](#32-implementation-requirements)
+    3.3. [Development Steps](#33-development-steps)
 4. [Communication Protocols](#4-communication-protocols)
     4.1. [CAN Bus (Sensor Communication)](#41-can-bus-sensor-communication)
     4.2. [UART/RS485 (Uphole Communication)](#42-uartrs485-uphole-communication)
@@ -37,14 +38,10 @@
     8.2. [Completed Implementation Details](#82-completed-implementation-details)
     8.3. [Updated POC Development Plan](#83-updated-poc-development-plan)
     8.4. [Detailed Implementation Specifications](#84-detailed-implementation-specifications)
-9. [Safety and Reliability](#9-safety-and-reliability)
-    9.1. [Fault Detection and Recovery](#91-fault-detection-and-recovery)
-    9.2. [Watchdog and System Health](#92-watchdog-and-system-health)
-    9.3. [Communication Robustness](#93-communication-robustness)
-10. [Future Enhancements](#10-future-enhancements)
-11. [Development Guidelines](#11-development-guidelines)
-12. [Next Steps](#12-next-steps)
-13. [Current Implementation Status Summary](#13-current-implementation-status-summary)
+9. [Next Steps](#12-next-steps)
+10. [Current Implementation Status Summary](#13-current-implementation-status-summary)
+11. [Appendix: Detailed Command/Response Timing Analysis](#14-appendix-detailed-commandresponse-timing-analysis)
+12. [Appendix: Detailed Data Structure Definitions](#15-appendix-detailed-data-structure-definitions)
 
 -----
 
@@ -106,7 +103,7 @@ The void detection system is a safety-critical embedded application running on S
 * ❌ **Void Detection Logic:** Core algorithms using millimeter precision need implementation. The [`mti_void.c`](../Device/Src/mti_void.c) module exists but requires full algorithm development. This is the critical missing component.
 * ✅ **Error Recovery:** Basic error handling (e.g., CAN sensor resets) is in place. Build system successfully compiles with 0 errors.
 
-**Next Priority: Void Detection Implementation**
+### Next Priority: Void Detection Implementation
 
 With the temperature monitoring system now complete, the primary focus shifts to the core void detection algorithm implementation. All supporting infrastructure (radar data acquisition, communication) is functional. The void detection module ([`mti_void.c`](../Device/Src/mti_void.c)) needs to:
 
@@ -122,28 +119,28 @@ With the temperature monitoring system now complete, the primary focus shifts to
 
 The void detection system must implement the following algorithm stages:
 
-**Stage 1: Data Acquisition**
+#### Stage 1: Data Acquisition
 
 * Collect distance measurements from 3 radar sensors positioned at 120° intervals
 * Validate data quality and sensor health status
 * Apply sensor-specific calibration offsets
 * Filter out noise and invalid readings
 
-**Stage 2: Geometric Analysis**
+#### Stage 2: Geometric Analysis
 
 * Calculate borehole center position using triangulation
 * Determine effective borehole diameter at measurement point
 * Detect asymmetric wall conditions indicating potential voids
 * Apply coordinate transformation for precise void location
 
-**Stage 3: Void Detection Logic**
+#### Stage 3: Void Detection Logic
 
 * Compare calculated diameter against baseline/expected diameter
 * Apply configurable void detection thresholds (e.g., 20% diameter increase)
 * Implement hysteresis to prevent false void start/end events
 * Generate void severity classification (minor, major, critical)
 
-**Stage 4: Event Generation**
+#### Stage 4: Event Generation
 
 * Generate void start events with precise location and severity
 * Continuous void monitoring and size tracking
@@ -832,9 +829,9 @@ uint16_t             radar_get_angle_deg(uint8_t sensor_idx);
 
 With Phase 1 and 1.5 complete, the focus is now on Void Detection.
 
-#### ✅ Phase 1: Basic Data Flow Implementation - COMPLETED
+#### ✅ Phase 1: Basic Data Flow Implementation Status - COMPLETED
 
-#### ✅ Phase 1.5: Temperature Module Implementation - COMPLETED
+#### ✅ Phase 1.5: Temperature Module Implementation Status - COMPLETED
 
 #### Phase 2: Core Void Detection Module Implementation - CRITICAL PRIORITY
 
@@ -876,7 +873,7 @@ With Phase 1 and 1.5 complete, the focus is now on Void Detection.
 * [ ] Validate command responses from both temperature and void modules under various conditions.
 * [ ] Perform end-to-end system testing with simulated and, if possible, live data.
 * [ ] Document system behavior and performance characteristics.
-* [ ] Address any remaining items from Section 12.2 POC Validation and Testing.
+* [ ] Address any remaining validation and testing tasks.
 
 -----
 
@@ -1071,7 +1068,7 @@ With the temperature sensing module successfully implemented and integrated, the
 
 The primary focus is to complete Phase 2, 3 (Void parts), and 4 of the Updated POC Development Plan (Section 8.3). Key tasks include:
 
-**Priority 1: Core Void Detection Algorithm (Target: Weeks 1-2)**
+#### Priority 1: Core Void Detection Algorithm (Target: Weeks 1-2)
 
 * **Implement `mti_void.c` processing loop (`void_system_process`):**
   * Fetch cleaned radar data from the `mti_radar` module.
@@ -1086,7 +1083,7 @@ The primary focus is to complete Phase 2, 3 (Void parts), and 4 of the Updated P
   * Determine void magnitude (size) and affected sensor/sector.
 * **Data Structures:** Refine and utilize `void_measurement_t`, `void_status_t`, and `void_detection_result_t` as defined in [`mti_void.h`](../Device/Inc/mti_void.h) and section [6.1 POC Data Structures and Flow](#61-poc-data-structures-and-flow). Ensure proper initialization and state management.
 
-**Priority 2: Void Detection Command Interface (Target: Week 2-3)**
+#### Priority 2: Void Detection Command Interface (Target: Week 2-3)
 
 * **Implement `handle_void_command` (or `cmd_void`) in `vmt_command.c`:**
   * Handler for `@vd,status?` to retrieve and format data from `mti_void.c`.
@@ -1094,10 +1091,10 @@ The primary focus is to complete Phase 2, 3 (Void parts), and 4 of the Updated P
 * **Response Formatting:** Develop functions to send void detection status and configuration acknowledgements.
 * **Event Reporting:** Implement `!vd,flag,...` asynchronous alert if a void is detected, as per section [4.2.2 Response/Event Format](#422-responseevent-format-downhole-to-upholedebug).
 
-**Priority 3: System Integration and Testing (Target: Week 3)**
+#### Priority 3: System Integration and Testing (Target: Week 3)
 
 * Integrate `void_system_process()` into the main application loop in [`mti_system.c`](../Device/Src/mti_system.c) or [`vmt_device.c`](../Device/Src/vmt_device.c).
-* Conduct thorough testing as outlined in [12.2 POC Validation and Testing](#122-poc-validation-and-testing), focusing on void detection specific scenarios.
+* Conduct thorough testing focusing on void detection specific scenarios.
 * Verify interactions between the void detection module and other system components (CAN, UART, Radar, Temperature).
 
 -----
