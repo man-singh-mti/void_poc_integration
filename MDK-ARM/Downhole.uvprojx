@@ -524,6 +524,11 @@
               <FileType>1</FileType>
               <FilePath>..\Device\Src\mti_temp.c</FilePath>
             </File>
+            <File>
+              <FileName>mti_void.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Src\mti_void.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -2489,6 +2494,11 @@
               <FileName>mti_temp.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Src\mti_temp.c</FilePath>
+            </File>
+            <File>
+              <FileName>mti_void.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Src\mti_void.c</FilePath>
             </File>
           </Files>
         </Group>

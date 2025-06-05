@@ -2,6 +2,7 @@
 #include "mti_can.h"
 #include "mti_radar.h"
 #include "mti_temp.h"
+#include "mti_void.h" // Add this include
 
 #include <math.h>
 #include <stdlib.h>
@@ -603,43 +604,24 @@ void device_process(void)
         }
         return;
     }
-    // printf("thre_h = %lf\n",h_sensor.h_adc->thre_h);
-    // printf("water = %d\n",h_sensor.water[0]);
-    // printf("acc_l: %lf\n",h_imu->accel_len);
-    // printf("acc_x = %d\n",h_imu->accel_x);
     module_init();
     cmd_process();
 
-    radar_system_process(); // Add this line only
+    radar_system_process();
     temp_system_process();
+    void_system_process();
 
-    // water_detect();
     icm20948_process(&h_icm20948[0]);
     icm20948_process(&h_icm20948[1]);
-    // if (b_water_det_printf) {
-    //	b_water_det_printf = false;
-    //	cmd_print_water(UART_UPHOLE); //event water
-    // }
 
     imu_process(&h_imu[0]);
     imu_process(&h_imu[1]);
-    // printf("@val,%d:%d:%d||%d,%d,%d\r\n",h_imu[0].accel_x,h_imu[0].accel_y,h_imu[0].accel_z,h_imu[1].accel_x,h_imu[1].accel_y,h_imu[1].accel_z);
 
 
-    //	uart_tx_channel_set(UART_UPHOLE);
-    //	if(state<= stopped_state) return;
     water_detect();
     keepalive_check();
-    //	if(live_imu) imu_compare(&h_imu[0], &h_imu[1]);
-    //	bottom_detect(&h_imu[1]);
+
     uart_tx_channel_set(UART_DEBUG);
-    // printf("@val,water = %.3lf,%.3lf\n",adc_value_get(ADC_SEQ_WATER_BEGIN),adc_value_get(ADC_SEQ_WATER_BEGIN+1));
-    // printf("@val,void = %.3lf,%.3lf,%.3lf\n",adc_value_get(ADC_SEQ_DIST_BEGIN),adc_value_get(ADC_SEQ_DIST_BEGIN+1),adc_value_get(ADC_SEQ_DIST_BEGIN+2));
-    // printf("@val,temp = %.2f\n",adc_value_get(ADC_SEQ_TEMP));
-    // printf("thre_h = %lf\n",h_sensor.h_adc->thre_h);
-    // printf("acc_x = %d\n",h_imu->accel_x);
-    // printf("@val,water = %d\n",adc_value[4]);
-    // adc_sample_finish_cb(ADC_SEQ_WATER_BEGIN);
 
     log_save_process();
     log_load_process();

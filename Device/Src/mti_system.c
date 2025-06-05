@@ -5,6 +5,7 @@
 #include "mti_can.h"
 #include "mti_radar.h"
 #include "mti_temp.h"
+#include "mti_void.h" // Add this include
 
 bool           debug = true;
 bool           initialised;
@@ -193,8 +194,23 @@ bool module_init(void)
         {
             printf("@status,down,7\n"); // Temperature initialization error
         }
+        init_step = STEP_VOID;
+        break;
+
+    case STEP_VOID:
+        // Initialize void detection module
+        void_system_init();
+        if (void_is_system_ready())
+        {
+            printf("@db,Void detection module initialized\n");
+        }
+        else
+        {
+            printf("@status,down,8\n"); // Void initialization error
+        }
         init_step = STEP_FINISH;
         break;
+
     case STEP_FINISH:
         initialised = true;
         if (module_status == STATUS_SYNC)
@@ -343,6 +359,7 @@ bool keepalive_check(void)
         printf("@status,down,A\n");
         keepalive_timer = HAL_GetTick();
     }
+    return true; // Add this missing return statement
 }
 
 radar_init_status_t radar_init_status_get(void)

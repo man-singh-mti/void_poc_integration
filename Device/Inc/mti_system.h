@@ -22,8 +22,9 @@ typedef enum
     STATUS_OK,
     STATUS_IMU_ERROR,
     STATUS_VOID_ERROR,
-    STATUS_RADAR_ERROR, // Add this
-    STATUS_TEMP_ERROR
+    STATUS_RADAR_ERROR,
+    STATUS_TEMP_ERROR,
+    STATUS_VOID_DETECTION_ERROR // Add void-specific error
 } status_t;
 
 typedef enum step_
@@ -33,9 +34,10 @@ typedef enum step_
     STEP_WATER_SYNC, // 2
     STEP_IMU_SYNC,   // 3
     STEP_IMU_TEST,   // 4
-    STEP_RADAR,      // 5 - Rename from STEP_VOID for clarity
+    STEP_RADAR,      // 5
     STEP_TEMP,       // 6
-    STEP_FINISH,     // 7
+    STEP_VOID,       // 7 - Add void initialization step
+    STEP_FINISH,     // 8
 } init_step_t;
 
 // Add radar init status tracking
