@@ -51,74 +51,53 @@ void void_system_process(void)
 
     uint32_t current_time = HAL_GetTick();
 
-    // Check if it's time to process (every 100ms)
-    if ((current_time - prv_void_system.last_process_time_ms) < VOID_PROCESS_INTERVAL_MS)
+    // Update timestamp for this processing cycle
+    prv_void_system.last_process_time_ms = current_time;
+
+    // Update measurement data from radar sensors
+    prv_update_measurement_data();
+
+    // Check if we have valid data from all sensors
+    uint8_t valid_sensor_count = 0;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
+        if (prv_void_system.latest_measurement.data_valid[i])
+        {
+            valid_sensor_count++;
+        }
+    }
+
+    // Only proceed if we have data from at least 2 sensors
+    if (valid_sensor_count < 2)
+    {
+        debug_send("Insufficient sensor data for void analysis (%d/3 valid)", valid_sensor_count);
         return;
     }
 
-    prv_void_system.last_process_time_ms = current_time;
+    // Run detection algorithm
+    void_status_t new_status       = { 0 };
+    bool          detection_result = false;
 
-    // Update measurement data from radar system
-    prv_update_measurement_data();
-
-    // Reset detection status for this cycle
-    void_status_t new_status        = { 0 };
-    new_status.baseline_diameter_mm = prv_void_system.config.baseline_diameter_mm;
-    new_status.detection_time_ms    = current_time;
-    new_status.algorithm_used       = prv_void_system.config.active_algorithm;
-    strcpy(new_status.status_text, "No void detected");
-
-    // Choose detection algorithm
-    bool void_found = false;
-
-    if (prv_void_system.config.active_algorithm == VOID_ALG_CIRCLEFIT)
+    switch (prv_void_system.config.active_algorithm)
     {
-        // Use circle fitting for multi-sensor analysis
-        void_found = prv_circle_fit_void_detection(&new_status);
-    }
-    else
-    {
-        // Use simple algorithm - analyze each sensor individually
-        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-        {
-            if (prv_void_system.latest_measurement.data_valid[i])
-            {
-                void_status_t sensor_result = { 0 };
-
-                if (void_analyze_sensor_data(i, prv_void_system.latest_measurement.distance_mm[i], prv_void_system.latest_measurement.angle_deg[i], &sensor_result))
-                {
-                    if (sensor_result.confidence_percent >= prv_void_system.config.confidence_threshold)
-                    {
-                        new_status             = sensor_result;
-                        new_status.void_sector = i;
-                        void_found             = true;
-                        break;
-                    }
-                }
-            }
-        }
+    case VOID_ALG_SIMPLE:
+        detection_result = prv_simple_threshold_detection(&new_status);
+        break;
+    case VOID_ALG_CIRCLEFIT:
+        detection_result = prv_circle_fit_void_detection(&new_status);
+        break;
     }
 
-    // Update system status
-    prv_void_system.current_status = new_status;
-
-    // Add to history if void state changed
-    static bool last_void_state = false;
-    if (new_status.void_detected != last_void_state)
+    // Update current status
+    if (detection_result)
     {
+        prv_void_system.current_status                     = new_status;
+        prv_void_system.current_status.measurement_time_ms = current_time;
+
+        // Add to history
         prv_add_to_history(&new_status);
-        last_void_state = new_status.void_detected;
 
-        // Send event notification
-        if (new_status.void_detected)
-        {
-            debug_send("!vd,flag,%d,%d,%d,%s",
-                       new_status.void_sector,
-                       new_status.void_diameter_mm,
-                       new_status.confidence_percent,
-                       void_get_algorithm_string(new_status.algorithm_used));
-        }
+        debug_send("Void detected (immediate): %s", new_status.status_text);
     }
 }
 
@@ -132,7 +111,7 @@ bool void_analyze_sensor_data(uint8_t sensor_idx, uint16_t distance_mm, uint16_t
     // Initialize result
     memset(result, 0, sizeof(void_status_t));
     result->baseline_diameter_mm = prv_void_system.config.baseline_diameter_mm;
-    result->detection_time_ms    = HAL_GetTick();
+    result->measurement_time_ms  = HAL_GetTick();   // FIXED: was detection_time_ms
     result->algorithm_used       = VOID_ALG_SIMPLE; // Single sensor analysis always uses simple
 
     // Validate sensor data
@@ -150,13 +129,13 @@ bool void_analyze_sensor_data(uint8_t sensor_idx, uint16_t distance_mm, uint16_t
     {
         // Void detected
         result->void_detected      = true;
-        result->void_diameter_mm   = (distance_mm - expected_distance) * 2; // Convert to diameter
+        result->void_size_mm       = (distance_mm - expected_distance) * 2; // Convert to diameter
         result->confidence_percent = void_calculate_confidence(distance_mm, expected_distance, threshold);
 
         // Characterize the detection
         void_characterise_detection(distance_mm, expected_distance, result);
 
-        sprintf(result->status_text, "Void S%d: %dmm (simple)", sensor_idx, result->void_diameter_mm);
+        sprintf(result->status_text, "Void S%d: %dmm (simple)", sensor_idx, result->void_size_mm);
         return true;
     }
 
@@ -280,200 +259,197 @@ prv_circle_fit_3_points(uint16_t distances_mm[MAX_RADAR_SENSORS], uint16_t angle
 
 static bool prv_circle_fit_void_detection(void_status_t *result)
 {
-    if (!result)
-    {
-        return false;
-    }
+    uint16_t distances_mm[MAX_RADAR_SENSORS];
+    uint16_t angles_deg[MAX_RADAR_SENSORS];
+    bool     data_valid[MAX_RADAR_SENSORS];
+    uint8_t  valid_sensors = 0;
 
-    // Get current measurement data
-    uint16_t distances[MAX_RADAR_SENSORS];
-    uint16_t angles[MAX_RADAR_SENSORS];
-    bool     valid[MAX_RADAR_SENSORS];
-
+    // Collect measurement data
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        distances[i] = prv_void_system.latest_measurement.distance_mm[i];
-        angles[i]    = prv_void_system.latest_measurement.angle_deg[i];
-        valid[i]     = prv_void_system.latest_measurement.data_valid[i];
+        radar_measurement_t *measurement = radar_get_measurement(i);
+        if (measurement && measurement->data_valid)
+        {
+            distances_mm[i] = measurement->distance_mm;
+            angles_deg[i]   = measurement->angle_deg;
+            data_valid[i]   = true;
+            valid_sensors++;
+        }
+        else
+        {
+            data_valid[i] = false;
+        }
     }
 
-    // Perform circle fitting
-    circle_fit_data_t circle_result;
-    if (!prv_circle_fit_3_points(distances, angles, valid, &circle_result))
+    // Set partial data flag
+    result->partial_data = (valid_sensors < MAX_RADAR_SENSORS);
+
+    // Circle fitting requires at least 3 points for accurate results
+    if (valid_sensors < 3)
     {
-        // Circle fitting failed - fallback to simple algorithm if enabled
         if (prv_void_system.config.auto_fallback_enabled)
         {
-            debug_send("Circle fit failed, falling back to simple algorithm");
+            debug_send("Circle fit: insufficient sensors (%d < 3), falling back to simple", valid_sensors);
             return prv_simple_threshold_detection(result);
         }
-        return false;
+        else
+        {
+            debug_send("Circle fit: insufficient sensors (%d < 3), analysis failed", valid_sensors);
+            result->void_detected      = false;
+            result->confidence_percent = 0;
+            strcpy(result->status_text, "Insufficient sensor data for circle fit");
+            return false;
+        }
     }
 
-    // Store circle fitting results
-    result->circle_data    = circle_result;
-    result->algorithm_used = VOID_ALG_CIRCLEFIT;
+    // Proceed with circle fitting using 3+ sensors
+    circle_fit_data_t circle_data = { 0 };
+    bool              fit_success = prv_circle_fit_3_points(distances_mm, angles_deg, data_valid, &circle_data);
 
-    // Calculate baseline parameters
-    uint16_t expected_radius = prv_void_system.config.baseline_diameter_mm / 2;
-    uint16_t fitted_diameter = circle_result.radius_mm * 2;
-
-    // Void detection based on circle analysis
-    if (fitted_diameter > (prv_void_system.config.baseline_diameter_mm + prv_void_system.config.detection_threshold_mm))
+    if (!fit_success)
     {
-        result->void_detected    = true;
-        result->void_diameter_mm = fitted_diameter - prv_void_system.config.baseline_diameter_mm;
+        if (prv_void_system.config.auto_fallback_enabled)
+        {
+            debug_send("Circle fit failed, falling back to simple threshold");
+            return prv_simple_threshold_detection(result);
+        }
+        else
+        {
+            result->void_detected      = false;
+            result->confidence_percent = 0;
+            strcpy(result->status_text, "Circle fitting failed");
+            return false;
+        }
+    }
 
-        // Calculate enhanced confidence for circle fitting
-        result->confidence_percent = prv_calculate_circle_confidence(&circle_result, expected_radius);
+    // Process successful circle fit results
+    uint16_t expected_radius = prv_void_system.config.baseline_diameter_mm / 2;
 
-        // Determine primary void sector (sensor with maximum deviation)
-        uint16_t max_deviation  = 0;
-        uint8_t  primary_sector = 0;
+    if (circle_data.radius_mm > (expected_radius + prv_void_system.config.detection_threshold_mm))
+    {
+        result->void_detected      = true;
+        result->void_size_mm       = circle_data.radius_mm * 2;
+        result->confidence_percent = prv_calculate_circle_confidence(&circle_data, expected_radius);
 
+        // Determine which sector has the void (largest deviation)
+        uint16_t max_deviation   = 0;
+        uint8_t  dominant_sensor = 0; // ADD THIS LINE
         for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            if (valid[i])
+            if (data_valid[i])
             {
-                uint16_t deviation = (distances[i] > expected_radius) ? (distances[i] - expected_radius) : 0;
+                uint16_t deviation = (distances_mm[i] > expected_radius) ? (distances_mm[i] - expected_radius) : 0;
                 if (deviation > max_deviation)
                 {
-                    max_deviation  = deviation;
-                    primary_sector = i;
+                    max_deviation   = deviation;
+                    dominant_sensor = i; // CHANGED: was result->void_sector = i;
                 }
             }
         }
 
-        result->void_sector = primary_sector;
-
-        // Classify void severity based on circle analysis
-        if (result->void_diameter_mm < 30)
-        {
-            result->void_severity = VOID_SEVERITY_MINOR;
-        }
-        else if (result->void_diameter_mm < 80)
-        {
-            result->void_severity = VOID_SEVERITY_MAJOR;
-        }
-        else
-        {
-            result->void_severity = VOID_SEVERITY_CRITICAL;
-        }
-
-        sprintf(result->status_text, "Void detected: %dmm dia, %d%% conf (circle fit)", result->void_diameter_mm, result->confidence_percent);
-
+        void_characterise_detection(circle_data.radius_mm, expected_radius, result);
+        // FIXED: Use dominant_sensor instead of result->void_sector
+        snprintf(result->status_text, sizeof(result->status_text), "Void S%d: %dmm (circle)", dominant_sensor, result->void_size_mm);
         return true;
     }
 
-    strcpy(result->status_text, "No void detected (circle fit)");
+    snprintf(result->status_text, sizeof(result->status_text), "No void detected (circle)");
     return false;
 }
 
 static bool prv_simple_threshold_detection(void_status_t *result)
 {
-    // Use existing simple algorithm implementation
-    result->algorithm_used = VOID_ALG_SIMPLE;
+    uint8_t  valid_sensors   = 0;
+    uint16_t total_deviation = 0;
+    uint16_t max_deviation   = 0;
+    uint8_t  dominant_sensor = 0;
 
-    // Find the sensor with maximum deviation
-    uint16_t expected_distance = prv_void_system.config.baseline_diameter_mm / 2;
-    uint16_t threshold         = prv_void_system.config.detection_threshold_mm;
-
+    // Count valid sensors and calculate deviations
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
         if (prv_void_system.latest_measurement.data_valid[i])
         {
-            uint16_t distance = prv_void_system.latest_measurement.distance_mm[i];
+            valid_sensors++;
+            uint16_t expected  = prv_void_system.config.baseline_diameter_mm / 2;
+            uint16_t distance  = prv_void_system.latest_measurement.distance_mm[i];
+            uint16_t deviation = (distance > expected) ? (distance - expected) : (expected - distance);
 
-            if (distance > (expected_distance + threshold))
+            total_deviation += deviation;
+            if (deviation > max_deviation)
             {
-                result->void_detected      = true;
-                result->void_diameter_mm   = (distance - expected_distance) * 2;
-                result->confidence_percent = void_calculate_confidence(distance, expected_distance, threshold);
-                result->void_sector        = i;
-
-                void_characterise_detection(distance, expected_distance, result);
-                sprintf(result->status_text, "Void S%d: %dmm (fallback)", i, result->void_diameter_mm);
-
-                return true;
+                max_deviation   = deviation;
+                dominant_sensor = i;
             }
         }
     }
 
-    strcpy(result->status_text, "No void detected (simple)");
-    return false;
+    // Set partial data flag
+    result->partial_data = (valid_sensors < MAX_RADAR_SENSORS);
+
+    if (valid_sensors < 2)
+    {
+        result->void_detected      = false;
+        result->confidence_percent = 0;
+        strcpy(result->status_text, "Insufficient sensor data");
+        return false;
+    }
+
+    result->void_size_mm         = max_deviation; // FIXED
+    result->algorithm_used       = VOID_ALG_SIMPLE;
+    result->baseline_diameter_mm = prv_void_system.config.baseline_diameter_mm;
+
+    // Check if void detected
+    bool void_detected = (max_deviation > prv_void_system.config.detection_threshold_mm); // FIXED
+
+    if (void_detected)
+    {
+        result->void_detected      = true;
+        result->confidence_percent = void_calculate_confidence(max_deviation,
+                                                               prv_void_system.config.baseline_diameter_mm / 2,
+                                                               prv_void_system.config.detection_threshold_mm); // FIXED
+        void_characterise_detection(max_deviation, prv_void_system.config.baseline_diameter_mm / 2, result);
+
+        // Remove void_sector assignment as it doesn't exist in struct
+        // result->void_sector = dominant_sensor; // REMOVED
+
+        snprintf(result->status_text, sizeof(result->status_text), "Void detected: %dmm deviation (sensor %d)", max_deviation, dominant_sensor);
+    }
+    else
+    {
+        result->void_detected      = false;
+        result->confidence_percent = 0;
+        result->severity           = VOID_SEVERITY_NONE; // FIXED
+        strcpy(result->status_text, "No void detected");
+    }
+
+    return true;
 }
 
 static uint8_t prv_calculate_circle_confidence(const circle_fit_data_t *circle_data, uint16_t expected_radius)
 {
-    if (!circle_data || !circle_data->fit_successful)
+    if (!circle_data->fit_successful)
     {
         return 0;
     }
 
-    uint8_t confidence = 0;
-
-    // Factor 1: Geometric consistency (40% weight)
+    // Base confidence on fit error and radius deviation
     uint16_t radius_deviation = (circle_data->radius_mm > expected_radius) ? (circle_data->radius_mm - expected_radius) : (expected_radius - circle_data->radius_mm);
 
-    uint8_t geo_score = 0;
-    if (radius_deviation < 10)
+    // Lower confidence for high fit error or large center offset
+    uint8_t confidence = 100;
+
+    if (circle_data->fit_error_mm > 10)
     {
-        geo_score = 40;
-    }
-    else if (radius_deviation < 25)
-    {
-        geo_score = 30;
-    }
-    else if (radius_deviation < 50)
-    {
-        geo_score = 20;
-    }
-    else if (radius_deviation < 100)
-    {
-        geo_score = 10;
+        confidence -= (circle_data->fit_error_mm - 10) * 2; // Reduce by 2% per mm of error above 10mm
     }
 
-    confidence += geo_score;
-
-    // Factor 2: Fitting quality (35% weight)
-    uint8_t fit_score = 0;
-    if (circle_data->fit_error_mm < 5)
+    uint16_t center_offset = (uint16_t)sqrt(circle_data->center_x_mm * circle_data->center_x_mm + circle_data->center_y_mm * circle_data->center_y_mm);
+    if (center_offset > 50)
     {
-        fit_score = 35;
-    }
-    else if (circle_data->fit_error_mm < 10)
-    {
-        fit_score = 25;
-    }
-    else if (circle_data->fit_error_mm < 20)
-    {
-        fit_score = 15;
-    }
-    else if (circle_data->fit_error_mm < 30)
-    {
-        fit_score = 5;
+        confidence -= (center_offset - 50) / 5; // Reduce by 1% per 5mm of center offset above 50mm
     }
 
-    confidence += fit_score;
-
-    // Factor 3: Sensor coverage (25% weight)
-    uint8_t coverage_score = 0;
-    if (circle_data->sensors_used >= 3)
-    {
-        coverage_score = 25;
-    }
-    else if (circle_data->sensors_used == 2)
-    {
-        coverage_score = 15;
-    }
-    else if (circle_data->sensors_used == 1)
-    {
-        coverage_score = 5;
-    }
-
-    confidence += coverage_score;
-
-    return (confidence > 100) ? 100 : confidence;
+    return (confidence < VOID_MIN_CONFIDENCE) ? VOID_MIN_CONFIDENCE : confidence;
 }
 
 // Original functions (mostly unchanged)
@@ -501,25 +477,19 @@ uint8_t void_calculate_confidence(uint16_t distance_mm, uint16_t expected_mm, ui
 
 void void_characterise_detection(uint16_t distance_mm, uint16_t expected_mm, void_status_t *result)
 {
-    if (!result)
-    {
-        return;
-    }
+    uint16_t deviation = (distance_mm > expected_mm) ? (distance_mm - expected_mm) : (expected_mm - distance_mm);
 
-    uint16_t void_size = distance_mm - expected_mm;
-
-    // Classify severity based on void size
-    if (void_size < 20)
+    if (deviation < VOID_MINOR_THRESHOLD_MM)
     {
-        result->void_severity = VOID_SEVERITY_MINOR;
+        result->severity = VOID_SEVERITY_MINOR; // FIXED
     }
-    else if (void_size < 50)
+    else if (deviation < VOID_MAJOR_THRESHOLD_MM)
     {
-        result->void_severity = VOID_SEVERITY_MAJOR;
+        result->severity = VOID_SEVERITY_MAJOR; // FIXED
     }
     else
     {
-        result->void_severity = VOID_SEVERITY_CRITICAL;
+        result->severity = VOID_SEVERITY_CRITICAL; // FIXED
     }
 }
 
@@ -597,7 +567,7 @@ void_algorithm_t void_get_current_algorithm(void)
 // Status and data retrieval functions
 void void_get_latest_results(void_status_t *result)
 {
-    if (result)
+    if (result && prv_void_system.system_initialized)
     {
         *result = prv_void_system.current_status;
     }
@@ -605,7 +575,7 @@ void void_get_latest_results(void_status_t *result)
 
 void void_get_current_config(void_config_t *config)
 {
-    if (config)
+    if (config && prv_void_system.system_initialized)
     {
         *config = prv_void_system.config;
     }
@@ -613,12 +583,13 @@ void void_get_current_config(void_config_t *config)
 
 bool void_get_measurement_data(void_measurement_t *measurement)
 {
-    if (measurement)
+    if (!measurement || !prv_void_system.system_initialized)
     {
-        *measurement = prv_void_system.latest_measurement;
-        return true;
+        return false;
     }
-    return false;
+
+    *measurement = prv_void_system.latest_measurement;
+    return true;
 }
 
 uint8_t void_get_history_count(void)
@@ -628,19 +599,19 @@ uint8_t void_get_history_count(void)
 
 bool void_get_history_entry(uint8_t index, void_status_t *entry)
 {
-    if (entry && index < prv_void_system.history_count)
+    if (!entry || index >= prv_void_system.history_count)
     {
-        *entry = prv_void_system.history[index];
-        return true;
+        return false;
     }
-    return false;
+
+    *entry = prv_void_system.history[index];
+    return true;
 }
 
 void void_clear_history(void)
 {
     prv_void_system.history_count = 0;
     memset(prv_void_system.history, 0, sizeof(prv_void_system.history));
-    debug_send("Void history cleared");
 }
 
 bool void_is_system_ready(void)
@@ -670,11 +641,11 @@ const char *void_get_algorithm_string(void_algorithm_t algorithm)
     switch (algorithm)
     {
     case VOID_ALG_SIMPLE:
-        return "simple";
+        return "Simple Threshold";
     case VOID_ALG_CIRCLEFIT:
-        return "circlefit";
+        return "Circle Fitting";
     default:
-        return "unknown";
+        return "Unknown";
     }
 }
 
@@ -682,17 +653,19 @@ const char *void_get_algorithm_string(void_algorithm_t algorithm)
 static void prv_load_default_config(void)
 {
     prv_void_system.config.baseline_diameter_mm   = VOID_DEFAULT_BASELINE_MM;
-    prv_void_system.config.detection_threshold_mm = VOID_DEFAULT_THRESHOLD_MM;
+    prv_void_system.config.detection_threshold_mm = VOID_DEFAULT_THRESHOLD_MM; // FIXED
     prv_void_system.config.confidence_threshold   = VOID_MIN_CONFIDENCE;
-    prv_void_system.config.median_filter_enabled  = false;
-    prv_void_system.config.range_min_mm           = 50;
-    prv_void_system.config.range_max_mm           = 5000;
+    prv_void_system.config.median_filter_enabled  = true;
+    prv_void_system.config.range_min_mm           = 10;
+    prv_void_system.config.range_max_mm           = 500;
 
     // Circle fitting defaults
     prv_void_system.config.active_algorithm        = VOID_ALG_SIMPLE;
     prv_void_system.config.circle_fit_tolerance_mm = CIRCLE_FIT_DEFAULT_TOLERANCE_MM;
-    prv_void_system.config.min_sensors_for_circle  = 3;
+    prv_void_system.config.min_sensors_for_circle  = CIRCLE_FIT_MIN_SENSORS;
     prv_void_system.config.auto_fallback_enabled   = true;
+
+    prv_void_system.current_status.measurement_time_ms = HAL_GetTick(); // FIXED
 }
 
 static bool prv_validate_sensor_data(uint16_t distance_mm, uint8_t sensor_idx)
@@ -718,11 +691,11 @@ static void prv_update_measurement_data(void)
     // Get data from each radar sensor
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        radar_measurement_t *radar_data = radar_get_measurement(i);
-        if (radar_data && radar_data->data_valid)
+        radar_measurement_t *measurement = radar_get_measurement(i);
+        if (measurement && measurement->data_valid)
         {
-            prv_void_system.latest_measurement.distance_mm[i] = radar_data->distance_mm;
-            prv_void_system.latest_measurement.angle_deg[i]   = radar_data->angle_deg;
+            prv_void_system.latest_measurement.distance_mm[i] = measurement->distance_mm;
+            prv_void_system.latest_measurement.angle_deg[i]   = measurement->angle_deg;
             prv_void_system.latest_measurement.data_valid[i]  = true;
         }
         else
@@ -734,48 +707,18 @@ static void prv_update_measurement_data(void)
 
 static void prv_add_to_history(const void_status_t *status)
 {
-    if (!status)
-    {
-        return;
-    }
-
-    // Add to circular buffer
-    uint8_t index                  = prv_void_system.history_count % VOID_HISTORY_SIZE;
-    prv_void_system.history[index] = *status;
-
     if (prv_void_system.history_count < VOID_HISTORY_SIZE)
     {
+        prv_void_system.history[prv_void_system.history_count] = *status;
         prv_void_system.history_count++;
     }
-}
-
-static uint16_t prv_apply_median_filter(uint16_t distances[], uint8_t count)
-{
-    if (count == 0)
+    else
     {
-        return 0;
-    }
-    if (count == 1)
-    {
-        return distances[0];
-    }
-
-    // Simple bubble sort for small arrays
-    uint16_t sorted[MAX_RADAR_SENSORS];
-    memcpy(sorted, distances, count * sizeof(uint16_t));
-
-    for (uint8_t i = 0; i < count - 1; i++)
-    {
-        for (uint8_t j = 0; j < count - i - 1; j++)
+        // Shift history array and add new entry
+        for (uint8_t i = 0; i < (VOID_HISTORY_SIZE - 1); i++)
         {
-            if (sorted[j] > sorted[j + 1])
-            {
-                uint16_t temp = sorted[j];
-                sorted[j]     = sorted[j + 1];
-                sorted[j + 1] = temp;
-            }
+            prv_void_system.history[i] = prv_void_system.history[i + 1];
         }
+        prv_void_system.history[VOID_HISTORY_SIZE - 1] = *status;
     }
-
-    return sorted[count / 2];
 }

@@ -24,6 +24,9 @@ uint32_t       keepalive_timer;
 
 static const char *str_radar_status[4] = { "Not Initialised", "Ready", "Chirping", "Stopped" };
 
+// Add missing function declaration at the top
+bool void_is_system_ready(void); // Add this line after includes
+
 bool debug_get(void)
 {
     return debug;
@@ -166,15 +169,38 @@ bool module_init(void)
                 {
                     can_setup();
                     radar_system_init();
+
+                    // Test 1: Function logic test
+                    debug_send("Running sensor indexing diagnostics...");
+                    test_sensor_indexing();
+
+                    // Test 2: Real sensor communication test
+                    debug_send("Testing real sensor communication...");
+                    test_sensor_responses();
                 }
-                can_send(CAN_CMD_BASE, CAN_CMD_STATUS);
+                else
+                {
+                    // Subsequent retries - just ping sensors
+                    test_sensor_responses();
+                }
+
                 radar_retries++;
-            }
-            else
-            {
-                radar_init_status = RADAR_INIT_ERROR;
-                module_status_set(STATUS_RADAR_ERROR);
-                printf("@status,down,3\n"); // Radar error
+
+                // Check if we have enough responding sensors
+                uint8_t responding_sensors = get_active_sensor_count();
+
+                if (responding_sensors >= 2)
+                {
+                    radar_init_status = RADAR_INIT_OK;
+                    debug_send("✓ Radar init SUCCESS: %d/%d sensors responding", responding_sensors, MAX_RADAR_SENSORS);
+                }
+                else if (radar_retries >= 5)
+                {
+                    radar_init_status = RADAR_INIT_ERROR;
+                    module_status_set(STATUS_RADAR_ERROR);
+                    printf("@status,down,3\n");
+                    debug_send("✗ Radar init FAILED: Only %d/%d sensors responding after %d retries", responding_sensors, MAX_RADAR_SENSORS, radar_retries);
+                }
             }
         }
         else
@@ -329,7 +355,7 @@ void imu_validate(h_imu_t *h_imu)
             //				if(reserve_get() > 0) {
             //					if(module_status != 5) {
             //						module_status = 5;
-            //						printf("@init,down,status,%d\n",module_status);
+            //					 printf("@init,down,status,%d\n",module_status);
             //					}
             //				}
             //				else {

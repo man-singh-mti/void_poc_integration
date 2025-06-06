@@ -12,11 +12,35 @@
 #define VOID_DEFAULT_BASELINE_MM  150U // Default expected borehole diameter (mm)
 #define VOID_DEFAULT_THRESHOLD_MM 50U  // Default void detection threshold (mm)
 #define VOID_MIN_CONFIDENCE       70U  // Minimum confidence for void detection
-#define VOID_PROCESS_INTERVAL_MS  100U // Process void detection every 100ms
+#define VOID_PROCESS_INTERVAL_MS  10U  // Process void detection every 10ms
 
 // Circle fitting constants
 #define CIRCLE_FIT_DEFAULT_TOLERANCE_MM 20U // Default circle fitting tolerance
 #define CIRCLE_FIT_MIN_SENSORS          2U  // Minimum sensors for circle fitting
+
+// Add these constants after the existing #defines (around line 18)
+
+// Confidence calculation constants
+#define VOID_BASE_CONFIDENCE_PERCENT 70U  // Base confidence at threshold
+#define VOID_MAX_CONFIDENCE_PERCENT  100U // Maximum confidence
+#define VOID_CONFIDENCE_SCALE_FACTOR 30U  // Scaling factor for confidence
+
+// Circle fitting validation constants
+#define CIRCLE_FIT_MIN_RADIUS_MM        10U   // Minimum reasonable radius
+#define CIRCLE_FIT_MAX_RADIUS_MM        1000U // Maximum reasonable radius
+#define CIRCLE_FIT_MAX_CENTER_OFFSET_MM 500U  // Max center offset from origin
+
+// Severity classification thresholds
+#define VOID_MINOR_THRESHOLD_MM 20U // < 20mm = minor
+#define VOID_MAJOR_THRESHOLD_MM 50U // < 50mm = major, >= 50mm = critical
+
+// System timing constants
+#define VOID_SENSOR_TIMEOUT_MS 2000U // Sensor data timeout
+#define VOID_EVENT_DEBOUNCE_MS 200U  // Event debounce time
+
+// Mathematical constants for circle fitting
+#define VOID_PI         3.14159f
+#define VOID_DEG_TO_RAD 0.01745f // π/180
 
 // Void severity levels
 typedef enum
@@ -74,18 +98,16 @@ typedef struct
 // Void detection result
 typedef struct
 {
-    bool            void_detected;        // Current void state
-    uint8_t         void_sector;          // Which sensor detected void (0-2)
-    uint16_t        void_diameter_mm;     // Calculated void diameter
-    uint16_t        baseline_diameter_mm; // Expected baseline diameter
-    void_severity_t void_severity;        // Severity classification
-    uint8_t         confidence_percent;   // Detection confidence (0-100)
-    uint32_t        detection_time_ms;    // When void was detected
-    char            status_text[64];      // Human-readable status (increased size)
-
-    // Algorithm-specific data
-    void_algorithm_t  algorithm_used; // Which algorithm produced this result
-    circle_fit_data_t circle_data;    // Circle fitting results (valid when algorithm_used == CIRCLEFIT)
+    bool              void_detected;        // Is a void detected
+    void_severity_t   severity;             // Severity classification
+    uint8_t           confidence_percent;   // Detection confidence (0-100%)
+    uint16_t          void_size_mm;         // Estimated void size in millimeters
+    uint16_t          baseline_diameter_mm; // Expected baseline diameter
+    void_algorithm_t  algorithm_used;       // Which algorithm was used
+    uint32_t          measurement_time_ms;  // When measurement was taken
+    char              status_text[64];      // Human-readable status
+    circle_fit_data_t circle_data;          // Circle fitting results (valid when algorithm_used == CIRCLEFIT)
+    bool              partial_data;         // ADD THIS LINE - true if analysis used incomplete sensor data
 } void_status_t;
 
 // System-wide void detection state
@@ -103,6 +125,7 @@ typedef struct
 // Core void detection functions
 void void_system_init(void);
 void void_system_process(void);
+bool void_is_system_ready(void); // Add this line
 
 // Data analysis functions
 bool    void_analyze_sensor_data(uint8_t sensor_idx, uint16_t distance_mm, uint16_t angle_deg, void_status_t *result);

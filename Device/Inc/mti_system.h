@@ -21,9 +21,9 @@ typedef enum
     STATUS_SYNC,
     STATUS_OK,
     STATUS_IMU_ERROR,
-    STATUS_VOID_ERROR,
-    STATUS_RADAR_ERROR,
+    STATUS_RADAR_ERROR, // Add this line
     STATUS_TEMP_ERROR,
+    STATUS_VOID_ERROR,
     STATUS_VOID_DETECTION_ERROR // Add void-specific error
 } status_t;
 

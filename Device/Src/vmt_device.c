@@ -598,18 +598,23 @@ void device_process(void)
     {
         if (dev_init_process())
         {
-            // printf("@init,down,water\n"); //request water sensitivity
-            //			HAL_Delay(250);
-            //			printf("@init,down,ok\n");
+            b_init_finish = true;
+            debug_send("Device initialization complete");
         }
         return;
     }
+
     module_init();
     cmd_process();
 
     radar_system_process();
     temp_system_process();
-    void_system_process();
+
+    // --- MODIFICATION START ---
+    // Remove the periodic call to the void system process.
+    // It is now triggered by the radar module upon data completion.
+    // void_system_process(); // REMOVED: No longer called from main loop
+    // --- MODIFICATION END ---
 
     icm20948_process(&h_icm20948[0]);
     icm20948_process(&h_icm20948[1]);
@@ -617,16 +622,8 @@ void device_process(void)
     imu_process(&h_imu[0]);
     imu_process(&h_imu[1]);
 
-
-    water_detect();
-    keepalive_check();
-
-    uart_tx_channel_set(UART_DEBUG);
-
     log_save_process();
     log_load_process();
-    flash_fifo_process(&h_flash_fifo_1);
-    flash_process();
 
     dev_debug_process();
 }

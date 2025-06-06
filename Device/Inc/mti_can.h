@@ -3,6 +3,8 @@
 
 #include "stm32f7xx.h"
 #include <stdbool.h>
+#include "vmt_uart.h" // For debug_send function
+#include "mti_void.h"
 
 // Update for 3 sensors
 #define MAX_RADAR_SENSORS         3U
@@ -134,6 +136,11 @@ void process_complete_radar_frame(uint8_t sensor_idx);
 bool    is_sensor_online(uint8_t sensor_idx);
 uint8_t get_active_sensor_count(void);
 void    reset_sensor_data(uint8_t sensor_idx);
+
+// Debug and test functions
+void test_sensor_indexing(void);
+void test_sensor_responses(void);
+void debug_send(const char *format, ...);
 
 // Global radar system instance
 extern multi_radar_system_t radar_system;

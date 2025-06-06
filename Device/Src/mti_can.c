@@ -3,6 +3,7 @@
 #include "vmt_uart.h"
 #include "mti_system.h"
 #include "mti_radar.h"
+#include "mti_void.h" // ADD THIS LINE
 #include <string.h>
 
 CAN_RxHeaderTypeDef rxHeader;
@@ -43,11 +44,15 @@ bool can_setup(void)
     canfil.FilterMaskIdLow  = FILTER_MASK_DATA & 0xFFFF;
     HAL_CAN_ConfigFilter(&hcan1, &canfil);
 
-    HAL_CAN_Start(&hcan1);
-    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) == HAL_OK)
+    if (HAL_CAN_Start(&hcan1) != HAL_OK)
     {
-        return true;
+        return false;
     }
+
+    debug_send("CAN setup complete for %d sensors", MAX_RADAR_SENSORS);
+
+
+    return true;
 #endif
     return false;
 }
@@ -119,7 +124,7 @@ void broadcast_to_all_sensors(uint32_t base_id, uint8_t message)
     }
 }
 
-// Corrected sensor index extraction
+// Fix sensor index extraction
 uint8_t get_sensor_index_from_can_id(uint32_t can_id)
 {
     // Handle command messages (0x80-0x82)
@@ -135,14 +140,37 @@ uint8_t get_sensor_index_from_can_id(uint32_t can_id)
     // Handle data messages (0xA0-0xC4 range)
     if ((can_id & 0xF0) >= 0xA0 && (can_id & 0xF0) <= 0xC0)
     {
-        uint8_t offset     = can_id & 0x0F;
-        uint8_t sensor_idx = offset >> 4; // Extract sensor index from upper nibble of offset
+        // Extract sensor index from the lower 4 bits
+        // 0xA0 = sensor 0, 0xA1 = sensor 0, etc.
+        // 0xB0 = sensor 1, 0xB1 = sensor 1, etc.
+        // 0xC0 = sensor 2, 0xC1 = sensor 2, etc.
+
+        uint8_t base_id    = can_id & 0xF0;
+        uint8_t sensor_idx = 0;
+
+        switch (base_id)
+        {
+        case 0xA0:
+            sensor_idx = 0;
+            break; // Sensor 0 data messages
+        case 0xB0:
+            sensor_idx = 1;
+            break; // Sensor 1 data messages
+        case 0xC0:
+            sensor_idx = 2;
+            break; // Sensor 2 data messages
+        default:
+            debug_send("Unknown base ID for sensor indexing: 0x%02X", base_id);
+            return 0xFF; // Invalid
+        }
+
         if (sensor_idx < MAX_RADAR_SENSORS)
         {
             return sensor_idx;
         }
     }
 
+    debug_send("Invalid CAN ID for sensor indexing: 0x%02X", can_id);
     return 0xFF; // Invalid sensor index
 }
 
@@ -194,12 +222,31 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1)
         case 0xA0: // Header
             sensor->totalPacketLength = rx_data.words[0];
             sensor->frameNumber       = rx_data.words[1];
-            sensor->numDetPoints      = (sensor->totalPacketLength > 129) ? (sensor->totalPacketLength - 129) : 0;
-            sensor->pointIndex        = 0;
-            sensor->maxSNR            = 0;
-            sensor->new_data_ready    = false;
 
-            debug_send("S%d Frame: %d, Points: %d", sensor_idx, sensor->frameNumber, sensor->numDetPoints);
+            // FIXED: Proper packet size calculation
+            // Each detected point is 8 bytes (2 floats: distance + SNR)
+            // Header is 8 bytes, so subtract header size and divide by point size
+            if (sensor->totalPacketLength > 8)
+            {
+                sensor->numDetPoints = (sensor->totalPacketLength - 8) / 8;
+            }
+            else
+            {
+                sensor->numDetPoints = 0;
+            }
+
+            // Sanity check
+            if (sensor->numDetPoints > MAX_RADAR_DETECTED_POINTS)
+            {
+                debug_send("S%d: Too many points (%d), limiting to %d", sensor_idx, sensor->numDetPoints, MAX_RADAR_DETECTED_POINTS);
+                sensor->numDetPoints = MAX_RADAR_DETECTED_POINTS;
+            }
+
+            sensor->pointIndex     = 0;
+            sensor->maxSNR         = 0;
+            sensor->new_data_ready = false;
+
+            debug_send("S%d Frame: %d, Points: %d (total packet: %d bytes)", sensor_idx, sensor->frameNumber, sensor->numDetPoints, sensor->totalPacketLength);
             break;
 
         case 0xA1: // Detected point
@@ -287,6 +334,21 @@ void process_complete_radar_frame(uint8_t sensor_idx)
 
     // Call the simplified radar processing function
     radar_process_measurement(sensor_idx, sensor->detectedPoints, sensor->numDetPoints);
+
+    // Handle completion based on current mode
+    extern radar_round_robin_t radar_round_robin; // Access to radar state
+
+    if (radar_round_robin.staggered_mode)
+    {
+        // Mark sensor complete (existing logic)
+        if (!radar_round_robin.frame_complete[sensor_idx])
+        {
+            radar_round_robin.frame_complete[sensor_idx] = true;
+            radar_round_robin.sensors_completed++;
+        }
+        // REMOVE ANY VOID ANALYSIS CALLS FROM HERE
+    }
+    // REMOVE sequential mode logic entirely
 }
 
 // Add this function if it's missing
@@ -328,4 +390,112 @@ void reset_sensor_data(uint8_t sensor_idx)
     radar_data_t *sensor = &radar_system.sensors[sensor_idx];
     memset(sensor, 0, sizeof(radar_data_t));
     radar_system.sensor_online[sensor_idx] = false;
+}
+
+// Add this function after the get_sensor_index_from_can_id function
+
+void test_sensor_indexing(void)
+{
+    debug_send("=== Testing Sensor Indexing Fix ===");
+
+    // Test various CAN IDs to verify sensor indexing works correctly
+    struct
+    {
+        uint32_t    can_id;
+        uint8_t     expected_sensor;
+        const char *message_type;
+    } test_cases[] = {
+        // Sensor 0 messages (0xA0-0xAF range)
+        { 0xA0, 0, "S0 Header" },
+        { 0xA1, 0, "S0 Object" },
+        { 0xA2, 0, "S0 Profile" },
+        { 0xA3, 0, "S0 Status" },
+        { 0xA4, 0, "S0 Version" },
+
+        // Sensor 1 messages (0xB0-0xBF range)
+        { 0xB0, 1, "S1 Header" },
+        { 0xB1, 1, "S1 Object" },
+        { 0xB2, 1, "S1 Profile" },
+        { 0xB3, 1, "S1 Status" },
+        { 0xB4, 1, "S1 Version" },
+
+        // Sensor 2 messages (0xC0-0xCF range)
+        { 0xC0, 2, "S2 Header" },
+        { 0xC1, 2, "S2 Object" },
+        { 0xC2, 2, "S2 Profile" },
+        { 0xC3, 2, "S2 Status" },
+        { 0xC4, 2, "S2 Version" },
+
+        // Command messages (should work too)
+        { 0x80, 0, "S0 Command" },
+        { 0x81, 1, "S1 Command" },
+        { 0x82, 2, "S2 Command" },
+
+        // Invalid cases
+        { 0x70, 0xFF, "Invalid ID" },
+        { 0xD0, 0xFF, "Out of range" },
+    };
+
+    uint8_t test_count = sizeof(test_cases) / sizeof(test_cases[0]);
+    uint8_t passed     = 0;
+
+    for (uint8_t i = 0; i < test_count; i++)
+    {
+        uint8_t result = get_sensor_index_from_can_id(test_cases[i].can_id);
+        bool    pass   = (result == test_cases[i].expected_sensor);
+
+        debug_send("Test %2d: ID 0x%02X (%s) -> Sensor %d (expected %d) %s",
+                   i + 1,
+                   test_cases[i].can_id,
+                   test_cases[i].message_type,
+                   result,
+                   test_cases[i].expected_sensor,
+                   pass ? "PASS" : "FAIL");
+
+        if (pass)
+            passed++;
+    }
+
+    debug_send("=== Sensor Indexing Test Results: %d/%d PASSED ===", passed, test_count);
+
+    if (passed == test_count)
+    {
+        debug_send("✓ All sensor indexing tests PASSED - system ready");
+    }
+    else
+    {
+        debug_send("✗ %d sensor indexing tests FAILED - check implementation", test_count - passed);
+    }
+}
+
+// Add this function after test_sensor_indexing()
+
+void test_sensor_responses(void)
+{
+    debug_send("=== Testing Real Sensor Responses ===");
+
+    // Send status command to each sensor individually
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        debug_send("Pinging sensor %d...", i);
+        can_send_to_sensor(i, CAN_CMD_BASE, CAN_CMD_STATUS);
+
+        // Small delay between sensor pings
+        HAL_Delay(100);
+    }
+
+    // Wait a bit for responses
+    HAL_Delay(500);
+
+    // Check results
+    uint8_t responding_sensors = 0;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        bool online = is_sensor_online(i);
+        debug_send("Sensor %d: %s", i, online ? "ONLINE" : "OFFLINE");
+        if (online)
+            responding_sensors++;
+    }
+
+    debug_send("=== Sensor Response Test: %d/%d sensors responding ===", responding_sensors, MAX_RADAR_SENSORS);
 }

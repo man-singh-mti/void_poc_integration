@@ -330,6 +330,7 @@ All void events report cross-sectional analysis; uphole system will add vertical
 #### Available Commands (✅ Implemented)
 
 **Basic Status and Configuration:**
+
 ```bash
 # Status queries
 @vd,status?                           # Get current void detection status
@@ -354,6 +355,7 @@ All void events report cross-sectional analysis; uphole system will add vertical
 #### Response Formats (✅ Implemented)
 
 **Status Response:**
+
 ```bash
 &vd,status,<detected>,<sector>,<diameter_mm>,<confidence_%>,<severity>,<algorithm>,<text>
 
@@ -363,6 +365,7 @@ All void events report cross-sectional analysis; uphole system will add vertical
 ```
 
 **Configuration Acknowledgments:**
+
 ```bash
 &vd,config,thresh,ack,<value>         # Threshold set confirmation
 &vd,config,baseline,ack,<value>       # Baseline set confirmation
@@ -370,6 +373,7 @@ All void events report cross-sectional analysis; uphole system will add vertical
 ```
 
 **Asynchronous Events:**
+
 ```bash
 !vd,flag,<sector>,<diameter_mm>,<confidence_%>,<algorithm>
 
@@ -404,30 +408,34 @@ All void events report cross-sectional analysis; uphole system will add vertical
 **Command Handler Location:** `vmt_command.c` → `cmd_void()` function
 
 **Current Implementation Status:**
-- ✅ **Basic void detection** (75% complete)
-- ✅ **Simple algorithm** (threshold-based detection)
-- ✅ **Circle fitting algorithm** (3-point circle fitting with fallback)
-- ✅ **Configuration interface** (threshold, baseline, confidence settings)
-- ✅ **Algorithm switching** (runtime selection between simple/circlefit)
-- ✅ **Event generation** (asynchronous void detection alerts)
-- ⚠️ **History management** (framework exists, needs completion)
-- ⚠️ **Advanced diagnostics** (planned for future implementation)
+
+* ✅ **Basic void detection** (75% complete)
+* ✅ **Simple algorithm** (threshold-based detection)
+* ✅ **Circle fitting algorithm** (3-point circle fitting with fallback)
+* ✅ **Configuration interface** (threshold, baseline, confidence settings)
+* ✅ **Algorithm switching** (runtime selection between simple/circlefit)
+* ✅ **Event generation** (asynchronous void detection alerts)
+* ⚠️ **History management** (framework exists, needs completion)
+* ⚠️ **Advanced diagnostics** (planned for future implementation)
 
 **Integration Points:**
-- **Data Source:** `mti_radar.c` → `radar_get_measurement()`
-- **Processing:** `mti_void.c` → `void_system_process()` (called every 100ms)
-- **Commands:** `vmt_command.c` → `cmd_void()` handler
-- **Events:** `debug_send()` for asynchronous notifications
+
+* **Data Source:** `mti_radar.c` → `radar_get_measurement()`
+* **Processing:** `mti_void.c` → `void_system_process()` (called every 100ms)
+* **Commands:** `vmt_command.c` → `cmd_void()` handler
+* **Events:** `debug_send()` for asynchronous notifications
 
 **Performance Characteristics:**
-- **Processing Interval:** 100ms (10Hz)
-- **Command Response Time:** <50ms
-- **Memory Usage:** ~4KB static allocation
-- **CPU Overhead:** <10% of main loop time
+
+* **Processing Interval:** 100ms (10Hz)
+* **Command Response Time:** <50ms
+* **Memory Usage:** ~4KB static allocation
+* **CPU Overhead:** <10% of main loop time
 
 #### Usage Examples
 
 **Basic Setup:**
+
 ```bash
 @vd,config,baseline,150               # Set 150mm expected diameter
 @vd,config,thresh,50                  # Set 50mm void detection threshold
@@ -436,6 +444,7 @@ All void events report cross-sectional analysis; uphole system will add vertical
 ```
 
 **Advanced Circle Fitting:**
+
 ```bash
 @vd,config,algorithm,circlefit        # Switch to circle fitting
 @vd,config,circle_tolerance,15        # Set 15mm fit tolerance
@@ -444,6 +453,7 @@ All void events report cross-sectional analysis; uphole system will add vertical
 ```
 
 **Monitoring:**
+
 ```bash
 @vd,status?                           # Poll current status
 # System will also send automatic events:
@@ -453,23 +463,29 @@ All void events report cross-sectional analysis; uphole system will add vertical
 ### 4.2.4. Implementation Roadmap
 
 #### Phase 1: Core Functionality (✅ Complete)
-- [x] Basic threshold detection
-- [x] Circle fitting algorithm
-- [x] Configuration interface
-- [x] Algorithm switching
-- [x] Event generation
+
+* [x] Basic threshold detection
+
+* [x] Circle fitting algorithm
+* [x] Configuration interface
+* [x] Algorithm switching
+* [x] Event generation
 
 #### Phase 2: Enhanced Features (🔄 In Progress)
-- [ ] Complete history management commands
-- [ ] Advanced diagnostics interface
-- [ ] Sensor calibration framework
-- [ ] Performance optimization
+
+* [ ] Complete history management commands
+
+* [ ] Advanced diagnostics interface
+* [ ] Sensor calibration framework
+* [ ] Performance optimization
 
 #### Phase 3: Production Features (📋 Planned)
-- [ ] Statistical analysis algorithms
-- [ ] Machine learning integration hooks
-- [ ] Advanced confidence models
-- [ ] Multi-algorithm fusion
+
+* [ ] Statistical analysis algorithms
+
+* [ ] Machine learning integration hooks
+* [ ] Advanced confidence models
+* [ ] Multi-algorithm fusion
 
 ---
 
