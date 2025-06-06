@@ -302,3 +302,30 @@ uint8_t get_active_sensor_count(void)
     }
     return count;
 }
+
+// Add these missing functions at the end
+bool is_sensor_online(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
+        return false;
+    }
+
+    // Consider sensor online if we've received a message in the last 2 seconds
+    uint32_t current_time = HAL_GetTick();
+    uint32_t last_message = radar_system.last_message_timestamp[sensor_idx];
+
+    return (current_time - last_message) < 2000; // 2 second timeout
+}
+
+void reset_sensor_data(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
+        return;
+    }
+
+    radar_data_t *sensor = &radar_system.sensors[sensor_idx];
+    memset(sensor, 0, sizeof(radar_data_t));
+    radar_system.sensor_online[sensor_idx] = false;
+}

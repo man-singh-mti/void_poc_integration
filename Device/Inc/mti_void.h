@@ -14,6 +14,10 @@
 #define VOID_MIN_CONFIDENCE       70U  // Minimum confidence for void detection
 #define VOID_PROCESS_INTERVAL_MS  100U // Process void detection every 100ms
 
+// Circle fitting constants
+#define CIRCLE_FIT_DEFAULT_TOLERANCE_MM 20U // Default circle fitting tolerance
+#define CIRCLE_FIT_MIN_SENSORS          2U  // Minimum sensors for circle fitting
+
 // Void severity levels
 typedef enum
 {
@@ -22,6 +26,24 @@ typedef enum
     VOID_SEVERITY_MAJOR    = 2,
     VOID_SEVERITY_CRITICAL = 3
 } void_severity_t;
+
+// Algorithm selection
+typedef enum
+{
+    VOID_ALG_SIMPLE    = 0, // Threshold-based detection (POC default)
+    VOID_ALG_CIRCLEFIT = 1  // 3-point circle fitting (advanced)
+} void_algorithm_t;
+
+// Circle fitting result data
+typedef struct
+{
+    bool     fit_successful; // Was circle fitting successful
+    int16_t  center_x_mm;    // Circle center X coordinate (mm) - signed for offset
+    int16_t  center_y_mm;    // Circle center Y coordinate (mm) - signed for offset
+    uint16_t radius_mm;      // Fitted circle radius (mm)
+    uint16_t fit_error_mm;   // RMS fitting error (mm)
+    uint8_t  sensors_used;   // Number of sensors used in fit
+} circle_fit_data_t;
 
 // Void detection configuration
 typedef struct
@@ -32,6 +54,12 @@ typedef struct
     bool     median_filter_enabled;  // Enable median filtering
     uint16_t range_min_mm;           // Minimum valid distance
     uint16_t range_max_mm;           // Maximum valid distance
+
+    // Circle fitting parameters
+    void_algorithm_t active_algorithm;        // Which algorithm to use
+    uint16_t         circle_fit_tolerance_mm; // Max acceptable fit error
+    uint8_t          min_sensors_for_circle;  // Minimum sensors required
+    bool             auto_fallback_enabled;   // Fall back to simple if circle fails
 } void_config_t;
 
 // Single void measurement from one sensor
@@ -53,7 +81,11 @@ typedef struct
     void_severity_t void_severity;        // Severity classification
     uint8_t         confidence_percent;   // Detection confidence (0-100)
     uint32_t        detection_time_ms;    // When void was detected
-    char            status_text[32];      // Human-readable status
+    char            status_text[64];      // Human-readable status (increased size)
+
+    // Algorithm-specific data
+    void_algorithm_t  algorithm_used; // Which algorithm produced this result
+    circle_fit_data_t circle_data;    // Circle fitting results (valid when algorithm_used == CIRCLEFIT)
 } void_status_t;
 
 // System-wide void detection state
@@ -84,6 +116,13 @@ void void_set_confidence_threshold(uint8_t confidence_percent);
 void void_set_range(uint16_t min_mm, uint16_t max_mm);
 void void_set_median_filter(bool enabled);
 
+// Circle fitting configuration functions
+void             void_set_detection_algorithm(void_algorithm_t algorithm);
+void             void_set_circle_tolerance(uint16_t tolerance_mm);
+void             void_set_min_sensors_circle(uint8_t min_sensors);
+void             void_set_auto_fallback(bool enabled);
+void_algorithm_t void_get_current_algorithm(void);
+
 // Status and data retrieval functions
 void    void_get_latest_results(void_status_t *result);
 void    void_get_current_config(void_config_t *config);
@@ -95,5 +134,6 @@ bool    void_get_history_entry(uint8_t index, void_status_t *entry);
 void        void_clear_history(void);
 bool        void_is_system_ready(void);
 const char *void_get_severity_string(void_severity_t severity);
+const char *void_get_algorithm_string(void_algorithm_t algorithm);
 
 #endif // MTI_VOID_H

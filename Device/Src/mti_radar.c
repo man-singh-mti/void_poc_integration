@@ -82,6 +82,7 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADA
     // Reset measurement
     measurement->distance_mm = 0;
     measurement->data_valid  = false;
+    measurement->angle_deg   = sensor_angles[sensor_idx]; // ADD THIS LINE
 
     // Find the CLOSEST valid point (closest to borehole wall)
     float closest_distance = 999.0f; // Start with large value
@@ -91,9 +92,6 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADA
     {
         float distance_m = detectedPoints[i][0];
         float snr        = detectedPoints[i][1];
-
-        // Remove this debug message - silent processing
-        // debug_send("S%d Point %d: %.3fm, SNR=%.1f", sensor_idx, i, distance_m, snr);
 
         // Simple filtering: minimum SNR and reasonable distance for borehole measurement
         if (snr > 100.0f && distance_m > 0.05f && distance_m < 5.0f) // 5cm to 5m range
@@ -108,18 +106,11 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADA
 
     if (found_valid)
     {
-        // Convert to millimeters and store single distance
+        // Convert to millimeters and store
         measurement->distance_mm = (uint16_t)(closest_distance * 1000.0f);
         measurement->data_valid  = true;
-
-        // Remove this debug message - silent processing
-        // debug_send("S%d (%d deg): Wall distance = %u mm", sensor_idx, sensor_angles[sensor_idx], measurement->distance_mm);
+        // angle_deg already set above
     }
-    // Remove else debug message - silent processing
-    // else
-    // {
-    //     debug_send("S%d (%d deg): No valid wall measurement", sensor_idx, sensor_angles[sensor_idx]);
-    // }
 
     // IMMEDIATE SWITCH: Move to next sensor after processing frame
     uint32_t time_since_switch = HAL_GetTick() - radar_round_robin.last_switch_time;
