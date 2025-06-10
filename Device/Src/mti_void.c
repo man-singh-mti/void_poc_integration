@@ -697,27 +697,6 @@ static bool prv_validate_sensor_data(uint16_t distance_mm, uint8_t sensor_idx)
     return true;
 }
 
-static void prv_update_measurement_data(void)
-{
-    prv_void_system.latest_measurement.measurement_time_ms = HAL_GetTick();
-
-    // Get data from each radar sensor
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        radar_measurement_t *measurement = radar_get_measurement(i);
-        if (measurement && measurement->data_valid)
-        {
-            prv_void_system.latest_measurement.distance_mm[i] = measurement->distance_mm;
-            prv_void_system.latest_measurement.angle_deg[i]   = measurement->angle_deg;
-            prv_void_system.latest_measurement.data_valid[i]  = true;
-        }
-        else
-        {
-            prv_void_system.latest_measurement.data_valid[i] = false;
-        }
-    }
-}
-
 static void prv_add_to_history(const void_status_t *status)
 {
     if (prv_void_system.history_count < VOID_HISTORY_SIZE)
