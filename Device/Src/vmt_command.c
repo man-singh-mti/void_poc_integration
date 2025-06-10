@@ -4,22 +4,17 @@
 #include <stdlib.h>
 #include <math.h>
 
-// HAL/STM32 peripherals
 #include "spi.h"
 
-// Device modules
 #include "vmt_uart.h"
 #include "vmt_device.h"
 #include "vmt_adc.h"
 #include "vmt_flash.h"
 #include "vmt_flash_fifo.h"
-
-// Sensors and system modules
 #include "mti_imu.h"
 #include "mti_water.h"
 #include "mti_system.h"
-#include "mti_temp.h"
-#include "mti_void.h"
+#include "mti_temp.h" // Add include
 
 /* type define */
 #define CMD_STR_LEN_MAX   (255)
@@ -33,7 +28,7 @@ typedef struct h_cmd_str_buff_
 
 bool auto_log;
 
-/* function prototypes */
+/* function define */
 void cmd_find_cb(uint8_t id);
 void cmd_spi_finish(h_dev_spi_send_t *p_h_spi);
 
@@ -42,6 +37,7 @@ static void cmd_fifo_multi_w_process(void);
 static void cmd_fifo_check_process(void);
 static void cmd_fifo_multi_d_process(void);
 
+// static void cmd_example(str_pointers_t *str_p);
 static void cmd_detect(h_str_pointers_t *str_p);
 static void cmd_bottom(h_str_pointers_t *str_p);
 static void cmd_water(h_str_pointers_t *str_p);
@@ -50,7 +46,7 @@ static void cmd_start(h_str_pointers_t *str_p);
 static void cmd_finish(h_str_pointers_t *str_p);
 static void cmd_initial(h_str_pointers_t *str_p);
 static void cmd_connect(h_str_pointers_t *str_p);
-static void cmd_sleep(h_str_pointers_t *str_p);
+static void cmd_sleep(h_str_pointers_t *p_h_str_p);
 static void cmd_echo(h_str_pointers_t *str_p);
 static void cmd_spi(h_str_pointers_t *str_p);
 static void cmd_log(h_str_pointers_t *str_p);
@@ -59,9 +55,9 @@ static void cmd_flash(h_str_pointers_t *str_p);
 static void cmd_debug(h_str_pointers_t *str_p);
 static void cmd_imu(h_str_pointers_t *str_p);
 static void cmd_void(h_str_pointers_t *str_p);
-static void cmd_temp(h_str_pointers_t *str_p);
-
-/* command string constants */
+static void cmd_temp(h_str_pointers_t *str_p); // Add command handler function
+/* variable */
+// static const char cmd_str_example[] = "@example";
 static const char cmd_str_detect[]     = "@dt";
 static const char cmd_str_bottom[]     = "@bt";
 static const char cmd_str_water[]      = "@wt";
@@ -79,8 +75,8 @@ static const char cmd_str_flash_fifo[] = "@ff";
 static const char cmd_str_flash[]      = "@flash";
 static const char cmd_str_imu[]        = "@imu";
 static const char cmd_str_debug[]      = "@cmd";
-static const char cmd_str_void[]       = "@vd";
-static const char cmd_str_temp[]       = "@temp";
+static const char cmd_str_void[]       = "!void";
+static const char cmd_str_temp[]       = "@temp"; // Add to command strings
 
 static h_str_cmd_t h_str_cmd_debug[] = {
     {
@@ -138,10 +134,6 @@ static h_str_cmd_t h_str_cmd_debug[] = {
     {
         .ptr      = (char *)cmd_str_temp,
         .callback = cmd_temp, // Add to command handlers
-    },
-    {
-        .ptr      = (char *)cmd_str_void,
-        .callback = cmd_void,
     },
 };
 
@@ -202,6 +194,13 @@ static h_str_cmd_t h_str_cmd_uphole[] = {
         .ptr      = (char *)cmd_str_temp,
         .callback = cmd_temp, // Add to command handlers
     },
+};
+
+static h_str_cmd_t h_str_cmd_void[] = {
+    {
+        .ptr      = (char *)cmd_str_init,
+        .callback = cmd_initial,
+    },
     {
         .ptr      = (char *)cmd_str_void,
         .callback = cmd_void,
@@ -210,6 +209,7 @@ static h_str_cmd_t h_str_cmd_uphole[] = {
 
 static char str_head_uphole[STR_H_STR_CMD_HEAD_LEN_GET(h_str_cmd_uphole)] = { 0x0 };
 static char str_head_debug[STR_H_STR_CMD_HEAD_LEN_GET(h_str_cmd_debug)]   = { 0x0 };
+static char str_head_void[STR_H_STR_CMD_HEAD_LEN_GET(h_str_cmd_void)]     = { 0x0 };
 
 static const char delimiters[] = ",";
 static const char end_char[]   = "\n";
@@ -231,7 +231,14 @@ static h_string_t h_str[UART_NUMBER] = {
 		.p_delimiters = (char*) delimiters,
 		.p_end_char = (char*) end_char,
 		.cmd_find_cb = cmd_find_cb, },
-};
+	[UART_VOID] = {
+		.id = UART_VOID,
+		.p_h_cmd = h_str_cmd_void,
+		.cmd_n = STR_H_STR_CMD_LEN_GET(h_str_cmd_void),
+		.p_cmd_head = (char*) str_head_void,
+		.p_delimiters = (char*) delimiters,
+		.p_end_char = (char*) end_char,
+		.cmd_find_cb = cmd_find_cb, }, };
 
 static h_cmd_str_buff_t h_cmd_str_buff[UART_NUMBER] = { 0x0 };
 
@@ -615,8 +622,8 @@ static void cmd_sensor(h_str_pointers_t *str_p)
     case 'w':
         if (str_p->part[2] == NULL)
         { // calibrate
-            uint16_t water_1 = adc_value_get(ADC_SEQ_WATER_1);
-            uint16_t water_2 = adc_value_get(ADC_SEQ_WATER_2);
+            uint16_t water_1 = adc_value_get(ADC_SEQ_WATER_BEGIN);
+            uint16_t water_2 = adc_value_get(ADC_SEQ_WATER_BEGIN + 1);
             printf("%s,w,%u,%u\n", cmd_str_sensor, water_1, water_2);
             reserve_set(water_1 - 500);
         }
@@ -1378,87 +1385,20 @@ static void cmd_flash(h_str_pointers_t *str_p)
     uart_tx_channel_undo();
 }
 
-// Implement cmd_void function (replace the stub around line 1275):
 static void cmd_void(h_str_pointers_t *str_p)
 {
-    uart_tx_channel_set(cmd_uart_ch);
-
-    if (str_p->part[1] == NULL)
+    bool void_detected = atoi(str_p->part[1]);
+    uart_tx_channel_set(UART_DEBUG);
+    if (void_detected)
     {
-        // Simple status query: @vd
-        void_status_t status;
-        void_get_latest_results(&status);
-
-        // Simple response format per void.md
-        printf("&vd,0x%02X,%d,%d,%d,%d,%d,%d,%d\n",
-               (status.void_detected ? 0x10 : 0x00) | 0x0F, // flags with all sensors valid
-               radar_get_distance_mm(0),
-               radar_get_distance_mm(1),
-               radar_get_distance_mm(2),
-               status.void_detected && status.void_size_mm > 0 ? status.void_size_mm : 0,
-               0, // sensor 1 void size (future)
-               0, // sensor 2 void size (future)
-               status.confidence_percent);
-        uart_tx_channel_undo();
-        return;
-    }
-
-    // Handle configuration commands
-    if (strcmp(str_p->part[1], "t") == 0 && str_p->part[2] != NULL)
-    {
-        // @vd,t,<threshold>
-        uint16_t threshold = atoi(str_p->part[2]);
-        void_set_threshold(threshold);
-        printf("&vd,ok,t,%d\n", threshold);
-    }
-    else if (strcmp(str_p->part[1], "b") == 0 && str_p->part[2] != NULL)
-    {
-        // @vd,b,<baseline>
-        uint16_t baseline = atoi(str_p->part[2]);
-        void_set_baseline(baseline);
-        printf("&vd,ok,b,%d\n", baseline);
-    }
-    else if (strcmp(str_p->part[1], "c") == 0 && str_p->part[2] != NULL)
-    {
-        // @vd,c,<confidence>
-        uint8_t confidence = atoi(str_p->part[2]);
-        void_set_confidence_threshold(confidence);
-        printf("&vd,ok,c,%d\n", confidence);
-    }
-    else if (strcmp(str_p->part[1], "alg") == 0 && str_p->part[2] != NULL)
-    {
-        // @vd,alg,<0/1>
-        void_algorithm_t alg = (atoi(str_p->part[2]) == 1) ? VOID_ALG_CIRCLEFIT : VOID_ALG_SIMPLE;
-        void_set_detection_algorithm(alg);
-        printf("&vd,ok,alg,%s\n", void_get_algorithm_string(alg));
-    }
-    else if (strcmp(str_p->part[1], "status") == 0)
-    {
-        // @vd,status - verbose status
-        void_status_t status;
-        void_get_latest_results(&status);
-
-        printf("&vd,status,%d,%s,%d,%d,%s,%d,%s\n",
-               status.void_detected ? 1 : 0,
-               void_get_severity_string(status.severity),
-               status.void_size_mm,
-               status.confidence_percent,
-               void_get_algorithm_string(status.algorithm_used),
-               status.baseline_diameter_mm,
-               status.status_text);
-
-        // Send sensor data
-        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-        {
-            printf("&vd,sensor,%d,%s,%d,%d\n", i, radar_has_valid_data(i) ? "ok" : "invalid", radar_get_distance_mm(i), radar_get_angle_deg(i));
-        }
+        printf("@db,Void detected\n");
     }
     else
     {
-        printf("&vd,err,unknown_cmd\n");
+        printf("@db,Void ended\n");
     }
-
-    uart_tx_channel_undo();
+    uart_tx_channel_set(UART_UPHOLE);
+    printf("%s,%s\n", str_p->part[0], str_p->part[1]);
 }
 
 static void cmd_debug(h_str_pointers_t *str_p)

@@ -30,8 +30,8 @@ bool water_detect(void)
         return b_water;
     }
 
-    water_value_1 = adc_value_get(ADC_SEQ_WATER_1);
-    water_value_2 = adc_value_get(ADC_SEQ_WATER_2);
+    water_value_1 = adc_value_get(ADC_SEQ_WATER_BEGIN);
+    water_value_2 = adc_value_get(ADC_SEQ_WATER_BEGIN + 1);
     if (water_value_1 > water_value_2)
     {
         water_value = water_value_1;

@@ -39,11 +39,7 @@ void void_system_init(void)
     prv_void_system.system_initialized   = true;
     prv_void_system.last_process_time_ms = HAL_GetTick();
 
-    // Simple POC initialization feedback
-    debug_send("Void detection system initialized (algorithm: %s, baseline: %dmm, threshold: %dmm)",
-               void_get_algorithm_string(prv_void_system.config.active_algorithm),
-               prv_void_system.config.baseline_diameter_mm,
-               prv_void_system.config.detection_threshold_mm);
+    debug_send("Void detection system initialized (algorithm: %s)", void_get_algorithm_string(prv_void_system.config.active_algorithm));
 }
 
 void void_system_process(void)
@@ -102,15 +98,6 @@ void void_system_process(void)
         prv_add_to_history(&new_status);
 
         debug_send("Void detected (immediate): %s", new_status.status_text);
-    }
-
-    // AUTOMATIC: Send data when processing complete
-    void_send_data();
-
-    // OPTIONAL: Send immediate event if void detected
-    if (prv_void_system.current_status.void_detected)
-    {
-        void_send_event();
     }
 }
 
@@ -697,113 +684,6 @@ static bool prv_validate_sensor_data(uint16_t distance_mm, uint8_t sensor_idx)
     return true;
 }
 
-static void prv_add_to_history(const void_status_t *status)
-{
-    if (prv_void_system.history_count < VOID_HISTORY_SIZE)
-    {
-        prv_void_system.history[prv_void_system.history_count] = *status;
-        prv_void_system.history_count++;
-    }
-    else
-    {
-        // Shift history array and add new entry
-        for (uint8_t i = 0; i < (VOID_HISTORY_SIZE - 1); i++)
-        {
-            prv_void_system.history[i] = prv_void_system.history[i + 1];
-        }
-        prv_void_system.history[VOID_HISTORY_SIZE - 1] = *status;
-    }
-}
-
-static uint16_t prv_apply_median_filter(uint16_t distances[], uint8_t count)
-{
-    if (count == 0)
-    {
-        return 0;
-    }
-    if (count == 1)
-    {
-        return distances[0];
-    }
-    // Simple bubble sort for small arrays
-    uint16_t sorted[MAX_RADAR_SENSORS];
-    for (uint8_t i = 0; i < count; i++)
-    {
-        sorted[i] = distances[i];
-    }
-
-    for (uint8_t i = 0; i < count - 1; i++)
-    {
-        for (uint8_t j = 0; j < count - i - 1; j++)
-        {
-            if (sorted[j] > sorted[j + 1])
-            {
-                uint16_t temp = sorted[j];
-                sorted[j]     = sorted[j + 1];
-                sorted[j + 1] = temp;
-            }
-        }
-    }
-
-    return sorted[count / 2]; // Return median
-}
-
-// COMPLETE: Automatic data transmission function
-void void_send_data(void)
-{
-    void_measurement_t *latest = &prv_void_system.latest_measurement;
-
-    // Calculate flags (0x0F = all sensors valid, 0x10 = void detected)
-    uint8_t flags = 0x00;
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        if (latest->data_valid[i])
-        {
-            flags |= (0x01 << i); // Set sensor valid bit
-        }
-    }
-    if (prv_void_system.current_status.void_detected)
-    {
-        flags |= 0x10; // Set void detected bit
-    }
-
-    // Calculate void sizes (0 if no void)
-    uint16_t void_sizes[MAX_RADAR_SENSORS] = { 0 };
-    if (prv_void_system.current_status.void_detected)
-    {
-        // Set void size for detected void
-        void_sizes[0] = prv_void_system.current_status.void_size_mm;
-    }
-
-    // AUTOMATIC: Send data to uphole (follows water detection pattern)
-    uart_tx_channel_set(UART_UPHOLE);
-    printf("&vd,0x%02X,%d,%d,%d,%d,%d,%d,%d\r\n",
-           flags,
-           latest->distance_mm[0],
-           latest->distance_mm[1],
-           latest->distance_mm[2],
-           void_sizes[0],
-           void_sizes[1],
-           void_sizes[2],
-           prv_void_system.current_status.confidence_percent);
-    uart_tx_channel_undo();
-}
-
-// COMPLETE: Optional asynchronous event transmission
-void void_send_event(void)
-{
-    if (prv_void_system.current_status.void_detected)
-    {
-        uart_tx_channel_set(UART_UPHOLE);
-        printf("!vd,flag,%d,%d,%d\r\n",
-               0, // sector (simplified for POC)
-               prv_void_system.current_status.void_size_mm,
-               prv_void_system.current_status.confidence_percent);
-        uart_tx_channel_undo();
-    }
-}
-
-// FIX: Complete the prv_update_measurement_data function
 static void prv_update_measurement_data(void)
 {
     prv_void_system.latest_measurement.measurement_time_ms = HAL_GetTick();
@@ -825,5 +705,20 @@ static void prv_update_measurement_data(void)
     }
 }
 
-// FIX: Complete missing implementation sections marked with {...}
-// All the {...} placeholders need actual implementation
+static void prv_add_to_history(const void_status_t *status)
+{
+    if (prv_void_system.history_count < VOID_HISTORY_SIZE)
+    {
+        prv_void_system.history[prv_void_system.history_count] = *status;
+        prv_void_system.history_count++;
+    }
+    else
+    {
+        // Shift history array and add new entry
+        for (uint8_t i = 0; i < (VOID_HISTORY_SIZE - 1); i++)
+        {
+            prv_void_system.history[i] = prv_void_system.history[i + 1];
+        }
+        prv_void_system.history[VOID_HISTORY_SIZE - 1] = *status;
+    }
+}

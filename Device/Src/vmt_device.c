@@ -81,11 +81,11 @@ static h_sensor_t h_sensor = {
 	.h_adc[ADC_SEQ_TEMP] = {
 		.thre_h = 6.0,
 		.thre_l = 5.8, },
-	.h_adc[ADC_SEQ_WATER_1] = {
+	.h_adc[ADC_SEQ_WATER_BEGIN + 0] = {
 		.thre_h = 1.0,
 		.thre_l = 0.8,
 	},
-	.h_adc[ADC_SEQ_WATER_2] = {
+	.h_adc[ADC_SEQ_WATER_BEGIN + 1] = {
 		.thre_h = 1.0,
 		.thre_l = 0.8, }, };
 
