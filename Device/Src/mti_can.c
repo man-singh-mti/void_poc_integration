@@ -1,9 +1,9 @@
 #include "can.h"
 #include "mti_can.h"
 #include "vmt_uart.h"
-#include "mti_system.h"
+#include "mti_system.h" // ✅ Already included - provides radar_status_set()
 #include "mti_radar.h"
-#include "mti_void.h" // ADD THIS LINE
+#include "mti_void.h"
 #include <string.h>
 
 CAN_RxHeaderTypeDef rxHeader;
@@ -294,26 +294,30 @@ void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_
     switch (command)
     {
     case CAN_CMD_START:
-        // Remove: debug_send("S%d: Start command received", sensor_idx);
+        // FIXED: Use correct radar hardware status
+        radar_status_set(RADAR_CHIRPING);
+        sensor->status = RADAR_HW_CHIRPING; //  Correct
+        debug_send("S%d: Start command received - radar chirping", sensor_idx);
         break;
 
     case CAN_CMD_STOP:
-        // Remove: debug_send("S%d: Stop command received", sensor_idx);
+        // FIXED: Use correct radar hardware status
+        radar_status_set(RADAR_STOPPED);
+        sensor->status = RADAR_HW_STOPPED; //  Correct
+        debug_send("S%d: Stop command received - radar stopped", sensor_idx);
         break;
 
     case CAN_CMD_STATUS:
-        // Respond with current status
         can_send(CAN_MSG_ID_STATUS_SENSOR(sensor_idx), (uint8_t)sensor->status);
         radar_init_status_set(RADAR_INIT_OK);
-        // Remove: debug_send("S%d: Status response sent", sensor_idx);
+        debug_send("S%d: Status response sent", sensor_idx);
         break;
 
     case CAN_CMD_CAL:
-        // Remove: debug_send("S%d: Calibration command received", sensor_idx);
+        debug_send("S%d: Calibration command received", sensor_idx);
         break;
 
     default:
-        // Keep only error messages
         debug_send("S%d: Unknown cmd 0x%02X", sensor_idx, command);
         break;
     }
@@ -446,7 +450,9 @@ void test_sensor_indexing(void)
                    pass ? "PASS" : "FAIL");
 
         if (pass)
+        {
             passed++;
+        }
     }
 
     debug_send("=== Sensor Indexing Test Results: %d/%d PASSED ===", passed, test_count);
@@ -487,7 +493,9 @@ void test_sensor_responses(void)
         bool online = is_sensor_online(i);
         debug_send("Sensor %d: %s", i, online ? "ONLINE" : "OFFLINE");
         if (online)
+        {
             responding_sensors++;
+        }
     }
 
     debug_send("=== Sensor Response Test: %d/%d sensors responding ===", responding_sensors, MAX_RADAR_SENSORS);

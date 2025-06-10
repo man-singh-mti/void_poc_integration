@@ -229,25 +229,16 @@ static void radar_complete_staggered_cycle(void)
         }
     }
 
-    // Trigger void detection if we have sufficient data
+    // AUTOMATIC: Trigger void detection when radar cycle completes
     if (radar_round_robin.sensors_completed >= 2)
     {
-        debug_send("Triggering void analysis with %d sensors", radar_round_robin.sensors_completed);
-
-        // --- MODIFICATION START ---
-        // Replace the non-existent function with the correct one.
-        void_system_process(); // CHANGED: Use actual function name
-        // --- MODIFICATION END ---
-    }
-    else
-    {
-        debug_send("Insufficient sensor data for void analysis (%d sensors)", radar_round_robin.sensors_completed);
+        debug_send("Auto-triggering void analysis with %d sensors", radar_round_robin.sensors_completed);
+        void_system_process(); // This will call void_send_data() automatically
     }
 
-    // Reset staggered mode
-    radar_round_robin.staggered_mode = false;
-
-    // Schedule next cycle start after pause
+    // Reset staggered mode and schedule next cycle
+    radar_round_robin.staggered_mode   = false;
+    radar_round_robin.last_switch_time = HAL_GetTick();
     HAL_Delay(RADAR_STAGGERED_CYCLE_PAUSE_MS);
     radar_start_staggered_cycle();
 }

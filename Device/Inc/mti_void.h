@@ -18,8 +18,6 @@
 #define CIRCLE_FIT_DEFAULT_TOLERANCE_MM 20U // Default circle fitting tolerance
 #define CIRCLE_FIT_MIN_SENSORS          2U  // Minimum sensors for circle fitting
 
-// Add these constants after the existing #defines (around line 18)
-
 // Confidence calculation constants
 #define VOID_BASE_CONFIDENCE_PERCENT 70U  // Base confidence at threshold
 #define VOID_MAX_CONFIDENCE_PERCENT  100U // Maximum confidence
@@ -175,5 +173,9 @@ void        void_clear_history(void);
 bool        void_is_system_ready(void);
 const char *void_get_severity_string(void_severity_t severity);
 const char *void_get_algorithm_string(void_algorithm_t algorithm);
+
+// ADD: Automatic data transmission functions (after line 167)
+void void_send_data(void);  // NEW: Automatic &vd,... transmission
+void void_send_event(void); // NEW: Asynchronous !vd,... events
 
 #endif // MTI_VOID_H
