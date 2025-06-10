@@ -615,8 +615,8 @@ static void cmd_sensor(h_str_pointers_t *str_p)
     case 'w':
         if (str_p->part[2] == NULL)
         { // calibrate
-            uint16_t water_1 = adc_value_get(ADC_SEQ_WATER_BEGIN);
-            uint16_t water_2 = adc_value_get(ADC_SEQ_WATER_BEGIN + 1);
+            uint16_t water_1 = adc_value_get(ADC_SEQ_WATER_1);
+            uint16_t water_2 = adc_value_get(ADC_SEQ_WATER_2);
             printf("%s,w,%u,%u\n", cmd_str_sensor, water_1, water_2);
             reserve_set(water_1 - 500);
         }

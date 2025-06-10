@@ -55,18 +55,18 @@ static h_moving_avg_u16_t h_avg[ADC_SEQ_NUM] = {
 	[ADC_SEQ_TEMP] = {
 		.p_buff = avg_buff_temp,
 		.buff_len = ADC_AVG_BUFF_LEN_TEMP, },
-	[ADC_SEQ_WATER_BEGIN + 0] = {
+	[ADC_SEQ_WATER_1] = {
 		.p_buff = avg_buff_water[0],
 		.buff_len = ADC_AVG_BUFF_LEN_WATER,},
-	[ADC_SEQ_WATER_BEGIN + 1] = {
+	[ADC_SEQ_WATER_2] = {
 		.p_buff = avg_buff_water[1],
 		.buff_len = ADC_AVG_BUFF_LEN_WATER, }, };
 
 /* adc_volt_coeffi is coefficient of adc value to analog voltage */
 static double adc_volt_coeffi[ADC_SEQ_NUM] = {
-    [ADC_SEQ_TEMP]            = (ADC_VDD_VOLT * (1000 + 240)) / (4096 * 240),
-    [ADC_SEQ_WATER_BEGIN + 0] = (ADC_VDD_VOLT) / (4096),
-    [ADC_SEQ_WATER_BEGIN + 1] = (ADC_VDD_VOLT) / (4096),
+    [ADC_SEQ_TEMP]    = (ADC_VDD_VOLT * (1000 + 240)) / (4096 * 240),
+    [ADC_SEQ_WATER_1] = (ADC_VDD_VOLT) / (4096),
+    [ADC_SEQ_WATER_2] = (ADC_VDD_VOLT) / (4096),
 };
 
 static h_adc_debug_t h_adc_debug = {

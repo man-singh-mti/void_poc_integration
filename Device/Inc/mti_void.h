@@ -122,6 +122,23 @@ typedef struct
     bool               system_initialized;         // Initialization flag
 } void_system_state_t;
 
+// Configuration source tracking
+typedef enum
+{
+    CONFIG_SOURCE_DEFAULT,
+    CONFIG_SOURCE_UPHOLE,
+    CONFIG_SOURCE_DEBUG
+} config_source_t;
+
+// Configuration with source tracking
+typedef struct
+{
+    void_config_t   base_config;
+    config_source_t source;
+    uint32_t        last_update_time_ms;
+    bool            config_received_from_uphole;
+} void_config_manager_t;
+
 // Core void detection functions
 void void_system_init(void);
 void void_system_process(void);

@@ -39,7 +39,11 @@ void void_system_init(void)
     prv_void_system.system_initialized   = true;
     prv_void_system.last_process_time_ms = HAL_GetTick();
 
-    debug_send("Void detection system initialized (algorithm: %s)", void_get_algorithm_string(prv_void_system.config.active_algorithm));
+    // Simple POC initialization feedback
+    debug_send("Void detection system initialized (algorithm: %s, baseline: %dmm, threshold: %dmm)",
+               void_get_algorithm_string(prv_void_system.config.active_algorithm),
+               prv_void_system.config.baseline_diameter_mm,
+               prv_void_system.config.detection_threshold_mm);
 }
 
 void void_system_process(void)
@@ -721,4 +725,37 @@ static void prv_add_to_history(const void_status_t *status)
         }
         prv_void_system.history[VOID_HISTORY_SIZE - 1] = *status;
     }
+}
+
+static uint16_t prv_apply_median_filter(uint16_t distances[], uint8_t count)
+{
+    if (count == 0)
+    {
+        return 0;
+    }
+    if (count == 1)
+    {
+        return distances[0];
+    }
+    // Simple bubble sort for small arrays
+    uint16_t sorted[MAX_RADAR_SENSORS];
+    for (uint8_t i = 0; i < count; i++)
+    {
+        sorted[i] = distances[i];
+    }
+
+    for (uint8_t i = 0; i < count - 1; i++)
+    {
+        for (uint8_t j = 0; j < count - i - 1; j++)
+        {
+            if (sorted[j] > sorted[j + 1])
+            {
+                uint16_t temp = sorted[j];
+                sorted[j]     = sorted[j + 1];
+                sorted[j + 1] = temp;
+            }
+        }
+    }
+
+    return sorted[count / 2]; // Return median
 }

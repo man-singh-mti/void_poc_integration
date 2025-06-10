@@ -35,4 +35,8 @@ void cmd_print_flash_fifo_mark_finish(uart_select_t channel);
 void cmd_print_temp_status(uart_select_t channel);
 void cmd_print_temp_alert(uart_select_t channel);
 
+// Add void command printing functions
+void cmd_print_void_status(uart_select_t channel);
+void cmd_print_void_detection(uart_select_t channel);
+
 #endif /*__VMT_COMMAND_H__ */

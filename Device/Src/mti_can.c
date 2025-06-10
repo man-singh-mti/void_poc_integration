@@ -17,7 +17,6 @@ multi_radar_system_t radar_system = { 0 };
 
 bool can_setup(void)
 {
-#ifdef PCB_CANBUS
 // Configure filter to accept both command (0x80-0x8F) and data (0xA0-0xBF) messages
 #define FILTER_ID_CMD    ((0x00000080 << 3) | 0x4)
 #define FILTER_MASK_CMD  ((0x000000F0 << 3) | 0x4)
@@ -53,13 +52,10 @@ bool can_setup(void)
 
 
     return true;
-#endif
-    return false;
 }
 
 bool can_send(uint32_t ID, uint8_t message)
 {
-#ifdef PCB_CANBUS
     txHeader.DLC                = 1;
     txHeader.IDE                = CAN_ID_EXT;
     txHeader.RTR                = CAN_RTR_DATA;
@@ -73,13 +69,11 @@ bool can_send(uint32_t ID, uint8_t message)
     {
         return true;
     }
-#endif
-    return false;
+    return false; // Add this line to fix warning
 }
 
 bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
 {
-#ifdef PCB_CANBUS
     txHeader.DLC                = length;
     txHeader.IDE                = CAN_ID_EXT;
     txHeader.RTR                = CAN_RTR_DATA;
@@ -99,8 +93,7 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
     {
         return true;
     }
-#endif
-    return false;
+    return false; // Add this line to fix warning
 }
 
 // Send command to specific sensor
