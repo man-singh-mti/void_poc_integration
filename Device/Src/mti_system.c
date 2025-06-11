@@ -11,7 +11,7 @@ bool           debug = true;
 bool           initialised;
 bool           water_synced;
 radar_status_t radar_status;
-uint8_t        module_status;
+status_t       module_status;
 bool           initialised;
 bool           version_sent;
 init_step_t    init_step     = STEP_START;

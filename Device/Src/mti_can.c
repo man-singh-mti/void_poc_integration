@@ -17,7 +17,6 @@ multi_radar_system_t radar_system = { 0 };
 
 bool can_setup(void)
 {
-#ifdef PCB_CANBUS
 // Configure filter to accept both command (0x80-0x8F) and data (0xA0-0xBF) messages
 #define FILTER_ID_CMD    ((0x00000080 << 3) | 0x4)
 #define FILTER_MASK_CMD  ((0x000000F0 << 3) | 0x4)
@@ -53,13 +52,10 @@ bool can_setup(void)
 
 
     return true;
-#endif
-    return false;
 }
 
 bool can_send(uint32_t ID, uint8_t message)
 {
-#ifdef PCB_CANBUS
     txHeader.DLC                = 1;
     txHeader.IDE                = CAN_ID_EXT;
     txHeader.RTR                = CAN_RTR_DATA;
@@ -73,13 +69,14 @@ bool can_send(uint32_t ID, uint8_t message)
     {
         return true;
     }
-#endif
-    return false;
+    else
+    {
+        return false;
+    }
 }
 
 bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
 {
-#ifdef PCB_CANBUS
     txHeader.DLC                = length;
     txHeader.IDE                = CAN_ID_EXT;
     txHeader.RTR                = CAN_RTR_DATA;
@@ -99,8 +96,10 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
     {
         return true;
     }
-#endif
-    return false;
+    else
+    {
+        return false;
+    }
 }
 
 // Send command to specific sensor
@@ -301,22 +300,27 @@ void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_
     switch (command)
     {
     case CAN_CMD_START:
-        // Remove: debug_send("S%d: Start command received", sensor_idx);
+        radar_status_set(RADAR_CHIRPING);
+        sensor->status = RADAR_HW_CHIRPING; //  Correct
+        debug_send("S%d: Start command received - radar chirping", sensor_idx);
         break;
 
     case CAN_CMD_STOP:
-        // Remove: debug_send("S%d: Stop command received", sensor_idx);
+        // FIXED: Use correct radar hardware status
+        radar_status_set(RADAR_STOPPED);
+        sensor->status = RADAR_HW_STOPPED; //  Correct
+        debug_send("S%d: Stop command received - radar stopped", sensor_idx);
         break;
 
     case CAN_CMD_STATUS:
         // Respond with current status
         can_send(CAN_MSG_ID_STATUS_SENSOR(sensor_idx), (uint8_t)sensor->status);
         radar_init_status_set(RADAR_INIT_OK);
-        // Remove: debug_send("S%d: Status response sent", sensor_idx);
+        debug_send("S%d: Status response sent", sensor_idx);
         break;
 
     case CAN_CMD_CAL:
-        // Remove: debug_send("S%d: Calibration command received", sensor_idx);
+        debug_send("S%d: Calibration command received", sensor_idx);
         break;
 
     default:

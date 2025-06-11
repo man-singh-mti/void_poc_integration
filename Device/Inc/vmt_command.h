@@ -31,7 +31,7 @@ void cmd_print_flash_fifo_write_finish(uart_select_t channel);
 void cmd_print_flash_fifo_delete_finish(uart_select_t channel);
 void cmd_print_flash_fifo_mark_finish(uart_select_t channel);
 
-// Add temperature command printing functions
+// Add temperature command printing functions (aligned with water pattern)
 void cmd_print_temp_status(uart_select_t channel);
 void cmd_print_temp_alert(uart_select_t channel);
 

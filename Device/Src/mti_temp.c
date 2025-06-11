@@ -2,9 +2,10 @@
 #include "vmt_adc.h"
 #include "vmt_uart.h"
 #include "main.h"
+#include "mti_system.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h> // Add for atoi function
+#include <stdlib.h>
 
 /* Private variables */
 static temp_status_t prv_temp_current_status = { 0 };
@@ -20,8 +21,9 @@ static bool    prv_temp_buffer_full  = false;
 static int16_t prv_temp_convert_adc_to_celsius(uint16_t adc_value);
 static int16_t prv_temp_apply_smoothing(int16_t new_temp);
 static bool    prv_temp_validate_reading(int16_t temperature);
+static void    prv_temp_send_alert_events(bool high_alert, bool low_alert, bool previous_high, bool previous_low);
 
-/* Main temperature processing function */
+/* Main temperature processing function - enhanced with automatic streaming */
 void temp_system_process(void)
 {
     static temp_raw_data_t       raw_data;
@@ -33,6 +35,11 @@ void temp_system_process(void)
         // Stage 2: Process and clean data
         if (temp_process_raw_data(&raw_data, &processed_data))
         {
+            // Store previous state for change detection
+            int16_t previous_temp       = prv_temp_current_status.current_temperature;
+            bool    previous_high_alert = prv_temp_current_status.high_temp_alert;
+            bool    previous_low_alert  = prv_temp_current_status.low_temp_alert;
+
             // Stage 3: Update flags and status
             temp_update_flags(&processed_data, &prv_temp_current_status);
 
@@ -40,8 +47,127 @@ void temp_system_process(void)
             prv_temp_current_status.current_temperature = processed_data.temperature_c;
             prv_temp_current_status.last_update_ms      = processed_data.process_time_ms;
             prv_temp_current_status.system_ready        = true;
+
+            // Stage 4: Check for significant changes
+            prv_temp_current_status.significant_change = temp_significant_change_detected();
+
+            // Stage 5: Send automatic streams based on void.md requirements
+            bool alert_change = (previous_high_alert != prv_temp_current_status.high_temp_alert) || (previous_low_alert != prv_temp_current_status.low_temp_alert);
+
+            bool should_stream = alert_change || prv_temp_current_status.significant_change || temp_max_interval_exceeded() ||
+                                 (prv_temp_current_status.last_streamed_temperature == TEMP_INVALID_READING);
+
+            // Only send automatic streams in operational mode (like water module)
+            if (should_stream && state_get() == measure_state) // ← Changed this line
+            {
+                // Send alert events first if needed (like water module pattern)
+                if (alert_change)
+                {
+                    prv_temp_send_alert_events(prv_temp_current_status.high_temp_alert, prv_temp_current_status.low_temp_alert, previous_high_alert, previous_low_alert);
+                }
+
+                // Send automatic change-based stream
+                temp_send_change_based_stream();
+            }
         }
     }
+}
+
+/* Send automatic change-based stream (per void.md specification) */
+void temp_send_change_based_stream(void)
+{
+    // Only send in operational mode (like water module)
+    if (state_get() != measure_state)
+    {
+        return;
+    }
+
+    uart_tx_channel_set(UART_UPHOLE);
+
+    // Format: &temp,status,<temp_c>,<alert> (from void.md table)
+    uint8_t alert_flag = 0;
+    if (prv_temp_current_status.high_temp_alert)
+    {
+        alert_flag |= 0x01;
+    }
+    if (prv_temp_current_status.low_temp_alert)
+    {
+        alert_flag |= 0x02;
+    }
+    printf("&temp,status,%d,%d\r\n", prv_temp_current_status.current_temperature, alert_flag);
+
+    uart_tx_channel_undo();
+
+    // Update streaming state
+    prv_temp_current_status.last_streamed_temperature = prv_temp_current_status.current_temperature;
+    prv_temp_current_status.last_stream_time_ms       = HAL_GetTick();
+    prv_temp_current_status.significant_change        = false;
+}
+
+/* Send alert events (like water module !water,messageID,state pattern) */
+static void prv_temp_send_alert_events(bool high_alert, bool low_alert, bool previous_high, bool previous_low)
+{
+    static uint8_t temp_message_id = 30; // Start at 30 (water uses 10-19, void might use 20-29)
+
+    uart_tx_channel_set(UART_UPHOLE);
+
+    // Send high temperature alert events
+    if (high_alert && !previous_high)
+    {
+        printf("!temp,%d,high\r\n", temp_message_id);
+        printf("!temp,%d,high\r\n", temp_message_id); // Send twice like water module
+    }
+    else if (!high_alert && previous_high)
+    {
+        printf("!temp,%d,normal_high\r\n", temp_message_id);
+        printf("!temp,%d,normal_high\r\n", temp_message_id);
+    }
+
+    // Send low temperature alert events
+    if (low_alert && !previous_low)
+    {
+        printf("!temp,%d,low\r\n", temp_message_id);
+        printf("!temp,%d,low\r\n", temp_message_id); // Send twice like water module
+    }
+    else if (!low_alert && previous_low)
+    {
+        printf("!temp,%d,normal_low\r\n", temp_message_id);
+        printf("!temp,%d,normal_low\r\n", temp_message_id);
+    }
+
+    uart_tx_channel_undo();
+
+    // Increment message ID (cycle 30-39)
+    if (temp_message_id == 39)
+    {
+        temp_message_id = 30;
+    }
+    else
+    {
+        temp_message_id++;
+    }
+}
+
+/* Check for significant temperature change (1°C threshold per void.md) */
+bool temp_significant_change_detected(void)
+{
+    if (prv_temp_current_status.last_streamed_temperature == TEMP_INVALID_READING)
+    {
+        return true; // First reading is always significant
+    }
+
+    int16_t change = prv_temp_current_status.current_temperature - prv_temp_current_status.last_streamed_temperature;
+    if (change < 0)
+        change = -change; // Absolute value
+
+    return (change >= TEMP_CHANGE_THRESHOLD_C);
+}
+
+/* Check if max interval exceeded (10 seconds per void.md) */
+bool temp_max_interval_exceeded(void)
+{
+    uint32_t elapsed = HAL_GetTick() - prv_temp_current_status.last_stream_time_ms;
+    return (elapsed >= TEMP_MAX_INTERVAL_MS);
 }
 
 /* Get raw temperature data from ADC */
@@ -193,12 +319,17 @@ void handle_temp_config_command(const char *params)
     }
 }
 
-/* Initialize temperature system */
+/* Initialize temperature system - enhanced for streaming */
 bool temp_init(void)
 {
     // Initialize status structure
     memset(&prv_temp_current_status, 0, sizeof(temp_status_t));
     prv_temp_current_status.current_temperature = TEMP_INVALID_READING;
+
+    // Initialize streaming fields
+    prv_temp_current_status.last_streamed_temperature = TEMP_INVALID_READING;
+    prv_temp_current_status.last_stream_time_ms       = HAL_GetTick();
+    prv_temp_current_status.significant_change        = false;
 
     // Initialize smoothing buffer
     memset(prv_temp_smoothing_buffer, 0, sizeof(prv_temp_smoothing_buffer));
@@ -217,11 +348,9 @@ bool temp_init(void)
         return false;
     }
 
-    printf("@db,Temperature module ready, ADC test: %u\n", test_adc);
+    printf("@db,Temperature module ready with automatic streaming\n");
     return true;
 }
-
-/* Private function implementations */
 
 /* Convert ADC reading to Celsius (integer-based) */
 static int16_t prv_temp_convert_adc_to_celsius(uint16_t adc_value)
@@ -263,4 +392,25 @@ static bool prv_temp_validate_reading(int16_t temperature)
 {
     // Basic range check for reasonable temperature values
     return (temperature >= -50 && temperature <= 150);
+}
+
+/* Private debug printing function */
+static void prv_temp_debug_print(const char *message, ...)
+{
+    h_dev_debug_t debug_flags;
+    dev_printf_debug_get(&debug_flags);
+
+    if (debug_flags.b_temp_sample)
+    {
+        uart_tx_channel_set(UART_DEBUG);
+        printf("@temp_debug,");
+
+        va_list args;
+        va_start(args, message);
+        vprintf(message, args);
+        va_end(args);
+
+        printf("\r\n");
+        uart_tx_channel_undo();
+    }
 }

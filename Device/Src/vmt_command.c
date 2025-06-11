@@ -76,7 +76,8 @@ static const char cmd_str_flash[]      = "@flash";
 static const char cmd_str_imu[]        = "@imu";
 static const char cmd_str_debug[]      = "@cmd";
 static const char cmd_str_void[]       = "!void";
-static const char cmd_str_temp[]       = "@temp"; // Add to command strings
+static const char cmd_str_temp[]       = "@tp"; // Temperature command string
+
 
 static h_str_cmd_t h_str_cmd_debug[] = {
     {
@@ -133,7 +134,7 @@ static h_str_cmd_t h_str_cmd_debug[] = {
     },
     {
         .ptr      = (char *)cmd_str_temp,
-        .callback = cmd_temp, // Add to command handlers
+        .callback = cmd_temp, // Add temperature to debug commands
     },
 };
 
@@ -192,24 +193,12 @@ static h_str_cmd_t h_str_cmd_uphole[] = {
     },
     {
         .ptr      = (char *)cmd_str_temp,
-        .callback = cmd_temp, // Add to command handlers
-    },
-};
-
-static h_str_cmd_t h_str_cmd_void[] = {
-    {
-        .ptr      = (char *)cmd_str_init,
-        .callback = cmd_initial,
-    },
-    {
-        .ptr      = (char *)cmd_str_void,
-        .callback = cmd_void,
+        .callback = cmd_temp, // Add temperature to uphole commands
     },
 };
 
 static char str_head_uphole[STR_H_STR_CMD_HEAD_LEN_GET(h_str_cmd_uphole)] = { 0x0 };
 static char str_head_debug[STR_H_STR_CMD_HEAD_LEN_GET(h_str_cmd_debug)]   = { 0x0 };
-static char str_head_void[STR_H_STR_CMD_HEAD_LEN_GET(h_str_cmd_void)]     = { 0x0 };
 
 static const char delimiters[] = ",";
 static const char end_char[]   = "\n";
@@ -231,14 +220,7 @@ static h_string_t h_str[UART_NUMBER] = {
 		.p_delimiters = (char*) delimiters,
 		.p_end_char = (char*) end_char,
 		.cmd_find_cb = cmd_find_cb, },
-	[UART_VOID] = {
-		.id = UART_VOID,
-		.p_h_cmd = h_str_cmd_void,
-		.cmd_n = STR_H_STR_CMD_LEN_GET(h_str_cmd_void),
-		.p_cmd_head = (char*) str_head_void,
-		.p_delimiters = (char*) delimiters,
-		.p_end_char = (char*) end_char,
-		.cmd_find_cb = cmd_find_cb, }, };
+};
 
 static h_cmd_str_buff_t h_cmd_str_buff[UART_NUMBER] = { 0x0 };
 
@@ -622,8 +604,8 @@ static void cmd_sensor(h_str_pointers_t *str_p)
     case 'w':
         if (str_p->part[2] == NULL)
         { // calibrate
-            uint16_t water_1 = adc_value_get(ADC_SEQ_WATER_BEGIN);
-            uint16_t water_2 = adc_value_get(ADC_SEQ_WATER_BEGIN + 1);
+            uint16_t water_1 = adc_value_get(ADC_SEQ_WATER_1);
+            uint16_t water_2 = adc_value_get(ADC_SEQ_WATER_2);
             printf("%s,w,%u,%u\n", cmd_str_sensor, water_1, water_2);
             reserve_set(water_1 - 500);
         }
@@ -1539,22 +1521,22 @@ static void cmd_temp(h_str_pointers_t *str_p)
 
     if (str_p->part[1] == NULL)
     {
-        // Default to status query
-        handle_temp_status_command();
+        // Default to status query (like water @wt)
+        cmd_print_temp_status(cmd_uart_ch);
         uart_tx_channel_undo();
         return;
     }
 
     if (strcmp(str_p->part[1], "status") == 0)
     {
-        handle_temp_status_command();
+        cmd_print_temp_status(cmd_uart_ch);
     }
     else if (strcmp(str_p->part[1], "get") == 0)
     {
         // Get current temperature reading
         temp_status_t status;
         temp_get_latest_status(&status);
-        printf("&temp,value,%d\n", status.current_temperature);
+        printf("@tp,value,%d\n", status.current_temperature);
     }
     else if (strcmp(str_p->part[1], "config") == 0)
     {
@@ -1564,32 +1546,55 @@ static void cmd_temp(h_str_pointers_t *str_p)
             {
                 int16_t threshold = atoi(str_p->part[3]);
                 temp_set_high_threshold(threshold);
-                printf("&temp,config,high,ack,%d\n", threshold);
+                printf("@tp,config,high,ack,%d\n", threshold);
             }
             else if (strcmp(str_p->part[2], "low") == 0 && str_p->part[3] != NULL)
             {
                 int16_t threshold = atoi(str_p->part[3]);
                 temp_set_low_threshold(threshold);
-                printf("&temp,config,low,ack,%d\n", threshold);
+                printf("@tp,config,low,ack,%d\n", threshold);
             }
             else
             {
-                printf("&temp,config,nack\n");
+                printf("@tp,config,nack\n");
             }
         }
         else
         {
             // Show current thresholds
-            printf("&temp,thresholds,%d,%d\n", temp_get_high_threshold(), temp_get_low_threshold());
+            printf("@tp,thresholds,%d,%d\n", temp_get_high_threshold(), temp_get_low_threshold());
         }
     }
     else
     {
-        printf("&temp,error,unknown_command\n");
+        printf("@tp,error,unknown_command\n");
     }
 
     uart_tx_channel_undo();
 }
+// Add temperature status printing function (aligned with water pattern)
+void cmd_print_temp_status(uart_select_t channel)
+{
+    uart_tx_channel_set(channel);
+    temp_status_t status;
+    temp_get_latest_status(&status);
+    printf("@tp,%d,%d,%d,%d\n", status.current_temperature, status.high_temp_alert ? 1 : 0, status.low_temp_alert ? 1 : 0, status.system_ready ? 1 : 0);
+    uart_tx_channel_undo();
+}
+
+// Add temperature alert printing function (aligned with water pattern)
+void cmd_print_temp_alert(uart_select_t channel)
+{
+    uart_tx_channel_set(channel);
+    temp_status_t status;
+    temp_get_latest_status(&status);
+    if (status.high_temp_alert || status.low_temp_alert)
+    {
+        printf("!temp,alert,%d,%d\n", status.high_temp_alert ? 1 : 0, status.low_temp_alert ? 1 : 0);
+    }
+    uart_tx_channel_undo();
+}
+
 void cmd_print_bottom(uart_select_t channel)
 {
     uart_tx_channel_set(channel);
@@ -1719,26 +1724,5 @@ void cmd_print_flash_fifo_delete_finish(uart_select_t channel)
     }
     b_ff_delete_busy = false;
     uart_tx_channel_set(channel);
-    uart_tx_channel_undo();
-}
-
-void cmd_print_temp_status(uart_select_t channel)
-{
-    uart_tx_channel_set(channel);
-    temp_status_t status;
-    temp_get_latest_status(&status);
-    printf("&temp,status,%d,%d,%d,%d\n", status.current_temperature, status.high_temp_alert ? 1 : 0, status.low_temp_alert ? 1 : 0, status.system_ready ? 1 : 0);
-    uart_tx_channel_undo();
-}
-
-void cmd_print_temp_alert(uart_select_t channel)
-{
-    uart_tx_channel_set(channel);
-    temp_status_t status;
-    temp_get_latest_status(&status);
-    if (status.high_temp_alert || status.low_temp_alert)
-    {
-        printf("!temp,alert,%d,%d\n", status.high_temp_alert ? 1 : 0, status.low_temp_alert ? 1 : 0);
-    }
     uart_tx_channel_undo();
 }
