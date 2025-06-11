@@ -51,11 +51,12 @@ typedef enum
     VOID_SEVERITY_CRITICAL = 3
 } void_severity_t;
 
-// Algorithm selection
+// Enhanced algorithm selection (simplified approach)
 typedef enum
 {
-    VOID_ALG_SIMPLE    = 0, // Threshold-based detection (POC default)
-    VOID_ALG_CIRCLEFIT = 1  // 3-point circle fitting (advanced)
+    VOID_ALG_BYPASS    = 0, // Bypass detection, stream raw sensor data only (DEFAULT)
+    VOID_ALG_SIMPLE    = 1, // Threshold-based detection + raw data (POC default)
+    VOID_ALG_CIRCLEFIT = 2  // 3-point circle fitting + raw data (advanced)
 } void_algorithm_t;
 
 // Circle fitting result data
@@ -64,7 +65,7 @@ typedef struct
     bool     fit_successful; // Was circle fitting successful
     int16_t  center_x_mm;    // Circle center X coordinate (mm) - signed for offset
     int16_t  center_y_mm;    // Circle center Y coordinate (mm) - signed for offset
-    uint16_t radius_mm;      // Fitted circle radius (mm)
+    uint16_t radius_mm;      // Circle radius (mm)
     uint16_t fit_error_mm;   // RMS fitting error (mm)
     uint8_t  sensors_used;   // Number of sensors used in fit
 } circle_fit_data_t;
@@ -79,8 +80,8 @@ typedef struct
     uint16_t range_min_mm;           // Minimum valid distance
     uint16_t range_max_mm;           // Maximum valid distance
 
-    // Circle fitting parameters
-    void_algorithm_t active_algorithm;        // Which algorithm to use
+    // Algorithm selection (updated)
+    void_algorithm_t active_algorithm;        // Which algorithm to use (0=bypass, 1=simple, 2=circlefit)
     uint16_t         circle_fit_tolerance_mm; // Max acceptable fit error
     uint8_t          min_sensors_for_circle;  // Minimum sensors required
     bool             auto_fallback_enabled;   // Fall back to simple if circle fails
@@ -103,11 +104,12 @@ typedef struct
     uint8_t           confidence_percent;   // Detection confidence (0-100%)
     uint16_t          void_size_mm;         // Estimated void size in millimeters
     uint16_t          baseline_diameter_mm; // Expected baseline diameter
-    void_algorithm_t  algorithm_used;       // Which algorithm was used
+    void_algorithm_t  algorithm_used;       // Which algorithm was used (0=bypass, 1=simple, 2=circlefit)
     uint32_t          measurement_time_ms;  // When measurement was taken
     char              status_text[64];      // Human-readable status
     circle_fit_data_t circle_data;          // Circle fitting results (valid when algorithm_used == CIRCLEFIT)
-    bool              partial_data;         // ADD THIS LINE - true if analysis used incomplete sensor data
+    bool              partial_data;         // true if analysis used incomplete sensor data
+    uint8_t           sensor_count_used;    // Number of sensors used for this result
 } void_status_t;
 
 // System-wide void detection state

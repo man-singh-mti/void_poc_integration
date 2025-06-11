@@ -1,6 +1,7 @@
 #include "mti_void.h"
 #include "mti_radar.h"
 #include "vmt_uart.h"
+#include "mti_system.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -9,12 +10,23 @@
 // Static system state
 static void_system_state_t prv_void_system = { 0 };
 
+// Static variable to track previous void detection state
+static bool prv_previous_void_detected = false;
+
 // Private function prototypes
 static void     prv_load_default_config(void);
 static bool     prv_validate_sensor_data(uint16_t distance_mm, uint8_t sensor_idx);
 static void     prv_update_measurement_data(void);
 static void     prv_add_to_history(const void_status_t *status);
 static uint16_t prv_apply_median_filter(uint16_t distances[], uint8_t count);
+
+// ADD THESE MISSING PROTOTYPES:
+static void    prv_process_detection_result(const void_status_t *status, uint32_t current_time);
+static void    prv_send_insufficient_sensor_fault(uint8_t sensor_count, void_algorithm_t algorithm);
+static void    void_send_automatic_stream(void);
+static bool    prv_check_sensor_void_detection(uint8_t sensor_idx);
+static uint8_t prv_calculate_sensor_confidence(uint8_t sensor_idx);
+static void    void_send_detection_events(bool void_detected, bool previous_void_detected);
 
 // Circle fitting private functions
 static bool
@@ -49,15 +61,13 @@ void void_system_process(void)
         return;
     }
 
-    uint32_t current_time = HAL_GetTick();
-
-    // Update timestamp for this processing cycle
+    uint32_t current_time                = HAL_GetTick();
     prv_void_system.last_process_time_ms = current_time;
 
     // Update measurement data from radar sensors
     prv_update_measurement_data();
 
-    // Check if we have valid data from all sensors
+    // Count valid sensors
     uint8_t valid_sensor_count = 0;
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
@@ -67,38 +77,246 @@ void void_system_process(void)
         }
     }
 
-    // Only proceed if we have data from at least 2 sensors
-    if (valid_sensor_count < 2)
+    // Process based on algorithm selection
+    void_algorithm_t active_algorithm = prv_void_system.config.active_algorithm;
+
+    switch (active_algorithm)
     {
-        debug_send("Insufficient sensor data for void analysis (%d/3 valid)", valid_sensor_count);
+    case VOID_ALG_BYPASS:
+        // No void detection, just prepare status for streaming
+        prv_void_system.current_status.algorithm_used     = VOID_ALG_BYPASS;
+        prv_void_system.current_status.sensor_count_used  = valid_sensor_count;
+        prv_void_system.current_status.void_detected      = false;
+        prv_void_system.current_status.confidence_percent = 0;
+        strcpy(prv_void_system.current_status.status_text, "Bypass mode - raw data only");
+        debug_send("Algorithm 0 (bypass): Raw data streaming (%d/3 sensors)", valid_sensor_count);
+        break;
+
+    case VOID_ALG_SIMPLE:
+        if (valid_sensor_count >= 2)
+        {
+            void_status_t new_status     = { 0 };
+            new_status.algorithm_used    = VOID_ALG_SIMPLE;
+            new_status.sensor_count_used = valid_sensor_count;
+
+            if (prv_simple_threshold_detection(&new_status))
+            {
+                prv_process_detection_result(&new_status, current_time);
+                debug_send("Algorithm 1 (simple): Detection complete, conf=%d%%", new_status.confidence_percent);
+            }
+        }
+        else
+        {
+            prv_send_insufficient_sensor_fault(valid_sensor_count, VOID_ALG_SIMPLE);
+        }
+        break;
+
+    case VOID_ALG_CIRCLEFIT:
+        if (valid_sensor_count >= 2)
+        {
+            void_status_t new_status     = { 0 };
+            new_status.algorithm_used    = VOID_ALG_CIRCLEFIT;
+            new_status.sensor_count_used = valid_sensor_count;
+
+            if (prv_circle_fit_void_detection(&new_status))
+            {
+                prv_process_detection_result(&new_status, current_time);
+                debug_send("Algorithm 2 (circlefit): Detection complete, conf=%d%%", new_status.confidence_percent);
+            }
+            else if (prv_void_system.config.auto_fallback_enabled)
+            {
+                // Fallback to simple algorithm
+                debug_send("Circle fit failed, falling back to simple algorithm");
+                new_status.algorithm_used = VOID_ALG_SIMPLE; // Mark as fallback
+                if (prv_simple_threshold_detection(&new_status))
+                {
+                    prv_process_detection_result(&new_status, current_time);
+                    debug_send("Fallback to algorithm 1 (simple): conf=%d%%", new_status.confidence_percent);
+                }
+            }
+        }
+        else
+        {
+            prv_send_insufficient_sensor_fault(valid_sensor_count, VOID_ALG_CIRCLEFIT);
+        }
+        break;
+
+    default:
+        debug_send("Unknown algorithm %d, defaulting to bypass", active_algorithm);
+        prv_void_system.config.active_algorithm = VOID_ALG_BYPASS;
+        break;
+    }
+
+    // Always stream data during operational mode
+    if (state_get() == measure_state)
+    {
+        void_send_automatic_stream();
+    }
+}
+
+static void prv_process_detection_result(const void_status_t *status, uint32_t current_time)
+{
+    // Check for state change and send events
+    bool current_void_detected = status->void_detected;
+    if (current_void_detected != prv_previous_void_detected)
+    {
+        void_send_detection_events(current_void_detected, prv_previous_void_detected);
+    }
+    prv_previous_void_detected = current_void_detected;
+
+    // Update current status
+    prv_void_system.current_status                     = *status;
+    prv_void_system.current_status.measurement_time_ms = current_time;
+
+    // Add to history
+    prv_add_to_history(status);
+
+    debug_send("Detection result processed: void=%s, conf=%d%%", status->void_detected ? "YES" : "NO", status->confidence_percent);
+}
+
+static void prv_send_insufficient_sensor_fault(uint8_t sensor_count, void_algorithm_t algorithm)
+{
+    debug_send("Algorithm %d: insufficient sensors (%d/3)", algorithm, sensor_count);
+
+    // Update status to show fault condition
+    prv_void_system.current_status.algorithm_used     = algorithm;
+    prv_void_system.current_status.sensor_count_used  = sensor_count;
+    prv_void_system.current_status.void_detected      = false;
+    prv_void_system.current_status.confidence_percent = 0;
+    snprintf(prv_void_system.current_status.status_text,
+             sizeof(prv_void_system.current_status.status_text),
+             "Insufficient sensors (%d/3) for algorithm %d",
+             sensor_count,
+             algorithm);
+
+    // Send fault event if in operational mode
+    if (state_get() == measure_state)
+    {
+        uart_tx_channel_set(UART_UPHOLE);
+        printf("!vd,fault,sensor_count,%d\r\n", sensor_count);
+        uart_tx_channel_undo();
+    }
+}
+
+static void void_send_automatic_stream(void)
+{
+    if (state_get() != measure_state)
+    {
         return;
     }
 
-    // Run detection algorithm
-    void_status_t new_status       = { 0 };
-    bool          detection_result = false;
+    uart_tx_channel_set(UART_UPHOLE);
 
-    switch (prv_void_system.config.active_algorithm)
+    // Enhanced 8-bit flag encoding:
+    // Bits 0-1: Algorithm (0=bypass, 1=simple, 2=circlefit, 3=reserved)
+    // Bits 2-4: Sensor validity (bit 2=sensor 0, bit 3=sensor 1, bit 4=sensor 2)
+    // Bit 5: Overall void detected (any sensor)
+    // Bits 6-7: System status (0=normal, 1=degraded, 2=error, 3=init)
+
+    uint8_t  flags = 0;
+    uint16_t distances[MAX_RADAR_SENSORS];
+    uint8_t  per_sensor_void[MAX_RADAR_SENSORS];
+    uint8_t  per_sensor_confidence[MAX_RADAR_SENSORS];
+
+    // Bits 0-1: Current algorithm
+    flags |= (prv_void_system.current_status.algorithm_used & 0x03);
+
+    // Bits 2-4: Sensor validity and collect per-sensor data
+    bool any_void_detected = false;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-    case VOID_ALG_SIMPLE:
-        detection_result = prv_simple_threshold_detection(&new_status);
-        break;
-    case VOID_ALG_CIRCLEFIT:
-        detection_result = prv_circle_fit_void_detection(&new_status);
-        break;
+        if (prv_void_system.latest_measurement.data_valid[i])
+        {
+            flags |= (1 << (i + 2)); // Set sensor validity bit
+            distances[i] = prv_void_system.latest_measurement.distance_mm[i];
+
+            // Per-sensor void detection and confidence
+            if (prv_void_system.current_status.algorithm_used == VOID_ALG_BYPASS)
+            {
+                per_sensor_void[i]       = 0; // No detection in bypass
+                per_sensor_confidence[i] = 0; // No confidence in bypass
+            }
+            else
+            {
+                // Check if THIS sensor detected a void
+                bool sensor_void         = prv_check_sensor_void_detection(i);
+                per_sensor_void[i]       = sensor_void ? 1 : 0;
+                per_sensor_confidence[i] = sensor_void ? prv_calculate_sensor_confidence(i) : 0;
+
+                if (sensor_void)
+                    any_void_detected = true;
+            }
+        }
+        else
+        {
+            distances[i]             = 9999; // Fault code
+            per_sensor_void[i]       = 9;    // Fault code
+            per_sensor_confidence[i] = 0;    // No confidence for invalid sensor
+        }
     }
 
-    // Update current status
-    if (detection_result)
+    // Bit 5: Overall void detected flag
+    if (any_void_detected)
     {
-        prv_void_system.current_status                     = new_status;
-        prv_void_system.current_status.measurement_time_ms = current_time;
-
-        // Add to history
-        prv_add_to_history(&new_status);
-
-        debug_send("Void detected (immediate): %s", new_status.status_text);
+        flags |= 0x20; // Set bit 5
     }
+
+    // Bits 6-7: System status
+    uint8_t sys_status = 0; // Normal
+    if (!prv_void_system.system_initialized)
+    {
+        sys_status = 3; // Initializing
+    }
+    else if (prv_void_system.current_status.sensor_count_used < MAX_RADAR_SENSORS)
+    {
+        sys_status = 1; // Degraded
+    }
+    flags |= (sys_status << 6);
+
+    // Enhanced per-sensor stream format:
+    // &vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<c0>,<c1>,<c2>
+    printf("&vd,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+           flags, // 8-bit flags
+           distances[0],
+           distances[1],
+           distances[2], // Sensor distances
+           per_sensor_void[0],
+           per_sensor_void[1],
+           per_sensor_void[2], // Per-sensor void status
+           per_sensor_confidence[0],
+           per_sensor_confidence[1],
+           per_sensor_confidence[2]); // Per-sensor confidence
+
+    uart_tx_channel_undo();
+}
+
+// Helper function to check per-sensor void detection
+static bool prv_check_sensor_void_detection(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !prv_void_system.latest_measurement.data_valid[sensor_idx])
+    {
+        return false;
+    }
+
+    uint16_t distance  = prv_void_system.latest_measurement.distance_mm[sensor_idx];
+    uint16_t expected  = prv_void_system.config.baseline_diameter_mm / 2; // Radius
+    uint16_t threshold = prv_void_system.config.detection_threshold_mm;
+
+    return (distance > (expected + threshold));
+}
+
+static uint8_t prv_calculate_sensor_confidence(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !prv_void_system.latest_measurement.data_valid[sensor_idx])
+    {
+        return 0;
+    }
+
+    uint16_t distance  = prv_void_system.latest_measurement.distance_mm[sensor_idx];
+    uint16_t expected  = prv_void_system.config.baseline_diameter_mm / 2;
+    uint16_t threshold = prv_void_system.config.detection_threshold_mm;
+
+    return void_calculate_confidence(distance, expected, threshold);
 }
 
 bool void_analyze_sensor_data(uint8_t sensor_idx, uint16_t distance_mm, uint16_t angle_deg, void_status_t *result)
@@ -636,38 +854,44 @@ const char *void_get_severity_string(void_severity_t severity)
     }
 }
 
-const char *void_get_algorithm_string(void_algorithm_t algorithm)
-{
-    switch (algorithm)
-    {
-    case VOID_ALG_SIMPLE:
-        return "Simple Threshold";
-    case VOID_ALG_CIRCLEFIT:
-        return "Circle Fitting";
-    default:
-        return "Unknown";
-    }
-}
-
-// Private helper functions
+// Updated default configuration
 static void prv_load_default_config(void)
 {
+    // Basic detection parameters
     prv_void_system.config.baseline_diameter_mm   = VOID_DEFAULT_BASELINE_MM;
-    prv_void_system.config.detection_threshold_mm = VOID_DEFAULT_THRESHOLD_MM; // FIXED
+    prv_void_system.config.detection_threshold_mm = VOID_DEFAULT_THRESHOLD_MM;
     prv_void_system.config.confidence_threshold   = VOID_MIN_CONFIDENCE;
-    prv_void_system.config.median_filter_enabled  = true;
-    prv_void_system.config.range_min_mm           = 10;
-    prv_void_system.config.range_max_mm           = 500;
+
+    // Default algorithm: Bypass mode (as documented - safest for deployment)
+    prv_void_system.config.active_algorithm = VOID_ALG_BYPASS;
 
     // Circle fitting defaults
-    prv_void_system.config.active_algorithm        = VOID_ALG_SIMPLE;
     prv_void_system.config.circle_fit_tolerance_mm = CIRCLE_FIT_DEFAULT_TOLERANCE_MM;
     prv_void_system.config.min_sensors_for_circle  = CIRCLE_FIT_MIN_SENSORS;
     prv_void_system.config.auto_fallback_enabled   = true;
 
-    prv_void_system.current_status.measurement_time_ms = HAL_GetTick(); // FIXED
+    // Range and filtering
+    prv_void_system.config.range_min_mm          = 10;
+    prv_void_system.config.range_max_mm          = 500;
+    prv_void_system.config.median_filter_enabled = true;
 }
 
+const char *void_get_algorithm_string(void_algorithm_t algorithm)
+{
+    switch (algorithm)
+    {
+    case VOID_ALG_BYPASS:
+        return "bypass";
+    case VOID_ALG_SIMPLE:
+        return "simple";
+    case VOID_ALG_CIRCLEFIT:
+        return "circlefit";
+    default:
+        return "unknown";
+    }
+}
+
+// Private helper functions
 static bool prv_validate_sensor_data(uint16_t distance_mm, uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
@@ -720,5 +944,41 @@ static void prv_add_to_history(const void_status_t *status)
             prv_void_system.history[i] = prv_void_system.history[i + 1];
         }
         prv_void_system.history[VOID_HISTORY_SIZE - 1] = *status;
+    }
+}
+
+static void void_send_detection_events(bool void_detected, bool previous_void_detected)
+{
+    static uint8_t void_message_id = 20; // Start at 20 (water uses 10-19, temp uses 30-39)
+
+    if (state_get() != measure_state)
+    {
+        return;
+    }
+
+    uart_tx_channel_set(UART_UPHOLE);
+
+    // Send void detection events
+    if (void_detected && !previous_void_detected)
+    {
+        printf("!vd,%d,detected\r\n", void_message_id);
+        printf("!vd,%d,detected\r\n", void_message_id); // Send twice like water module
+    }
+    else if (!void_detected && previous_void_detected)
+    {
+        printf("!vd,%d,clear\r\n", void_message_id);
+        printf("!vd,%d,clear\r\n", void_message_id);
+    }
+
+    uart_tx_channel_undo();
+
+    // Increment message ID (cycle 20-29)
+    if (void_message_id == 29)
+    {
+        void_message_id = 20;
+    }
+    else
+    {
+        void_message_id++;
     }
 }

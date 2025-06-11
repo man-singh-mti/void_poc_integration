@@ -1834,14 +1834,40 @@ bool check_hysteresis(uint8_t idx, bool raw,
 
 All critical module references now include clickable links (where relevant):
 
-* [`mti_void.c`](https://www.google.com/search?q=../Device/Src/mti_void.c) (skeleton/POC)
-* [`mti_can.c`](https://www.google.com/search?q=../Device/Src/mti_can.c)
-* [`mti_radar.c`](https://www.google.com/search?q=../Device/Src/mti_radar.c)
-* [`mti_temp.c`](https://www.google.com/search?q=../Device/Src/mti_temp.c)
-* [`mti_system.c`](https://www.google.com/search?q=../Device/Src/mti_system.c)
-* [`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c)
-* [`vmt_uart.c`](https://www.google.com/search?q=../Device/Src/vmt_uart.c)
-* [`vmt_power.c`](https://www.google.com/search?q=../Device/Src/vmt_power.c)
-* [`vmt_icm20948.c`](https://www.google.com/search?q=../Device/Src/vmt_icm20948.c)
+* [`mti_void.c`](../Device/Src/mti_void.c)
+* [`mti_can.c`](../Device/Src/mti_can.c)
+* [`mti_radar.c`](../Device/Src/mti_radar.c)
+* [`mti_temp.c`](../Device/Src/mti_temp.c)
+* [`mti_system.c`](../Device/Src/mti_system.c)
+* [`vmt_command.c`](../Device/Src/vmt_command.c)
+* [`vmt_uart.c`](../Device/Src/vmt_uart.c)
+* [`vmt_power.c`](../Device/Src/vmt_power.c)
+* [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c)
 
 If additional source files become relevant (e.g. new circle fitting code), they should also be linked here.
+
+```c
+# All 3 sensors valid, simple algorithm, sensor 1 has void
+&vd,29,150,250,148,0,1,0,0,85,0
+
+# Decoded:
+# flags=29 (0x1D): algo=1(simple), sensors=111(all valid), void=1, status=0
+# distances: 150mm, 250mm, 148mm  
+# voids: only sensor 1 detected void (0,1,0)
+# confidence: 85% on sensor 1, 0% on others
+
+// Flag breakdown for 0x2D (45 decimal) example:
+// Binary: 00101101
+// Bits 0-1: 01 = Algorithm 1 (SIMPLE)
+// Bits 2-4: 011 = Sensors 0&1 valid, sensor 2 invalid  
+// Bit 5: 1 = Void detected
+// Bits 6-7: 00 = Normal system status
+
+uint8_t flags = 0x2D;
+uint8_t algorithm = flags & 0x03;           // = 1 (SIMPLE)
+bool s0_valid = (flags & 0x04) != 0;        // = true
+bool s1_valid = (flags & 0x08) != 0;        // = true  
+bool s2_valid = (flags & 0x10) != 0;        // = false
+bool void_detected = (flags & 0x20) != 0;   // = true
+uint8_t sys_status = (flags >> 6) & 0x03;   // = 0 (normal)
+```

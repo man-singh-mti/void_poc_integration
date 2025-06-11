@@ -75,7 +75,7 @@ static const char cmd_str_flash_fifo[] = "@ff";
 static const char cmd_str_flash[]      = "@flash";
 static const char cmd_str_imu[]        = "@imu";
 static const char cmd_str_debug[]      = "@cmd";
-static const char cmd_str_void[]       = "!void";
+static const char cmd_str_void[]       = "@vd";
 static const char cmd_str_temp[]       = "@tp"; // Temperature command string
 
 
@@ -136,6 +136,10 @@ static h_str_cmd_t h_str_cmd_debug[] = {
         .ptr      = (char *)cmd_str_temp,
         .callback = cmd_temp, // Add temperature to debug commands
     },
+    {
+        .ptr      = (char *)cmd_str_void,
+        .callback = cmd_void,
+    },
 };
 
 static h_str_cmd_t h_str_cmd_uphole[] = {
@@ -194,6 +198,10 @@ static h_str_cmd_t h_str_cmd_uphole[] = {
     {
         .ptr      = (char *)cmd_str_temp,
         .callback = cmd_temp, // Add temperature to uphole commands
+    },
+    {
+        .ptr      = (char *)cmd_str_void,
+        .callback = cmd_void,
     },
 };
 
