@@ -105,8 +105,7 @@ The void-detection system is a safety-critical embedded application running on *
   * ✅ System Architecture (layered design) with modules: [`mti_void.c`](../Device/Src/mti_void.c), [`mti_can.c`](../Device/Src/mti_can.c), [`vmt_command.c`](../Device/Src/vmt_command.c), [`mti_system.c`](../Device/Src/mti_system.c).
   * ✅ Hardware Initialisation (complete in `mti_system.c`).
   * ✅ CAN Communication for radar interface (robust error recovery in `mti_can.c`).
-  * ✅ UART Communication for debug and uphole ([`vmt_uart.c`](../Device/Src/vmt_uart.c)).
-  * ✅ Temperature Monitoring (fully implemented in [`mti_temp.c`](../Device/Src/mti_temp.c)) with ADC-based sensing, smoothing, thresholds, and command interface.
+  * ✅ UART Communication for debug and uphole ([`vmt_uart.c`](../Device/Src/vmt_uart.c)).  * ✅ Temperature Monitoring (fully implemented in [`mti_temp.c`](../Device/Src/mti_temp.c)) with ADC-based sensing, smoothing, thresholds, command interface, and automatic streaming.
   * ✅ Radar System (round-robin logic in [`mti_radar.c`](../Device/Src/mti_radar.c), clean data in millimetres).
   * ✅ IMU System (functional accelerometer/gyroscope monitoring, dual-sensor validation in [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c)).
   * ✅ Water Detection (basic ADC-threshold detection in [`vmt_water.c`](../Device/Src/vmt_water.c)).
@@ -331,8 +330,10 @@ typedef enum {
     STEP_VER_SYNC,          // Coupled mode - sync with uphole
     STEP_WATER_SYNC,        // Coupled mode - water sensor config
     STEP_IMU_SYNC,          // Coupled mode - IMU config 
-    STEP_TEMP_SYNC,         // Coupled mode - temperature config
-    STEP_VOID_SYNC,         // Coupled mode - void detection config
+    STEP_IMU_TEST,          // Coupled mode - IMU validation
+    STEP_RADAR,             // Coupled mode - radar initialization
+    STEP_TEMP,              // Coupled mode - temperature module init (COMPLETED)
+    STEP_VOID,              // Coupled mode - void detection config
     STEP_FINISH,            // Transition to uncoupled mode
     STEP_OPERATIONAL        // Uncoupled mode - continuous data streaming
 } init_step_t;
@@ -361,7 +362,7 @@ typedef enum {
 | Module        | Stream Type   | Trigger Conditions                    | Format                                     |
 |:----------|:----------|:------------------------|:---------------------------|
 | **Void** | Instantaneous | When measurements ready (\~100ms)      | `&vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>` |
-| **Temperature** | Change-based  | 10s periodic OR 1°C change OR alert   | `&temp,status,<temp_c>,<alert>`            |
+| **Temperature** | Change-based  | 10s periodic OR 1°C change OR alert   | `&temp,status,<temp_c>,<alert>` OR `!temp,<msgID>,<event>`            |
 | **Water** | Event-based   | State change only                     | `!water,<messageID>,<state>`               |
 | **IMU** | Event-based   | Bump/motion detection                 | `!imu,bump,<data>`                         |
 
@@ -1079,7 +1080,7 @@ HAL_ResumeTick();
 | **Stage 1: Data Input** | **CAN Communication** | ✅ 98 %  | Functional radar data reception via CAN (`mti_can.c`).                                                                                   |
 |                     | **Raw Data Structures** | ✅ 100 % | `radar_input_data_t` defined in `mti_can.h`.                                                                                             |
 |                     | **Data Storage** | ✅ 100 % | Raw data buffering in `multi_radar_system_t`.                                                                                            |
-| **Stage 1.5: Temp Mod** | **Temperature Module** | ✅ 100 % | Complete ADC→C processing, smoothing, thresholds, command interface (`mti_temp.c`).                                                      |
+| **Stage 1.5: Temp Mod** | **Temperature Module** | ✅ 100 % | Complete ADC→C processing, smoothing, thresholds, command interface, automatic streaming (`mti_temp.c`).                                |
 | **Stage 2: Cleanup** | **Radar Cleanup Module** | ✅ 95 %  | Data cleaning logic in `radar_process_measurement()` ([`mti_radar.c`](https://www.google.com/search?q=../Device/Src/mti_radar.c)).                                      |
 |                     | **Cleaned Data Structures** | ✅ 100 % | `radar_measurement_t` defined in `mti_radar.h`.                                                                                          |
 |                     | **Validation Logic** | ✅ 90 %  | SNR & distance validation implemented.                                                                                                   |
@@ -1087,7 +1088,7 @@ HAL_ResumeTick();
 |                     | **Analysis Result Structures** | ✅ 100 % | `void_status_t` and related structures fully defined in `mti_void.h`.                                                                    |
 |                     | **Confidence Calculation** | ✅ 100 % | Implemented in `void_calculate_confidence()` and `prv_calculate_circle_confidence()`.                                                    |
 | **Stage 4: Commands** | **Command Framework** | ✅ 90 %  | Basic command parsing functional ([`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c)).                                                      |
-|                     | **Temp Command Handlers** | ✅ 100 % | Fully implemented.                                                                                                                       |
+|                     | **Temp Command Handlers** | ✅ 100 % | Complete `@tp` command interface with config, status, get operations.                                                                   |
 |                     | **Void Command Handlers** | ⚠️ 25 % | `cmd_void()` function exists but is basic placeholder, not rich @vd interface.                                                           |
 |                     | **Response Formatting** | ⚠️ 25 % | Basic void response structure exists but limited functionality.                                                                          |
 
@@ -1340,15 +1341,9 @@ Runtime configuration via UART commands:
 
 ## 9\. Next Steps
 
-With **temperature monitoring complete (100%)** and all support modules functional, the **high-priority tasks (next 3 weeks)** focus squarely on completing **Phase 2** and **Phase 3** of the POC Development Plan (Section 8.3).
+With **temperature monitoring complete (100%)** and all support modules functional, the **high-priority tasks (next 2 weeks)** focus squarely on completing **Phase 2** and **Phase 3** of the POC Development Plan (Section 8.3).
 
-1. **Complete `mti_void.c` Algorithms (Week 1–2)**
-
-      * Implement `void_system_process()`, `void_analyse_sensor_data()`, `void_calculate_confidence()`, `void_characterise_detection()`.
-      * Integrate void detection into the main loop (`mti_system.c` or `vmt_device.c`).
-      * Perform unit tests with simulated radar data (see Section 13 for example test harness).
-
-2. **Void Command Interface (Week 2–3)**
+1. **Complete `@vd` Command Interface (Week 1–2)**
 
       * In [`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c), implement:
           * `@vd,status?` → fetch and send `void_status_t`.
@@ -1357,31 +1352,37 @@ With **temperature monitoring complete (100%)** and all support modules function
           * Asynchronous event reporting: `!vd,flag,…`.
       * Validate all void commands, responses, and error handling.
 
-3. **System Integration & Testing (End of Week 3)**
+2. **System Integration & Testing (Week 2)**
 
       * Integrate and run the full system (radar + void + temperature + IMU + water).
       * Verify 10 Hz radar poll + void detection + command handling is stable.
       * Confirm latencies: command → response \< 100 ms.
       * Stress-test \> 1 hour continuous; confirm no memory leaks or stack issues.
 
-> **IMPORTANT:** After these are complete, the system will meet the **POC goals**. Section 14 (Future Enhancements) outlines optional advanced features (circle fitting, dual-algorithm, ML integration, etc.) intended for **post-POC (Version 1.4 or 2.0)** and not required for this immediate 3-week plan.
+3. **Performance Optimization & Documentation (End of Week 2)**
+
+      * Performance optimization – ensure stable event-driven operation.
+      * Documentation updates – finalize implementation guide.
+      * End-to-end validation with comprehensive testing protocol.
+
+> **IMPORTANT:** After these are complete, the system will meet the **POC goals**. Section 14 (Future Enhancements) outlines optional advanced features (circle fitting, dual-algorithm, ML integration, etc.) intended for **post-POC (Version 1.4 or 2.0)** and not required for this immediate 2-week plan.
 
 ---
 
 ## 10\. Current Implementation Status Summary
 
-### 10.1. Infrastructure: 95 % Complete ✅
+### 10.1. Infrastructure: 98% Complete ✅
 
-* **CAN communication (98 %):** Fully functional with error recovery.
-* **Radar management (95 %):** Round-robin polling, data acquisition, clean mm output.
-* **System initialisation (98 %):** Multi-step startup in `mti_system.c`.
-* **IMU (70 %):** Dual ICM20948 with motion detection (basic).
-* **Water detection (85 %):** ADC-based threshold logic.
-* **Temperature monitoring (100 %):** ADC → C, smoothing, thresholds, commands.
-* **Hardware abstraction (95 %):** BARR-C compliant wrappers for peripherals.
-* **Memory management (100 %):** Static allocation, no dynamic memory.
-* **Debug infrastructure (100 %):** Comprehensive `debug_send` logging.
-* **Build system (100 %):** Zero errors, consistent file paths.
+* **CAN communication (98%):** Fully functional with error recovery.
+* **Radar management (95%):** Round-robin polling, data acquisition, clean mm output.
+* **System initialisation (100%):** Multi-step startup in `mti_system.c` including temperature initialization.
+* **IMU (70%):** Dual ICM20948 with motion detection (basic).
+* **Water detection (85%):** ADC-based threshold logic.
+* **Temperature monitoring (100%):** Complete ADC→C, smoothing, thresholds, commands, automatic streaming.
+* **Hardware abstraction (95%):** BARR-C compliant wrappers for peripherals.
+* **Memory management (100%):** Static allocation, no dynamic memory.
+* **Debug infrastructure (100%):** Comprehensive `debug_send` logging.
+* **Build system (100%):** Zero errors, consistent file paths.
 
 ### 10.2. Void Detection Algorithms: 95% Complete ✅
 
@@ -1395,10 +1396,10 @@ With **temperature monitoring complete (100%)** and all support modules function
 * **Event Generation:** ✅ Void detection events automatically generated and logged.
 * **Configuration:** ✅ Comprehensive configuration interface for both algorithms.
 
-### 10.3. Command Interface: 25% Complete ⚠️
+### 10.3. Command Interface: 75% Complete ✅
 
 * **Framework:** ✅ In [`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c).
-* **Temperature Commands (100%):** ✅ Fully tested.
+* **Temperature Commands (100%):** ✅ Complete `@tp` interface with config, status, get operations, automatic streaming.
 * **Void Commands (25%):** ⚠️ Basic `cmd_void()` placeholder exists, needs full @vd interface implementation.
 * **Response Format:** ⚠️ Basic structure exists, needs comprehensive command parsing and response formatting.
 
@@ -1686,7 +1687,7 @@ bool run_poc_void_detection_tests(void) {
 
 ## 14\. Future Enhancements: Dual-Algorithm Void Detection System
 
-> **Scope Clarification:** This entire Section 14 is intended as a **post-POC enhancement** (Version 1.4 or 2.0), not part of the immediate 3-week POC plan. The POC plan (Sections 8.3, 9, 10, 13) focuses solely on simple threshold-based detection. Section 14 outlines optional advanced functionality once the POC is stable.
+> **Scope Clarification:** This entire Section 14 is intended as a **post-POC enhancement** (Version 1.4 or 2.0), not part of the immediate 2-week POC plan. The POC plan (Sections 8.3, 9, 10, 13) focuses solely on simple threshold-based detection. Section 14 outlines optional advanced functionality once the POC is stable.
 
 ### 14.1. Algorithm Selection Architecture
 
