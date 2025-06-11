@@ -15,6 +15,8 @@
 #include "mti_water.h"
 #include "mti_system.h"
 #include "mti_temp.h" // Add include
+#include "mti_void.h" // Add this include at the top
+
 
 /* type define */
 #define CMD_STR_LEN_MAX   (255)
@@ -1377,18 +1379,195 @@ static void cmd_flash(h_str_pointers_t *str_p)
 
 static void cmd_void(h_str_pointers_t *str_p)
 {
-    bool void_detected = atoi(str_p->part[1]);
-    uart_tx_channel_set(UART_DEBUG);
-    if (void_detected)
+    if (!str_p || !str_p->part[1])
     {
-        printf("@db,Void detected\n");
+        uart_tx_channel_set(cmd_uart_ch);
+        printf("!vd,error,missing_subcommand\n");
+        uart_tx_channel_undo();
+        return;
+    }
+
+    uart_tx_channel_set(cmd_uart_ch);
+
+    // Handle @vd,status? command
+    if (strcmp(str_p->part[1], "status?") == 0 || strcmp(str_p->part[1], "status") == 0)
+    {
+        void_status_t status;
+        void_get_latest_results(&status);
+
+        printf("&vd,status,%d,%d,%d,%d,%s,%d\n",
+               status.void_detected ? 1 : 0,
+               status.void_size_mm,
+               status.confidence_percent,
+               status.baseline_diameter_mm,
+               void_get_algorithm_string(status.algorithm_used),
+               status.partial_data ? 1 : 0);
+    }
+    // Handle @vd,config commands
+    else if (strcmp(str_p->part[1], "config") == 0 && str_p->part[2])
+    {
+        if (strcmp(str_p->part[2], "thresh") == 0 && str_p->part[3])
+        {
+            uint16_t threshold = atoi(str_p->part[3]);
+            void_set_threshold(threshold);
+            printf("&vd,config,thresh,ack,%d\n", threshold);
+        }
+        else if (strcmp(str_p->part[2], "baseline") == 0 && str_p->part[3])
+        {
+            uint16_t baseline = atoi(str_p->part[3]);
+            void_set_baseline(baseline);
+            printf("&vd,config,baseline,ack,%d\n", baseline);
+        }
+        else if (strcmp(str_p->part[2], "conf") == 0 && str_p->part[3])
+        {
+            uint8_t confidence = atoi(str_p->part[3]);
+            void_set_confidence_threshold(confidence);
+            printf("&vd,config,conf,ack,%d\n", confidence);
+        }
+        else if (strcmp(str_p->part[2], "algorithm") == 0 && str_p->part[3])
+        {
+            if (strcmp(str_p->part[3], "simple") == 0)
+            {
+                void_set_detection_algorithm(VOID_ALG_SIMPLE);
+                printf("&vd,config,algorithm,ack,simple\n");
+            }
+            else if (strcmp(str_p->part[3], "circlefit") == 0)
+            {
+                void_set_detection_algorithm(VOID_ALG_CIRCLEFIT);
+                printf("&vd,config,algorithm,ack,circlefit\n");
+            }
+            else if (strcmp(str_p->part[3], "bypass") == 0)
+            {
+                void_set_detection_algorithm(VOID_ALG_BYPASS);
+                printf("&vd,config,algorithm,ack,bypass\n");
+            }
+            else
+            {
+                printf("!vd,error,invalid_algorithm\n");
+            }
+        }
+        else if (strcmp(str_p->part[2], "range") == 0 && str_p->part[3] && str_p->part[4])
+        {
+            uint16_t min_mm = atoi(str_p->part[3]);
+            uint16_t max_mm = atoi(str_p->part[4]);
+            void_set_range(min_mm, max_mm);
+            printf("&vd,config,range,ack,%d,%d\n", min_mm, max_mm);
+        }
+        else if (strcmp(str_p->part[2], "filter") == 0 && str_p->part[3] && str_p->part[4])
+        {
+            if (strcmp(str_p->part[3], "median") == 0)
+            {
+                bool enabled = (atoi(str_p->part[4]) != 0);
+                void_set_median_filter(enabled);
+                printf("&vd,config,filter,median,ack,%d\n", enabled ? 1 : 0);
+            }
+            else
+            {
+                printf("!vd,error,unknown_filter_type\n");
+            }
+        }
+        else
+        {
+            printf("!vd,error,unknown_config_param\n");
+        }
+    }
+    // Handle @vd,history commands
+    else if (strcmp(str_p->part[1], "history") == 0)
+    {
+        if (str_p->part[2] && strcmp(str_p->part[2], "detection") == 0)
+        {
+            uint8_t count = void_get_history_count();
+            printf("&vd,history,detection,%d\n", count);
+            for (uint8_t i = 0; i < count; i++)
+            {
+                void_status_t entry;
+                if (void_get_history_entry(i, &entry))
+                {
+                    printf("&vd,history,entry,%d,%d,%d,%d,%s\n", i, entry.void_detected ? 1 : 0, entry.void_size_mm, entry.confidence_percent, entry.status_text);
+                }
+            }
+        }
+        else
+        {
+            printf("!vd,error,unknown_history_command\n");
+        }
+    }
+    // Handle @vd,clear commands
+    else if (strcmp(str_p->part[1], "clear") == 0)
+    {
+        if (str_p->part[2] && strcmp(str_p->part[2], "history") == 0)
+        {
+            void_clear_history();
+            printf("&vd,clear,history,ack\n");
+        }
+        else
+        {
+            printf("!vd,error,unknown_clear_command\n");
+        }
+    }
+    // Handle @vd,diag? command
+    else if (strcmp(str_p->part[1], "diag?") == 0 || strcmp(str_p->part[1], "diag") == 0)
+    {
+        void_config_t config;
+        void_get_current_config(&config);
+        printf("&vd,diag,ready,%d\n", void_is_system_ready() ? 1 : 0);
+        printf("&vd,diag,algorithm,%s\n", void_get_algorithm_string(config.active_algorithm));
+        printf("&vd,diag,baseline,%d\n", config.baseline_diameter_mm);
+        printf("&vd,diag,threshold,%d\n", config.detection_threshold_mm);
+        printf("&vd,diag,confidence,%d\n", config.confidence_threshold);
     }
     else
     {
-        printf("@db,Void ended\n");
+        printf("!vd,error,unknown_command\n");
     }
+
+    uart_tx_channel_undo();
+}
+
+// Add automatic void data streaming function
+void void_send_automatic_stream(void)
+{
+    // Only send in operational mode (like water/temp modules)
+    if (!system_is_operational_mode())
+    {
+        return;
+    }
+
     uart_tx_channel_set(UART_UPHOLE);
-    printf("%s,%s\n", str_p->part[0], str_p->part[1]);
+
+    void_measurement_t measurement;
+    if (void_get_measurement_data(&measurement))
+    {
+        // Format: &vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>
+        // flags: bit 0=void detected, bits 1-3=sensor validity
+        uint8_t       flags = 0;
+        void_status_t status;
+        void_get_latest_results(&status);
+
+        if (status.void_detected)
+        {
+            flags |= 0x01;
+        }
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            if (measurement.data_valid[i])
+            {
+                flags |= (1 << (i + 1));
+            }
+        }
+
+        printf("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+               flags,
+               measurement.distance_mm[0],
+               measurement.distance_mm[1],
+               measurement.distance_mm[2],
+               status.void_detected ? 1 : 0,
+               status.void_detected ? 1 : 0,
+               status.void_detected ? 1 : 0,
+               status.confidence_percent);
+    }
+
+    uart_tx_channel_undo();
 }
 
 static void cmd_debug(h_str_pointers_t *str_p)

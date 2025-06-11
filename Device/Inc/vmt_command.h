@@ -35,4 +35,6 @@ void cmd_print_flash_fifo_mark_finish(uart_select_t channel);
 void cmd_print_temp_status(uart_select_t channel);
 void cmd_print_temp_alert(uart_select_t channel);
 
+void void_send_automatic_stream(void); // Add void streaming function
+
 #endif /*__VMT_COMMAND_H__ */

@@ -397,3 +397,8 @@ void radar_init_status_set(radar_init_status_t status)
 {
     radar_init_status = status;
 }
+
+bool system_is_operational_mode(void)
+{
+    return (state == measure_state && initialised);
+}
