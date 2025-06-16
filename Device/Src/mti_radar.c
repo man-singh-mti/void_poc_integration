@@ -5,8 +5,7 @@
  * @copyright 2025 MTi Group
  *
  * This file implements the interface defined in mti_radar.h for controlling
- * radar sensors in a round-robin or staggered fashion and processing radar
- * measurements.
+ * radar sensors in continuous mode and processing radar measurements.
  */
 
 #include "mti_radar.h"
@@ -16,21 +15,18 @@
 #include <string.h>
 
 /**
- * @brief Start a specific radar sensor in staggered mode
+ * @brief Internal storage for radar measurements
  *
- * @param sensor_idx Index of the sensor to start (0-2)
+ * The measurements are stored here but also accessible via the CAN module's
+ * radar_system structure. This avoids duplicated storage while maintaining
+ * the API contract for radar_get_measurement().
  */
-static void radar_staggered_start_sensor(uint8_t sensor_idx);
+static radar_measurement_t radar_measurements[MAX_RADAR_SENSORS] = { 0 };
 
 /**
- * @brief Complete the current staggered radar cycle
- *
- * Stops all sensors and processes the collected data.
+ * @brief Current operational status of the radar system
  */
-static void radar_complete_staggered_cycle(void);
-
-/** Global round-robin system state */
-radar_round_robin_t radar_round_robin = { 0 };
+static uint8_t radar_status = RADAR_INITIALISING;
 
 /**
  * @brief Sensor angle lookup table in degrees
@@ -47,80 +43,140 @@ static const uint16_t sensor_angles[MAX_RADAR_SENSORS] = {
  */
 void radar_system_init(void)
 {
-    /* Initialize round-robin system */
-    memset(&radar_round_robin, 0, sizeof(radar_round_robin));
+    /* Initialize measurement storage */
+    memset(radar_measurements, 0, sizeof(radar_measurements));
 
-    debug_send("Radar system init (continuous mode)");
+    debug_send("Radar system initializing in continuous mode");
 
-    /* Configure for continuous operation */
-    radar_round_robin.system_running = true;
+    /* Set system status as initializing */
+    radar_status = RADAR_INITIALISING;
 
-    /* Start all sensors immediately */
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    /* Initialize CAN for continuous mode operation */
+    if (!can_initialize_continuous_mode())
     {
-        radar_sensor_start(i);
-        debug_send("Starting sensor %d in continuous mode", i);
-
-        /* Small delay between sensor starts to avoid CAN bus congestion */
-        HAL_Delay(20);
+        debug_send("CAN initialization failed!");
+        return;
     }
 
-    /* Record initialization time */
-    radar_round_robin.last_switch_time = HAL_GetTick();
+    /* Set proper angle values */
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        radar_measurements[i].angle_deg = sensor_angles[i];
+    }
+
+    /* Mark system as ready */
+    radar_status = RADAR_READY;
+
+    debug_send("Radar system initialized successfully");
 }
 
 /**
  * @brief Process radar system operations
  *
- * Handles operation timing and initiates new radar cycles when appropriate.
+ * Handles periodic health checks and monitoring.
  * Should be called regularly from the main program loop.
  */
 void radar_system_process(void)
 {
-    if (!radar_round_robin.system_running)
+    /* Skip processing if system isn't ready */
+    if (radar_status == RADAR_INITIALISING)
     {
         return;
     }
 
-    /* Process any received data */
-    radar_process_completed_measurements();
-
-    /* Periodically trigger void detection (every 200ms) */
-    static uint32_t last_void_process = 0;
-    uint32_t        current_time      = HAL_GetTick();
-
-    if (current_time - last_void_process >= 200)
+    /* Check for stale data and invalidate if necessary */
+    uint32_t current_time = HAL_GetTick();
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        /* Check sensor status periodically and restart any non-responsive sensors */
+        if (radar_measurements[i].data_valid)
+        {
+            /* Check if data is stale */
+            if ((current_time - radar_measurements[i].timestamp_ms) > RADAR_DATA_TIMEOUT_MS)
+            {
+                radar_measurements[i].data_valid = false;
+                debug_send("S%d: Data marked stale (age: %dms)", i, (current_time - radar_measurements[i].timestamp_ms));
+            }
+        }
+    }
+
+    /* Every 1 second, monitor sensor health */
+    static uint32_t last_health_check = 0;
+    if (current_time - last_health_check >= 1000)
+    {
+        /* Check sensor health and restart any offline sensors */
+        monitor_sensor_health();
+        last_health_check = current_time;
+    }
+
+    /* Adaptively adjust stale data timeout based on observed data rate */
+    static uint32_t data_rate_check_time                  = 0;
+    static uint32_t message_count[MAX_RADAR_SENSORS]      = { 0 };
+    static uint32_t last_message_count[MAX_RADAR_SENSORS] = { 0 };
+    static uint32_t adaptive_timeout_ms                   = RADAR_DATA_TIMEOUT_MS;
+
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        // Count each valid message received
+        if (radar_measurements[i].data_valid && radar_measurements[i].timestamp_ms > data_rate_check_time)
+        {
+            message_count[i]++;
+        }
+    }
+
+    // Every 5 seconds, estimate data rate and adjust timeout
+    if (current_time - data_rate_check_time >= 5000)
+    {
+        float   avg_messages_per_sec = 0;
+        uint8_t active_sensors       = 0;
+
         for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            if (!is_sensor_online(i))
+            if (message_count[i] > last_message_count[i])
             {
-                debug_send("Sensor %d offline - restarting", i);
-                radar_sensor_start(i);
+                float sensor_rate = (float)(message_count[i] - last_message_count[i]) / 5.0f;
+                avg_messages_per_sec += sensor_rate;
+                active_sensors++;
+                last_message_count[i] = message_count[i];
             }
         }
 
-        /* Trigger void detection with available data */
-        debug_send("Processing void detection with current sensor data");
-        void_system_process();
+        if (active_sensors > 0)
+        {
+            avg_messages_per_sec /= active_sensors;
 
-        last_void_process = current_time;
+            // Set timeout to approximately 3x the average message period
+            if (avg_messages_per_sec > 0)
+            {
+                uint32_t new_timeout = (uint32_t)(3000.0f / avg_messages_per_sec);
+
+                // Constrain between reasonable bounds (300ms - 5000ms)
+                if (new_timeout < 300)
+                    new_timeout = 300;
+                if (new_timeout > 5000)
+                    new_timeout = 5000;
+
+                // Only report significant changes
+                if (abs((int)new_timeout - (int)adaptive_timeout_ms) > 100)
+                {
+                    debug_send("Adjusting radar timeout: %dms → %dms (data rate: %.1fHz)", adaptive_timeout_ms, new_timeout, avg_messages_per_sec);
+                    adaptive_timeout_ms = new_timeout;
+                }
+            }
+        }
+
+        data_rate_check_time = current_time;
     }
-}
 
-/* Create new function to process completed measurements */
-void radar_process_completed_measurements(void)
-{
-    /* Process any sensors with new data */
+    // Use the adaptive timeout for stale data detection
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        if (radar_system.sensors[i].new_data_ready)
+        if (radar_measurements[i].data_valid)
         {
-            radar_process_measurement(i, radar_system.sensors[i].detectedPoints, radar_system.sensors[i].numDetPoints);
-
-            radar_system.sensors[i].new_data_ready = false;
-            debug_send("Processed new data from sensor %d", i);
+            if ((current_time - radar_measurements[i].timestamp_ms) > adaptive_timeout_ms)
+            {
+                radar_measurements[i].data_valid = false;
+                debug_send("S%d: Data marked stale (age: %dms, timeout: %dms)", i, (current_time - radar_measurements[i].timestamp_ms), adaptive_timeout_ms);
+            }
         }
     }
 }
@@ -138,7 +194,11 @@ void radar_sensor_start(uint8_t sensor_idx)
     }
 
     /* Send start command to specific sensor */
-    can_send(CAN_CMD_BASE + sensor_idx, CAN_CMD_START);
+    can_send_to_sensor(sensor_idx, CAN_CMD_BASE, CAN_CMD_START);
+    debug_send("Starting sensor %d", sensor_idx);
+
+    /* Update system status */
+    radar_status = RADAR_CHIRPING;
 }
 
 /**
@@ -154,14 +214,19 @@ void radar_sensor_stop(uint8_t sensor_idx)
     }
 
     /* Send stop command to specific sensor */
-    can_send(CAN_CMD_BASE + sensor_idx, CAN_CMD_STOP);
+    can_send_to_sensor(sensor_idx, CAN_CMD_BASE, CAN_CMD_STOP);
+    debug_send("Stopping sensor %d", sensor_idx);
+
+    /* Mark data as invalid since sensor is stopped */
+    radar_measurements[sensor_idx].data_valid = false;
 }
 
 /**
  * @brief Process raw radar measurement data
  *
  * Analyzes detected points from a radar sensor and determines the closest valid
- * point to represent the borehole wall.
+ * point to represent the borehole wall. This function is called by the CAN
+ * interrupt handler when a complete frame of data is received.
  *
  * @param sensor_idx      Index of the sensor providing the measurement (0-2)
  * @param detectedPoints  Array of points detected by radar [distance_m, SNR]
@@ -171,15 +236,22 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADA
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
     {
+        debug_send("ERROR: Invalid sensor index %d in radar_process_measurement", sensor_idx);
         return;
     }
 
-    radar_measurement_t *measurement = &radar_round_robin.measurements[sensor_idx];
+    if (detectedPoints == NULL)
+    {
+        debug_send("ERROR: NULL detectedPoints in radar_process_measurement for sensor %d", sensor_idx);
+        return;
+    }
+
+    radar_measurement_t *measurement = &radar_measurements[sensor_idx];
 
     /* Reset measurement */
-    measurement->distance_mm = 0;
-    measurement->data_valid  = false;
-    measurement->angle_deg   = sensor_angles[sensor_idx];
+    measurement->distance_mm  = 0;
+    measurement->data_valid   = false;
+    measurement->timestamp_ms = HAL_GetTick();
 
     /* Find the CLOSEST valid point (closest to borehole wall) */
     float closest_distance = 999.0f;
@@ -190,8 +262,10 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADA
         float distance_m = detectedPoints[i][0];
         float snr        = detectedPoints[i][1];
 
+        /* Apply filtering criteria for valid points */
         if (snr > RADAR_MIN_SNR_THRESHOLD && distance_m > RADAR_MIN_DISTANCE_M && distance_m < RADAR_MAX_DISTANCE_M)
         {
+            /* Track the closest valid point */
             if (distance_m < closest_distance)
             {
                 closest_distance = distance_m;
@@ -200,162 +274,18 @@ void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADA
         }
     }
 
+    /* Store valid measurement result */
     if (found_valid)
     {
         measurement->distance_mm = (uint16_t)(closest_distance * 1000.0f);
         measurement->data_valid  = true;
-    }
-}
 
-/**
- * @brief Switch to the next sensor in round-robin mode
- *
- * Stops the current sensor and starts the next one in sequence.
- */
-void radar_switch_to_next_sensor(void)
-{
-    /* Stop current sensor */
-    if (radar_round_robin.current_sensor < MAX_RADAR_SENSORS)
-    {
-        radar_sensor_stop(radar_round_robin.current_sensor);
-    }
-
-    uint8_t previous_sensor = radar_round_robin.current_sensor;
-
-    /* Move to next sensor */
-    radar_round_robin.current_sensor++;
-    if (radar_round_robin.current_sensor >= MAX_RADAR_SENSORS)
-    {
-        radar_round_robin.current_sensor = 0;
-        /* Completed a full cycle - this could trigger additional processing if needed */
-        debug_send("Radar cycle completed");
-    }
-
-    radar_sensor_start(radar_round_robin.current_sensor);
-    radar_round_robin.last_switch_time = HAL_GetTick();
-}
-
-/**
- * @brief Start a new staggered radar cycle
- *
- * Initializes all state variables and starts the first sensor.
- */
-void radar_start_staggered_cycle(void)
-{
-    uint32_t current_time = HAL_GetTick();
-
-    /* Reset cycle state */
-    radar_round_robin.cycle_start_time  = current_time;
-    radar_round_robin.sensors_completed = 0;
-    radar_round_robin.staggered_mode    = true;
-
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        radar_round_robin.sensor_started[i]          = false;
-        radar_round_robin.frame_complete[i]          = false;
-        radar_round_robin.measurements[i].data_valid = false;
-    }
-
-    debug_send("Starting staggered radar cycle");
-
-    /* Start first sensor immediately */
-    radar_staggered_start_sensor(0);
-}
-
-/**
- * @brief Start a specific radar sensor in staggered mode
- *
- * @param sensor_idx Index of the sensor to start (0-2)
- */
-static void radar_staggered_start_sensor(uint8_t sensor_idx)
-{
-    if (sensor_idx >= MAX_RADAR_SENSORS || radar_round_robin.sensor_started[sensor_idx])
-    {
-        return;
-    }
-
-    radar_round_robin.sensor_started[sensor_idx] = true;
-    can_send_to_sensor(sensor_idx, CAN_CMD_BASE, CAN_CMD_START);
-
-    debug_send("Staggered start S%d at +%dms", sensor_idx, HAL_GetTick() - radar_round_robin.cycle_start_time);
-}
-
-/**
- * @brief Process the ongoing staggered cycle
- *
- * Starts additional sensors at appropriate intervals and monitors progress.
- */
-void radar_process_staggered_cycle(void)
-{
-    if (!radar_round_robin.staggered_mode || !radar_round_robin.system_running)
-    {
-        return;
-    }
-
-    uint32_t elapsed_time = HAL_GetTick() - radar_round_robin.cycle_start_time;
-
-    /* Start sensors at staggered intervals */
-    if (elapsed_time >= RADAR_STAGGERED_START_INTERVAL_MS && !radar_round_robin.sensor_started[1])
-    {
-        radar_staggered_start_sensor(1);
-    }
-
-    if (elapsed_time >= (RADAR_STAGGERED_START_INTERVAL_MS * 2) && !radar_round_robin.sensor_started[2])
-    {
-        radar_staggered_start_sensor(2);
-    }
-
-    /* Check if all sensors have completed their frames */
-    if (radar_round_robin.sensors_completed >= MAX_RADAR_SENSORS)
-    {
-        radar_complete_staggered_cycle();
-    }
-
-    /* Timeout fallback */
-    if (elapsed_time >= RADAR_STAGGERED_TIMEOUT_MS)
-    {
-        debug_send("Staggered cycle timeout - completing with %d sensors", radar_round_robin.sensors_completed);
-        radar_complete_staggered_cycle();
-    }
-}
-
-/**
- * @brief Complete the current staggered radar cycle
- *
- * Stops all sensors and processes the collected data.
- */
-static void radar_complete_staggered_cycle(void)
-{
-    uint32_t cycle_time = HAL_GetTick() - radar_round_robin.cycle_start_time;
-
-    debug_send("Staggered cycle complete: %dms, %d/%d sensors", cycle_time, radar_round_robin.sensors_completed, MAX_RADAR_SENSORS);
-
-    /* Stop all sensors */
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        if (radar_round_robin.sensor_started[i])
-        {
-            radar_sensor_stop(i);
-        }
-    }
-
-    /* Trigger void detection if we have sufficient data */
-    if (radar_round_robin.sensors_completed >= 2)
-    {
-        debug_send("Triggering void analysis with %d sensors", radar_round_robin.sensors_completed);
-        void_system_process();
+        debug_send("S%d: Valid measurement: %d mm", sensor_idx, measurement->distance_mm);
     }
     else
     {
-        debug_send("Insufficient sensor data for void analysis (%d sensors)", radar_round_robin.sensors_completed);
+        debug_send("S%d: No valid points found", sensor_idx);
     }
-
-    /* Reset staggered mode */
-    radar_round_robin.staggered_mode = false;
-
-    /* Schedule next cycle start after pause */
-    HAL_Delay(RADAR_STAGGERED_CYCLE_PAUSE_MS);
-    radar_start_staggered_cycle();
 }
 
 /**
@@ -370,7 +300,7 @@ radar_measurement_t *radar_get_measurement(uint8_t sensor_idx)
     {
         return NULL;
     }
-    return &radar_round_robin.measurements[sensor_idx];
+    return &radar_measurements[sensor_idx];
 }
 
 /**
@@ -385,7 +315,7 @@ bool radar_has_valid_data(uint8_t sensor_idx)
     {
         return false;
     }
-    return radar_round_robin.measurements[sensor_idx].data_valid;
+    return radar_measurements[sensor_idx].data_valid;
 }
 
 /**
@@ -396,11 +326,11 @@ bool radar_has_valid_data(uint8_t sensor_idx)
  */
 uint16_t radar_get_distance_mm(uint8_t sensor_idx)
 {
-    if (sensor_idx >= MAX_RADAR_SENSORS)
+    if (sensor_idx >= MAX_RADAR_SENSORS || !radar_measurements[sensor_idx].data_valid)
     {
         return 0;
     }
-    return radar_round_robin.measurements[sensor_idx].distance_mm;
+    return radar_measurements[sensor_idx].distance_mm;
 }
 
 /**
@@ -416,4 +346,150 @@ uint16_t radar_get_angle_deg(uint8_t sensor_idx)
         return 0;
     }
     return sensor_angles[sensor_idx];
+}
+
+/**
+ * @brief Set radar operational status
+ *
+ * @param status Radar system status (RADAR_INITIALISING, RADAR_READY, etc.)
+ */
+void radar_status_set(uint8_t status)
+{
+    radar_status = status;
+}
+
+/**
+ * @brief Check if radar data is fresh (recently updated)
+ *
+ * @param sensor_idx Index of the sensor to check (0-2)
+ * @return true if data is fresh (updated within timeout period)
+ * @return false if data is stale or sensor index is invalid
+ */
+bool radar_data_is_fresh(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !radar_measurements[sensor_idx].data_valid)
+    {
+        return false;
+    }
+
+    uint32_t current_time = HAL_GetTick();
+    uint32_t data_age     = current_time - radar_measurements[sensor_idx].timestamp_ms;
+
+    return (data_age <= RADAR_DATA_TIMEOUT_MS);
+}
+
+/**
+ * @brief Run comprehensive radar system diagnostics
+ *
+ * Performs several tests to verify radar system health and functionality
+ */
+void radar_diagnostics(void)
+{
+    debug_send("=== RADAR SYSTEM DIAGNOSTICS ===");
+
+    // 1. Check overall system status
+    debug_send("System Status: %s (%d)", radar_status_string(), radar_status);
+
+    // 2. Test CAN connectivity
+    test_sensor_responses();
+
+    // 3. Check sensor data validity
+    uint8_t valid_sensors = 0;
+    uint8_t fresh_sensors = 0;
+
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_has_valid_data(i))
+        {
+            valid_sensors++;
+        }
+        if (radar_data_is_fresh(i))
+        {
+            fresh_sensors++;
+        }
+    }
+
+    debug_send("Valid sensors: %d/3, Fresh data: %d/3", valid_sensors, fresh_sensors);
+
+    // 4. Calculate system health score
+    uint8_t health = radar_system_health();
+    debug_send("System health score: %d/100", health);
+
+    // 5. Calculate overall data rate
+    uint32_t        current_time    = HAL_GetTick();
+    static uint32_t last_diag_time  = 0;
+    static uint32_t last_total_msgs = 0;
+    uint32_t        total_msgs      = 0;
+
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        radar_data_t *sensor = &radar_system.sensors[i];
+        total_msgs += sensor->frameNumber;
+    }
+
+    if (last_diag_time > 0)
+    {
+        float elapsed_sec  = (float)(current_time - last_diag_time) / 1000.0f;
+        float msgs_per_sec = (float)(total_msgs - last_total_msgs) / elapsed_sec;
+        debug_send("Current data rate: %.1f frames/sec total (%.1f per sensor)", msgs_per_sec, msgs_per_sec / MAX_RADAR_SENSORS);
+    }
+
+    last_diag_time  = current_time;
+    last_total_msgs = total_msgs;
+
+    debug_send("==========================");
+}
+
+/**
+ * @brief Get radar status as human-readable string
+ *
+ * @return const char* Status description
+ */
+const char *radar_status_string(void)
+{
+    switch (radar_status)
+    {
+    case RADAR_INITIALISING:
+        return "INITIALISING";
+    case RADAR_READY:
+        return "READY";
+    case RADAR_CHIRPING:
+        return "CHIRPING";
+    case RADAR_STOPPED:
+        return "STOPPED";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+/**
+ * @brief Log radar data quality metrics
+ *
+ * Outputs the validity and freshness of radar data for each sensor
+ */
+void radar_log_quality_metrics(void)
+{
+    uint32_t        current_time     = HAL_GetTick();
+    static uint32_t last_quality_log = 0;
+
+    // Log once every 10 seconds
+    if (current_time - last_quality_log < 10000)
+    {
+        return;
+    }
+    last_quality_log = current_time;
+
+    debug_send("--- RADAR QUALITY METRICS ---");
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_measurements[i].data_valid)
+        {
+            debug_send("S%d: VALID data, distance: %dmm, age: %dms", i, radar_measurements[i].distance_mm, (current_time - radar_measurements[i].timestamp_ms));
+        }
+        else
+        {
+            debug_send("S%d: INVALID data, last update: %dms ago", i, (current_time - radar_measurements[i].timestamp_ms));
+        }
+    }
+    debug_send("System status: %d", radar_status);
 }

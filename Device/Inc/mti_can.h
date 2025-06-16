@@ -3,8 +3,8 @@
  * @brief CAN bus communication interface for multi-radar sensor system
  *
  * This file provides interface functions and definitions for CAN communication
- * with radar sensors, supporting command and data exchange in a multi-sensor
- * configuration.
+ * with IWR1843 AOP radar sensors, supporting command and data exchange in a
+ * multi-sensor configuration with continuous data streaming.
  *
  * File organization:
  * - Configuration and constant definitions
@@ -36,18 +36,18 @@
 
 /**
  * @name CAN Command Definitions
- * @brief Command codes for radar sensor control
+ * @brief Command codes for radar sensor control (from CAN Guide)
  * @{
  */
 #define CAN_CMD_BASE      0x80U /**< Base address for command messages */
 #define CAN_CMD_START     0x00U /**< Command to start sensor operation */
 #define CAN_CMD_STOP      0x01U /**< Command to stop sensor operation */
-#define CAN_CMD_CAL       0x02U /**< Command to calibrate sensor */
-#define CAN_CMD_POWER     0x03U /**< Command to set power level */
-#define CAN_CMD_STATUS    0x04U /**< Command to request status information */
-#define CAN_CMD_THRESHOLD 0x05U /**< Command to set detection threshold */
-#define CAN_CMD_SPREAD    0x06U /**< Command to set spreading factor */
-#define CAN_CMD_PROFILE   0x07U /**< Command to set operation profile */
+#define CAN_CMD_CAL       0x02U /**< Command to perform DC calibration */
+#define CAN_CMD_POWER     0x03U /**< Command to set TX power backoff */
+#define CAN_CMD_STATUS    0x04U /**< Command to request status and version */
+#define CAN_CMD_THRESHOLD 0x05U /**< Command to set CFAR detection threshold */
+#define CAN_CMD_SPREAD    0x06U /**< Command to enable/disable spread spectrum */
+#define CAN_CMD_PROFILE   0x07U /**< Command to set chirp configuration profile */
 #define CAN_CMD_FOV       0x08U /**< Command to set field of view */
 #define CAN_CMD_INIT      0x09U /**< Command to initialize sensor */
 /** @} */
@@ -77,7 +77,7 @@
 
 /**
  * @name CAN Message Type Base IDs
- * @brief Base identifiers for different CAN message types
+ * @brief Base identifiers for different CAN message types (from CAN Guide)
  * @{
  */
 #define CAN_ID_HEADER_BASE  0xA0U /**< Base ID for frame header messages */
@@ -110,26 +110,8 @@
 /** @} */
 
 /**
- * @name Sensor Base Addresses
- * @brief Base address constants for each sensor
- * @{
- */
-#define SENSOR_0_BASE_ADDR 0x00 /**< Base address for sensor 0 */
-#define SENSOR_1_BASE_ADDR 0x10 /**< Base address for sensor 1 */
-#define SENSOR_2_BASE_ADDR 0x20 /**< Base address for sensor 2 */
-/** @} */
-
-/**
- * @brief Generate command ID for a specific sensor
- *
- * @param sensor_idx Sensor index (0-2)
- * @return Command ID for the specified sensor
- */
-#define CAN_CMD_SENSOR_ID(sensor_idx) (CAN_CMD_BASE + (sensor_idx))
-
-/**
  * @name Radar Operation Profile Constants
- * @brief Predefined radar operation profiles
+ * @brief Predefined radar operation profiles (from CAN Guide)
  * @{
  */
 #define RADAR_PROFILE_CAL         0 /**< Calibration profile */
@@ -151,11 +133,11 @@ typedef enum
 } radar_status_t;
 
 /**
- * @brief Hardware-level radar sensor status
+ * @brief Hardware-level radar sensor status (from CAN Guide)
  */
 typedef enum
 {
-    RADAR_HW_INITIALISING = 0, /**< Hardware initialization in progress */
+    RADAR_HW_INITIALISING = 0, /**< Hardware initialization in progress (BOOT) */
     RADAR_HW_READY        = 1, /**< Hardware ready for operation */
     RADAR_HW_CHIRPING     = 2, /**< Hardware actively transmitting/receiving */
     RADAR_HW_STOPPED      = 3, /**< Hardware operation halted */
@@ -176,6 +158,16 @@ typedef union
 } can_data_union_t;
 
 /**
+ * @brief Radar sensor firmware version structure
+ */
+typedef struct
+{
+    uint8_t major; /**< Major version number */
+    uint8_t minor; /**< Minor version number */
+    uint8_t sub;   /**< Sub version number */
+} radar_version_t;
+
+/**
  * @brief Radar sensor data structure
  *
  * Contains all data related to a single radar sensor including detected points,
@@ -185,18 +177,13 @@ typedef struct
 {
     float             detectedPoints[MAX_RADAR_DETECTED_POINTS][2]; /**< Array of detected points [distance, SNR] */
     uint32_t          frameNumber;                                  /**< Frame counter for this sensor */
-    uint32_t          totalPacketLength;                            /**< Raw value from header, protocol-specific */
+    uint32_t          totalPacketLength;                            /**< Total packet length from header */
     uint8_t           numDetPoints;                                 /**< Number of points expected/received for the frame */
     uint8_t           pointIndex;                                   /**< Current index for point reception */
     float             maxSNR;                                       /**< Calculated maximum SNR value */
     radar_hw_status_t status;                                       /**< Hardware status of this specific radar sensor */
     bool              new_data_ready;                               /**< Flag indicating new data is ready for processing */
-    struct
-    {
-        uint8_t major; /**< Major version number */
-        uint8_t minor; /**< Minor version number */
-        uint8_t sub;   /**< Sub version number */
-    } version;         /**< Sensor firmware version information */
+    radar_version_t   version;                                      /**< Sensor firmware version information */
 } radar_data_t;
 
 /**
@@ -219,6 +206,9 @@ typedef struct
 
 /**
  * @brief Initialize CAN interface and set up filters
+ *
+ * Configures CAN hardware with filters for command and data messages,
+ * then starts the CAN peripheral for continuous mode operation.
  *
  * @return true if setup was successful
  * @return false if any error occurred during setup
@@ -258,12 +248,14 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length);
 bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message);
 
 /**
- * @brief Send a command to all connected sensors
+ * @brief Initialize continuous mode operation
  *
- * @param base_id Base CAN ID for the message type
- * @param message Command code to send
+ * Configures and starts all sensors for continuous data streaming.
+ *
+ * @return true if initialization was successful
+ * @return false if an error occurred
  */
-void broadcast_to_all_sensors(uint32_t base_id, uint8_t message);
+bool can_initialize_continuous_mode(void);
 
 /**
  * @brief Extract sensor index from a CAN message ID
@@ -328,6 +320,13 @@ uint8_t get_active_sensor_count(void);
  * @param sensor_idx Index of the sensor to reset
  */
 void reset_sensor_data(uint8_t sensor_idx);
+
+/**
+ * @brief Monitor sensor health and restart any offline sensors
+ *
+ * Should be called periodically from main loop
+ */
+void monitor_sensor_health(void);
 /** @} */
 
 /**
@@ -347,16 +346,11 @@ void test_sensor_indexing(void);
  * for responses
  */
 void test_sensor_responses(void);
-
-/**
- * @brief Send debug message to the debug output
- *
- * @param format Printf-style format string
- * @param ... Format arguments
- */
-void debug_send(const char *format, ...);
 /** @} */
 
+/**
+ * @name External Variables
+ */
 /**
  * @brief Global radar system instance
  *
