@@ -77,78 +77,48 @@ void void_system_process(void)
         }
     }
 
+    // Only process if we have at least 2 valid sensors
+    if (valid_sensor_count < 2)
+    {
+        debug_send("Insufficient valid sensors for void detection: %d/3", valid_sensor_count);
+        return;
+    }
+
     // Process based on algorithm selection
-    void_algorithm_t active_algorithm = prv_void_system.config.active_algorithm;
+    void_algorithm_t active_algorithm  = prv_void_system.config.active_algorithm;
+    void_status_t    result            = { 0 };
+    bool             detection_success = false;
 
     switch (active_algorithm)
     {
     case VOID_ALG_BYPASS:
-        // No void detection, just prepare status for streaming
-        prv_void_system.current_status.algorithm_used     = VOID_ALG_BYPASS;
-        prv_void_system.current_status.sensor_count_used  = valid_sensor_count;
-        prv_void_system.current_status.void_detected      = false;
-        prv_void_system.current_status.confidence_percent = 0;
-        strcpy(prv_void_system.current_status.status_text, "Bypass mode - raw data only");
-        debug_send("Algorithm 0 (bypass): Raw data streaming (%d/3 sensors)", valid_sensor_count);
+        // Just stream raw data, no processing
+        debug_send("Bypass mode: streaming raw data only");
         break;
 
     case VOID_ALG_SIMPLE:
-        if (valid_sensor_count >= 2)
-        {
-            void_status_t new_status     = { 0 };
-            new_status.algorithm_used    = VOID_ALG_SIMPLE;
-            new_status.sensor_count_used = valid_sensor_count;
-
-            if (prv_simple_threshold_detection(&new_status))
-            {
-                prv_process_detection_result(&new_status, current_time);
-                debug_send("Algorithm 1 (simple): Detection complete, conf=%d%%", new_status.confidence_percent);
-            }
-        }
-        else
-        {
-            prv_send_insufficient_sensor_fault(valid_sensor_count, VOID_ALG_SIMPLE);
-        }
+        // Use simple threshold algorithm
+        detection_success = prv_simple_threshold_detection(&result);
         break;
 
     case VOID_ALG_CIRCLEFIT:
-        if (valid_sensor_count >= 2)
-        {
-            void_status_t new_status     = { 0 };
-            new_status.algorithm_used    = VOID_ALG_CIRCLEFIT;
-            new_status.sensor_count_used = valid_sensor_count;
-
-            if (prv_circle_fit_void_detection(&new_status))
-            {
-                prv_process_detection_result(&new_status, current_time);
-                debug_send("Algorithm 2 (circlefit): Detection complete, conf=%d%%", new_status.confidence_percent);
-            }
-            else if (prv_void_system.config.auto_fallback_enabled)
-            {
-                // Fallback to simple algorithm
-                debug_send("Circle fit failed, falling back to simple algorithm");
-                new_status.algorithm_used = VOID_ALG_SIMPLE; // Mark as fallback
-                if (prv_simple_threshold_detection(&new_status))
-                {
-                    prv_process_detection_result(&new_status, current_time);
-                    debug_send("Fallback to algorithm 1 (simple): conf=%d%%", new_status.confidence_percent);
-                }
-            }
-        }
-        else
-        {
-            prv_send_insufficient_sensor_fault(valid_sensor_count, VOID_ALG_CIRCLEFIT);
-        }
+        // Use circle fitting algorithm
+        detection_success = prv_circle_fit_void_detection(&result);
         break;
 
     default:
-        debug_send("Unknown algorithm %d, defaulting to bypass", active_algorithm);
-        prv_void_system.config.active_algorithm = VOID_ALG_BYPASS;
+        debug_send("Unknown algorithm selection: %d", active_algorithm);
         break;
     }
 
+    // Process detection results if available
+    if (detection_success)
+    {
+        prv_process_detection_result(&result, current_time);
+    }
+
     // Always stream data during operational mode
-    if (state_get() == measure_state)
+    if (system_is_operational_mode())
     {
         void_send_automatic_stream();
     }

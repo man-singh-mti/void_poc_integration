@@ -233,4 +233,12 @@ void radar_process_staggered_cycle(void);
 void radar_complete_staggered_cycle(void);
 /** @} */
 
+/**
+ * @brief Process any completed radar measurements
+ *
+ * Processes data from any sensors that have new data ready,
+ * for continuous operation mode.
+ */
+void radar_process_completed_measurements(void);
+
 #endif /* MTI_RADAR_H */

@@ -455,8 +455,8 @@ void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_
  * @brief Process a complete radar data frame
  *
  * Called when all expected points for a frame have been received.
- * Processes the radar measurement data and handles frame completion
- * based on the current operational mode.
+ * In continuous operation mode, immediately processes the data and
+ * triggers void detection when enough sensors have reported data.
  *
  * @param sensor_idx Index of the sensor that completed a frame
  */
@@ -466,23 +466,41 @@ void process_complete_radar_frame(uint8_t sensor_idx)
 
     debug_send("S%d: Frame %d complete with %d points", sensor_idx, sensor->frameNumber, sensor->numDetPoints);
 
-    // Call the simplified radar processing function
+    /* Mark sensor as online/active */
+    radar_system.last_message_timestamp[sensor_idx] = HAL_GetTick();
+    radar_system.sensor_online[sensor_idx]          = true;
+
+    /* Process this sensor's measurement data immediately */
     radar_process_measurement(sensor_idx, sensor->detectedPoints, sensor->numDetPoints);
 
-    // Handle completion based on current mode
-    extern radar_round_robin_t radar_round_robin; // Access to radar state
+    /* Mark data as processed */
+    sensor->new_data_ready = false;
 
-    if (radar_round_robin.staggered_mode)
+    /* In continuous mode, check if we should trigger void detection */
+    static uint32_t last_void_process_time = 0;
+    uint32_t        current_time           = HAL_GetTick();
+
+    /* Process void detection no more than once every 200ms */
+    if (current_time - last_void_process_time >= 200)
     {
-        // Mark sensor complete (existing logic)
-        if (!radar_round_robin.frame_complete[sensor_idx])
+        /* Count active sensors with valid data */
+        uint8_t valid_sensors = 0;
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            radar_round_robin.frame_complete[sensor_idx] = true;
-            radar_round_robin.sensors_completed++;
+            if (radar_has_valid_data(i))
+            {
+                valid_sensors++;
+            }
         }
-        // REMOVE ANY VOID ANALYSIS CALLS FROM HERE
+
+        /* Only trigger void detection if we have enough data */
+        if (valid_sensors >= 2)
+        {
+            debug_send("Continuous mode: Triggering void detection with %d sensors", valid_sensors);
+            void_system_process();
+            last_void_process_time = current_time;
+        }
     }
-    // REMOVE sequential mode logic entirely
 }
 
 /**

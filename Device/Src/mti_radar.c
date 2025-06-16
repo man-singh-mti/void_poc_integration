@@ -43,20 +43,29 @@ static const uint16_t sensor_angles[MAX_RADAR_SENSORS] = {
 };
 
 /**
- * @brief Initialize the radar system
- *
- * Sets up the round-robin state and prepares the system for operation.
+ * @brief Initialize the radar system for continuous operation
  */
 void radar_system_init(void)
 {
     /* Initialize round-robin system */
     memset(&radar_round_robin, 0, sizeof(radar_round_robin));
 
-    debug_send("Radar system init (staggered mode)");
+    debug_send("Radar system init (continuous mode)");
 
-    /* Start with staggered mode */
-    radar_round_robin.system_running   = true;
-    radar_round_robin.staggered_mode   = false; /* Will be set true on first cycle */
+    /* Configure for continuous operation */
+    radar_round_robin.system_running = true;
+
+    /* Start all sensors immediately */
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        radar_sensor_start(i);
+        debug_send("Starting sensor %d in continuous mode", i);
+
+        /* Small delay between sensor starts to avoid CAN bus congestion */
+        HAL_Delay(20);
+    }
+
+    /* Record initialization time */
     radar_round_robin.last_switch_time = HAL_GetTick();
 }
 
@@ -73,19 +82,45 @@ void radar_system_process(void)
         return;
     }
 
-    if (radar_round_robin.staggered_mode)
-    {
-        /* Process staggered cycle */
-        radar_process_staggered_cycle();
-    }
-    else
-    {
-        /* Check if it's time to start a new cycle */
-        uint32_t time_since_last = HAL_GetTick() - radar_round_robin.last_switch_time;
+    /* Process any received data */
+    radar_process_completed_measurements();
 
-        if (time_since_last >= RADAR_STAGGERED_CYCLE_PAUSE_MS)
+    /* Periodically trigger void detection (every 200ms) */
+    static uint32_t last_void_process = 0;
+    uint32_t        current_time      = HAL_GetTick();
+
+    if (current_time - last_void_process >= 200)
+    {
+        /* Check sensor status periodically and restart any non-responsive sensors */
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            radar_start_staggered_cycle();
+            if (!is_sensor_online(i))
+            {
+                debug_send("Sensor %d offline - restarting", i);
+                radar_sensor_start(i);
+            }
+        }
+
+        /* Trigger void detection with available data */
+        debug_send("Processing void detection with current sensor data");
+        void_system_process();
+
+        last_void_process = current_time;
+    }
+}
+
+/* Create new function to process completed measurements */
+void radar_process_completed_measurements(void)
+{
+    /* Process any sensors with new data */
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_system.sensors[i].new_data_ready)
+        {
+            radar_process_measurement(i, radar_system.sensors[i].detectedPoints, radar_system.sensors[i].numDetPoints);
+
+            radar_system.sensors[i].new_data_ready = false;
+            debug_send("Processed new data from sensor %d", i);
         }
     }
 }
