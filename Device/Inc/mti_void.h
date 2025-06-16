@@ -35,8 +35,9 @@
 #define VOID_MAJOR_THRESHOLD_MM 50U // < 50mm = major, >= 50mm = critical
 
 // System timing constants
-#define VOID_SENSOR_TIMEOUT_MS 2000U // Sensor data timeout
-#define VOID_EVENT_DEBOUNCE_MS 200U  // Event debounce time
+#define VOID_SENSOR_TIMEOUT_MS       2000U // Sensor data timeout (2 seconds)
+#define VOID_PERIODIC_INTERVAL_MS    100U  // Process every 100ms regardless of new data
+#define VOID_MIN_PROCESS_INTERVAL_MS 10U   // Minimum time between processing cycles
 
 // Mathematical constants for circle fitting
 #define VOID_PI         3.14159f
@@ -122,6 +123,11 @@ typedef struct
     uint8_t            history_count;              // Number of entries in history
     uint32_t           last_process_time_ms;       // Last processing timestamp
     bool               system_initialized;         // Initialization flag
+
+    // New fields for continuous streaming support
+    uint32_t sensor_update_time[MAX_RADAR_SENSORS]; // Last update time per sensor
+    uint8_t  sensors_with_new_data;                 // Count of sensors with new data
+    uint32_t last_forced_processing_ms;             // Time of last cycle-based processing
 } void_system_state_t;
 
 // Core void detection functions
@@ -160,5 +166,15 @@ void        void_clear_history(void);
 bool        void_is_system_ready(void);
 const char *void_get_severity_string(void_severity_t severity);
 const char *void_get_algorithm_string(void_algorithm_t algorithm);
+
+/**
+ * @brief Process new data from a specific radar sensor
+ *
+ * Called by the CAN interrupt handler when new radar data is received.
+ * Updates internal void detection state with the new measurement.
+ *
+ * @param sensor_idx Index of the sensor with new data (0-2)
+ */
+void void_process_new_sensor_data(uint8_t sensor_idx);
 
 #endif // MTI_VOID_H

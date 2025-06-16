@@ -61,11 +61,24 @@ void void_system_process(void)
         return;
     }
 
-    uint32_t current_time                = HAL_GetTick();
-    prv_void_system.last_process_time_ms = current_time;
+    uint32_t current_time = HAL_GetTick();
 
-    // Update measurement data from radar sensors
-    prv_update_measurement_data();
+    // Check if we should process based on time (100ms interval)
+    bool force_processing = false;
+    if ((current_time - prv_void_system.last_forced_processing_ms) >= VOID_PERIODIC_INTERVAL_MS)
+    {
+        force_processing                          = true;
+        prv_void_system.last_forced_processing_ms = current_time;
+    }
+
+    // Only process if we have new data or if time-based processing is forced
+    if (prv_void_system.sensors_with_new_data == 0 && !force_processing)
+    {
+        return;
+    }
+
+    prv_void_system.last_process_time_ms  = current_time;
+    prv_void_system.sensors_with_new_data = 0; // Reset counter after processing
 
     // Count valid sensors
     uint8_t valid_sensor_count = 0;
@@ -73,7 +86,17 @@ void void_system_process(void)
     {
         if (prv_void_system.latest_measurement.data_valid[i])
         {
-            valid_sensor_count++;
+            // Check if data is fresh enough (less than 2 seconds old)
+            if ((current_time - prv_void_system.sensor_update_time[i]) < VOID_SENSOR_TIMEOUT_MS)
+            {
+                valid_sensor_count++;
+            }
+            else
+            {
+                // Mark data as invalid if too old
+                prv_void_system.latest_measurement.data_valid[i] = false;
+                debug_send("Void: Sensor %d data too old (%d ms), marking invalid", i, (current_time - prv_void_system.sensor_update_time[i]));
+            }
         }
     }
 
@@ -950,5 +973,53 @@ static void void_send_detection_events(bool void_detected, bool previous_void_de
     else
     {
         void_message_id++;
+    }
+}
+
+void void_process_new_sensor_data(uint8_t sensor_idx)
+{
+    if (!prv_void_system.system_initialized || sensor_idx >= MAX_RADAR_SENSORS)
+    {
+        return;
+    }
+
+    // Update measurement data for this sensor
+    radar_measurement_t *measurement = radar_get_measurement(sensor_idx);
+    if (measurement && measurement->data_valid)
+    {
+        prv_void_system.latest_measurement.distance_mm[sensor_idx] = measurement->distance_mm;
+        prv_void_system.latest_measurement.angle_deg[sensor_idx]   = measurement->angle_deg;
+        prv_void_system.latest_measurement.data_valid[sensor_idx]  = true;
+        prv_void_system.sensor_update_time[sensor_idx]             = HAL_GetTick();
+
+        // Increment the counter of sensors with new data
+        prv_void_system.sensors_with_new_data++;
+
+        debug_send("Void: Updated sensor %d data: %dmm at %d°", sensor_idx, measurement->distance_mm, measurement->angle_deg);
+    }
+
+    // Process if:
+    // 1. We have data from all sensors, or
+    // 2. We have at least 2 sensors AND minimum processing interval has passed
+    uint32_t current_time = HAL_GetTick();
+    bool     process_now  = false;
+
+    if (prv_void_system.sensors_with_new_data == MAX_RADAR_SENSORS)
+    {
+        // All sensors have reported - process immediately
+        process_now = true;
+    }
+    else if (prv_void_system.sensors_with_new_data >= 2)
+    {
+        // Check if minimum time has passed since last processing
+        if ((current_time - prv_void_system.last_process_time_ms) >= VOID_MIN_PROCESS_INTERVAL_MS)
+        {
+            process_now = true;
+        }
+    }
+
+    if (process_now)
+    {
+        void_system_process();
     }
 }

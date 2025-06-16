@@ -13,6 +13,7 @@
 #include "vmt_uart.h"
 #include "mti_void.h"
 #include <string.h>
+#include <stdlib.h> // For abs() function
 
 /**
  * @brief Internal storage for radar measurements

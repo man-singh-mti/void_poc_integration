@@ -121,16 +121,6 @@
 #define RADAR_PROFILE_100M_MULTI  4 /**< Multiple targets, 100m range profile */
 /** @} */
 
-/**
- * @brief System-level radar operational status
- */
-typedef enum
-{
-    RADAR_INITIALISING, /**< System is initializing */
-    RADAR_READY,        /**< System is ready for operation */
-    RADAR_CHIRPING,     /**< System is actively transmitting/receiving */
-    RADAR_STOPPED,      /**< System operation is halted */
-} radar_status_t;
 
 /**
  * @brief Hardware-level radar sensor status (from CAN Guide)

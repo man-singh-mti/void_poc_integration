@@ -56,7 +56,7 @@ bool     water_synced_get(void);
 uint8_t  state_get(void);
 void     state_set(uint8_t);
 status_t module_status_get(void);
-void     radar_status_set(radar_status_t status);
+void     radar_status_set(radar_hw_status_t status);
 void     module_status_set(status_t status);
 bool     module_init(void);
 void     version_ack(bool received);

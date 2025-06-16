@@ -609,12 +609,7 @@ void device_process(void)
 
     radar_system_process();
     temp_system_process();
-
-    // --- MODIFICATION START ---
-    // Remove the periodic call to the void system process.
-    // It is now triggered by the radar module upon data completion.
-    // void_system_process(); // REMOVED: No longer called from main loop
-    // --- MODIFICATION END ---
+    void_system_process(); // Add this call to process void detection system
 
     icm20948_process(&h_icm20948[0]);
     icm20948_process(&h_icm20948[1]);

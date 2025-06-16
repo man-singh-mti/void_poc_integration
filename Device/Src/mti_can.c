@@ -517,7 +517,7 @@ void process_complete_radar_frame(uint8_t sensor_idx)
     /* Process this sensor's measurement data immediately */
     radar_process_measurement(sensor_idx, sensor->detectedPoints, sensor->numDetPoints);
 
-    /* Notify void detection system about new data - this may trigger immediate processing */
+    /* Notify void detection system about new data */
     void_process_new_sensor_data(sensor_idx);
 
     /* Mark data as processed */

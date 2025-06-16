@@ -7,20 +7,20 @@
 #include "mti_temp.h"
 #include "mti_void.h" // Add this include
 
-bool           debug = true;
-bool           initialised;
-bool           water_synced;
-radar_status_t radar_status;
-status_t       module_status;
-bool           initialised;
-bool           version_sent;
-init_step_t    init_step     = STEP_START;
-uint8_t        retries_ver   = 0;
-uint8_t        retries_water = 0;
-uint8_t        retries_imu   = 0;
-uint8_t        retries_radar = 0;
-uint8_t        state;
-uint32_t       keepalive_timer;
+bool              debug = true;
+bool              initialised;
+bool              water_synced;
+radar_hw_status_t radar_status;
+status_t          module_status;
+bool              initialised;
+bool              version_sent;
+init_step_t       init_step     = STEP_START;
+uint8_t           retries_ver   = 0;
+uint8_t           retries_water = 0;
+uint8_t           retries_imu   = 0;
+uint8_t           retries_radar = 0;
+uint8_t           state;
+uint32_t          keepalive_timer;
 
 static const char *str_radar_status[4] = { "Not Initialised", "Ready", "Chirping", "Stopped" };
 
@@ -42,7 +42,7 @@ bool water_synced_get(void)
     return water_synced;
 }
 
-void radar_status_set(radar_status_t status)
+void radar_status_set(radar_hw_status_t status)
 {
     radar_status = status;
     printf("Radar status: %s\n", str_radar_status[radar_status]);
@@ -312,7 +312,7 @@ void imu_validate(h_imu_t *h_imu)
         }
         if (error_code > 1)
         {
-            module_status = error_code;
+            module_status = (status_t)error_code;
             if (retry < 3)
             {
                 printf("@db,retry IMU init\n");

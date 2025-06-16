@@ -167,7 +167,7 @@ radar_measurement_t *radar_get_measurement(uint8_t sensor_idx);
  *
  * @param status Radar system status (RADAR_INITIALISING, RADAR_READY, etc.)
  */
-void radar_status_set(uint8_t status);
+void radar_status_set(radar_hw_status_t status);
 
 /**
  * @brief Check if radar data is fresh (recently updated)
@@ -177,6 +177,30 @@ void radar_status_set(uint8_t status);
  * @return false if data is stale or sensor index is invalid
  */
 bool radar_data_is_fresh(uint8_t sensor_idx);
+
+/**
+ * @brief Get radar status as human-readable string
+ *
+ * @return const char* Status description
+ */
+const char *radar_status_string(void);
+
+/**
+ * @brief Calculate radar system health score
+ *
+ * @return uint8_t Health score (0-100)
+ */
+uint8_t radar_system_health(void);
+
+/**
+ * @brief Log radar data quality metrics
+ */
+void radar_log_quality_metrics(void);
+
+/**
+ * @brief Run comprehensive radar system diagnostics
+ */
+void radar_diagnostics(void);
 
 /** @} */
 
