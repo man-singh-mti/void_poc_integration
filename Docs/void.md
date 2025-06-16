@@ -25,9 +25,8 @@
         4.2.2. [Automatic Data Stream Architecture](#422-automatic-data-stream-architecture)
         4.2.3. [Current Implementation Status: Void Command Interface](#423-current-implementation-status-void-command-interface)
         4.2.4. [Implementation Roadmap](#424-implementation-roadmap)
-5. [Void Detection Methods](#5-void-detection-methods)
-    5.1. [Simplified POC Architecture](#51-simplified-poc-architecture)
-    5.2. [Simplified Processing Flow](#52-simplified-processing-flow)
+5. [Void Detection Methods](#5-void-detection-methods)    5.1. [Simplified POC Architecture](#51-simplified-poc-architecture)
+    5.2. [Continuous Data Streaming Algorithm](#52-continuous-data-streaming-algorithm)
 6. [Detailed Design and Implementation](#6-detailed-design-and-implementation)
     6.1. [Actual Implementation Data Flow](#61-actual-implementation-data-flow)
     6.2. [Simplified Processing Modules](#62-simplified-processing-modules)
@@ -77,18 +76,18 @@ This document covers the downhole module firmware implementation, including:
 
 ### 1.4. Definitions and Acronyms
 
-| Term      | Definition                                           |
-|:------|:---------------------------------|
-| BARR-C    | Barr Group’s Embedded C Coding Standard              |
-| CAN       | Controller Area Network – automotive-grade bus       |
-| mm        | Millimetres                                          |
-| HAL       | Hardware Abstraction Layer (STM32 HAL)               |
-| ISR       | Interrupt Service Routine                            |
-| MCU       | Microcontroller Unit (STM32F722)                     |
-| RTOS      | Real-Time Operating System (not used – bare metal)   |
-| SNR       | Signal-to-Noise Ratio                                |
-| VMT       | Void Measurement Tool                                |
-| WCET      | Worst-Case Execution Time                            |
+| Term   | Definition                                         |
+|:-------|:---------------------------------------------------|
+| BARR-C | Barr Group’s Embedded C Coding Standard            |
+| CAN    | Controller Area Network – automotive-grade bus     |
+| mm     | Millimetres                                        |
+| HAL    | Hardware Abstraction Layer (STM32 HAL)             |
+| ISR    | Interrupt Service Routine                          |
+| MCU    | Microcontroller Unit (STM32F722)                   |
+| RTOS   | Real-Time Operating System (not used – bare metal) |
+| SNR    | Signal-to-Noise Ratio                              |
+| VMT    | Void Measurement Tool                              |
+| WCET   | Worst-Case Execution Time                          |
 
 ---
 
@@ -107,11 +106,8 @@ The void-detection system is a safety-critical embedded application running on *
   * ✅ CAN Communication for radar interface (98% complete - robust error recovery in `mti_can.c`).
   * ✅ UART Communication for debug and uphole ([`vmt_uart.c`](../Device/Src/vmt_uart.c)).
   * ✅ Temperature Monitoring (100% complete - fully implemented in [`mti_temp.c`](../Device/Src/mti_temp.c)) with ADC-based sensing, smoothing, thresholds, command interface, and automatic streaming.
-  * ✅ Radar System (95% complete - staggered cycle logic in [`mti_radar.c`](../Device/Src/mti_radar.c), clean data in millimetres with 20ms staggered sensor starts).
+  * ✅ Radar System (95% complete - continuous operation mode in [`mti_radar.c`](../Device/Src/mti_radar.c), clean data in millimetres with simultaneous sensor data processing).
   * ✅ IMU System (functional accelerometer/gyroscope monitoring, dual-sensor validation in [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c)).
-  * ✅ Water Detection (basic ADC-threshold detection in [`vmt_water.c`](../Device/Src/vmt_water.c)).
-  * ✅ **Void Detection Logic** in [`mti_void.c`](../Device/Src/mti_void.c) is currently **95% complete** (both simple threshold and circle fitting algorithms fully implemented and operational).
-  * ✅ Error Recovery mechanisms in CAN and other modules.
   * ✅ Build System: compiles with zero errors.
 
 **System Status: Production-Ready Void Detection Implementation**
@@ -119,10 +115,10 @@ The void detection system has evolved far beyond POC level to a near-production 
 
 * ✅ **Simple threshold-based void detection** – fully implemented and operational with configurable thresholds and hysteresis.
 * ✅ **Circle fitting algorithm** – implemented with 3-point circle fitting, automatic quality assessment, and intelligent fallback.
-* ✅ **Event-driven processing** – triggered by radar cycle completion via `radar_complete_staggered_cycle()` every 100ms.
+* ✅ **Event-driven processing** – triggered by radar data via continuous CAN data stream processing.
 * ✅ **Dual-algorithm architecture** – runtime switching between simple and circle fitting with automatic fallback protection.
 * ✅ **Configuration interface** – comprehensive runtime algorithm switching and parameter adjustment.
-* ✅ **Data flow integration** – seamless integration with radar's staggered cycle processing and millimetre-precision output.
+* ✅ **Data flow integration** – seamless integration with radar's continuous data processing and millimetre-precision output.
 * ⚠️ **Command interface** – basic placeholder (`cmd_void()` in `vmt_command.c` is minimal), not the rich `@vd` interface documented.
 
 The system represents a significant advancement from the originally documented POC concept. Current implementation status is 95% complete with only command interface completion and comprehensive testing remaining.
@@ -213,9 +209,9 @@ void void_set_baseline(uint16_t baseline_mm);
 
 **Integration Points:**
 
-* Fetch cleaned radar data from [`mti_radar.c`](https://www.google.com/search?q=../Device/Src/mti_radar.c).
-* Integrate `void_system_process()` into the main loop in [`mti_system.c`](https://www.google.com/search?q=../Device/Src/mti_system.c) or [`vmt_device.c`](https://www.google.com/search?q=../Device/Src/vmt_device.c).
-* Extend void commands in [`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c).
+* Fetch cleaned radar data from [`mti_radar.c`](../Device/Src/mti_radar.c).
+* Integrate `void_system_process()` into the main loop in [`mti_system.c`](../Device/Src/mti_system.c) or [`vmt_device.c`](../Device/Src/vmt_device.c).
+* Extend void commands in [`vmt_command.c`](../Device/Src/vmt_command.c).
 * Use UART channels (115 200 bps) for event reporting and debug.
 
 ### 3.3. Development Steps
@@ -223,7 +219,7 @@ void void_set_baseline(uint16_t baseline_mm);
 1. **Create `mti_void.h`** – Define data structures and function prototypes.
 2. **Implement `mti_void.c`** – Core threshold-based void detection algorithms.
 3. **Integrate with `mti_radar.c`** – Fetch millimetre data in `void_system_process()`.
-4. **Add void commands** to [`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c).
+4. **Add void commands** to [`vmt_command.c`](../Device/Src/vmt_command.c).
 5. **Testing and Calibration** – Validate with simulated/captured radar data.
 6. **Documentation** – Update usage guides and complete this implementation guide.
 
@@ -233,20 +229,21 @@ void void_set_baseline(uint16_t baseline_mm);
 
 ### 4.1. CAN Bus (Sensor Communication)
 
-**Implementation in** [`mti_can.c`](https://www.google.com/search?q=../Device/Src/mti_can.c):
+**Implementation in** [`mti_can.c`](../Device/Src/mti_can.c):
 
 * **Bus Speed:** 500 kbps.
 * **Frame Format:** Extended frame (29-bit ID).
 * **Error Handling:** Automatic retransmission, bus-off recovery in `HAL_CAN_ErrorCallback()`.
-* **Event-Driven Processing:** Staggered radar cycle triggers void detection automatically via `radar_complete_staggered_cycle()`.
+* **Event-Driven Processing:** Continuous radar data processing via CAN interrupt handlers in `HAL_CAN_RxFifo0MsgPendingCallback()`.
+* **Parallel Operation:** All sensors operate simultaneously in continuous mode, with each sending data independently.
 
 <!-- end list -->
 
 ```c
 // Sensor addressing (in mti_can.h)
 #define CAN_ID_HEADER_BASE  0xA0
-#define CAN_ID_OBJECT_BASE  0xB0
-#define CAN_ID_STATUS_BASE  0xC0
+#define CAN_ID_OBJECT_BASE  0xA1
+#define CAN_ID_STATUS_BASE  0xA3
 #define CAN_CMD_BASE        0x80
 
 #define CAN_MSG_ID_HEADER_SENSOR(idx)  (CAN_ID_HEADER_BASE + ((idx) * 0x10U))
@@ -258,14 +255,14 @@ void void_set_baseline(uint16_t baseline_mm);
 **Timing Constraints (in `vmt_common_defs.h`):**
 
 ```c
-#define RADAR_POLL_INTERVAL_MS   100     // 10 Hz
-#define CAN_COMM_TIMEOUT_MS      2000    // 2 s timeout
+#define RADAR_POLL_INTERVAL_MS   100     // 10 Hz expected data rate per sensor
+#define CAN_COMM_TIMEOUT_MS      2000    // 2 s timeout for sensor data
 #define SENSOR_RESET_DELAY_MS    10      // 10 ms reset time
 ```
 
 ### 4.2. UART/RS485 (Uphole Communication)
 
-**Implementation in** [`vmt_uart.c`](https://www.google.com/search?q=../Device/Src/vmt_uart.c) **and** [`vmt_command.c`](https://www.google.com/search?q=../Device/Src/vmt_command.c):
+**Implementation in** [`vmt_uart.c`](../Device/Src/vmt_uart.c) **and** [`vmt_command.c`](../Device/Src/vmt_command.c):
 
 * **Baud Rate:** Configurable (115 200 bps typical).
 * **Protocol:** ASCII commands/responses, prefixed (`@`, `&`, `!`, `$`).
@@ -280,7 +277,7 @@ General structure:
 @<command_family>,<action/target>,[param1],[param2],...<newline>
 ```
 
-Parsing is handled by `string_decoder_by_end()` in [`vmt_string.c`](https://www.google.com/search?q=../Device/Src/vmt_string.c).
+Parsing is handled by `string_decoder_by_end()` in [`vmt_string.c`](../Device/Src/vmt_string.c).
 
 **Examples (existing):**
 
@@ -354,176 +351,22 @@ typedef enum {
 
 **Communication Behaviour by Phase:**
 
-| Phase            | Mode      | Communication Pattern          | Configuration Commands     |
-|:-----------|:------|:-------------------|:-----------------|
-| **Initialization** | Coupled   | Bidirectional command/response | `@vd,config`, `@temp,config` accepted |
-| **Operational** | Uncoupled | Unidirectional data streaming | Configuration commands ignored |
-| **Keepalive** | Uncoupled | Periodic `@status,down,A` + data streams | Status queries may respond |
+| Phase              | Mode      | Communication Pattern                    | Configuration Commands                |
+|:-------------------|:----------|:-----------------------------------------|:--------------------------------------|
+| **Initialization** | Coupled   | Bidirectional command/response           | `@vd,config`, `@temp,config` accepted |
+| **Operational**    | Uncoupled | Unidirectional data streaming            | Configuration commands ignored        |
+| **Keepalive**      | Uncoupled | Periodic `@status,down,A` + data streams | Status queries may respond            |
 
 **Automatic Data Streams (Operational Phase Only):**
 
-| Module        | Stream Type   | Trigger Conditions                    | Format                                     |
-|:----------|:----------|:------------------------|:---------------------------|
-| **Void** | Instantaneous | When measurements ready (\~100ms)      | `&vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>` |
-| **Temperature** | Change-based  | 10s periodic OR 1°C change OR alert   | `&temp,status,<temp_c>,<alert>` OR `!temp,<msgID>,<event>`            |
-| **Water** | Event-based   | State change only                     | `!water,<messageID>,<state>`               |
-| **IMU** | Event-based   | Bump/motion detection                 | `!imu,bump,<data>`                         |
+| Module          | Stream Type   | Trigger Conditions                  | Format                                                     |
+|:----------------|:--------------|:------------------------------------|:-----------------------------------------------------------|
+| **Void**        | Instantaneous | When measurements ready (\~100ms)   | `&vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>`         |
+| **Temperature** | Change-based  | 10s periodic OR 1°C change OR alert | `&temp,status,<temp_c>,<alert>` OR `!temp,<msgID>,<event>` |
+| **Water**       | Event-based   | State change only                   | `!water,<messageID>,<state>`                               |
+| **IMU**         | Event-based   | Bump/motion detection               | `!imu,bump,<data>`                                         |
 
 #### Mode Transition Logic
-
-**Initialization Phase (Coupled Mode):**
-
-```c
-// Configuration commands accepted during module_init()
-static void handle_init_commands(void) {
-    switch (current_init_step) {
-        case STEP_VOID_SYNC:
-            // Process @vd,config commands
-            if (cmd_received && strstr(cmd_buffer, "@vd,config")) {
-                process_void_config_command();
-                send_config_acknowledgment();
-            }
-            break;
-            
-        case STEP_TEMP_SYNC:
-            // Process @temp,config commands  
-            if (cmd_received && strstr(cmd_buffer, "@temp,config")) {
-                process_temp_config_command();
-                send_config_acknowledgment();
-            }
-            break;
-    }
-}
-```
-
-**Operational Phase (Uncoupled Mode):**
-
-```c
-// Continuous data streaming after STEP_FINISH
-static void operational_mode_process(void) {
-    // Void detection continuous stream
-    if (void_measurement_ready()) {
-        send_void_stream_data();
-    }
-    
-    // Temperature change-based reporting
-    if (temp_change_detected() || temp_alert_triggered() || temp_max_interval_exceeded()) {
-        send_temp_stream_data();
-    }
-    
-    // Periodic keepalive
-    if (keepalive_due()) {
-        send_keepalive_message();  // @status,down,A
-    }
-}
-```
-
-**Configuration Command Handling:**
-
-```c
-// In vmt_command.c - mode-aware command processing
-static void cmd_vd_config(h_str_pointers_t *str_p) {
-    // Check if system is in initialization phase
-    if (system_get_init_state() != STEP_OPERATIONAL) {
-        // Coupled mode - process configuration
-        process_void_configuration(str_p);
-        uart_tx_channel_set(UART_UPHOLE);
-        printf("&vd,config,ack,%s\r\n", str_p->part[2]);
-    } else {
-        // Uncoupled mode - reject configuration
-        uart_tx_channel_set(UART_UPHOLE);
-        printf("!vd,error,operational_mode\r\n");
-    }
-}
-
-static void cmd_temp_config(h_str_pointers_t *str_p) {
-    // Check if system is in initialization phase
-    if (system_get_init_state() != STEP_OPERATIONAL) {
-        // Coupled mode - process configuration
-        process_temp_configuration(str_p);
-        uart_tx_channel_set(UART_UPHOLE);
-        printf("&temp,config,ack,%s\r\n", str_p->part[2]);
-    } else {
-        // Uncoupled mode - reject configuration
-        uart_tx_channel_set(UART_UPHOLE);
-        printf("!temp,error,operational_mode\r\n");
-    }
-}
-```
-
-#### System State Management
-
-**Initialization Sequence Integration:**
-
-```c
-// Enhanced module_init() in mti_system.c
-typedef struct {
-    init_step_t current_step;
-    uint32_t step_start_time_ms;
-    bool void_config_received;
-    bool temp_config_received;  
-    bool initialization_complete;
-} system_init_state_t;
-
-static system_init_state_t prv_init_state = {0};
-
-bool system_is_coupled_mode(void) {
-    return (prv_init_state.current_step < STEP_OPERATIONAL);
-}
-
-bool system_is_operational_mode(void) {
-    return (prv_init_state.current_step == STEP_OPERATIONAL);
-}
-
-init_step_t system_get_init_state(void) {
-    return prv_init_state.current_step;
-}
-```
-
-**Enhanced Keepalive with System State:**
-
-```c
-// Enhanced keepalive_check() in mti_system.c
-static void keepalive_check(void) {
-    static uint32_t last_keepalive_time = 0;
-    
-    if ((HAL_GetTick() - last_keepalive_time) > KEEPALIVE_INTERVAL_MS) {
-        uart_tx_channel_set(UART_UPHOLE);
-        
-        if (system_is_operational_mode()) {
-            // Operational mode keepalive with system health
-            printf("@status,down,A,uptime=%lu,mode=operational\r\n", 
-                   HAL_GetTick() / 1000);
-        } else {
-            // Initialization phase keepalive
-            printf("@status,down,A,step=%d,mode=initialization\r\n", 
-                   system_get_init_state());
-        }
-        
-        last_keepalive_time = HAL_GetTick();
-    }
-}
-```
-
-#### Mode Transition Error Responses
-
-**Initialization Phase Errors:**
-
-```bash
-!vd,error,init_timeout                  // Configuration not received during init
-!temp,error,init_timeout                // Temperature config timeout
-!system,error,init_failed               // Overall initialization failure
-```
-
-**Operational Phase Errors:**
-
-```bash
-!vd,error,operational_mode              // Configuration rejected in operational mode
-!temp,error,operational_mode            // Configuration rejected in operational mode
-!system,error,config_locked             // System configuration locked in operational mode
-```
-
-#### Communication Phase Examples
 
 **Initialization Phase (Coupled Mode):**
 
@@ -550,53 +393,6 @@ static void keepalive_check(void) {
 # Configuration attempts rejected
 @vd,config,thresh,60                    // Uphole attempts configuration
 !vd,error,operational_mode              // Downhole rejects - operational mode
-```
-
-#### Integration Points
-
-**System State Functions (add to mti\_system.h):**
-
-```c
-bool system_is_coupled_mode(void);
-bool system_is_operational_mode(void);
-init_step_t system_get_init_state(void);
-void system_transition_to_operational(void);
-```
-
-**Enhanced Command Processing (vmt\_command.c):**
-
-```c
-// Mode-aware command dispatcher
-static void process_command_with_mode_check(h_str_pointers_t *str_p) {
-    if (strcmp(str_p->part[0], "vd") == 0) {
-        if (system_is_coupled_mode() || strcmp(str_p->part[1], "status?") == 0) {
-            cmd_void(str_p);
-        } else {
-            send_operational_mode_error("vd");
-        }
-    }
-    // Similar pattern for temperature commands
-}
-```
-
-**Automatic Stream Controllers (add to respective modules):**
-
-```c
-// In mti_void.c
-void void_send_continuous_stream(void) {
-    if (system_is_operational_mode() && void_stream_enabled) {
-        send_void_data_message();
-    }
-}
-
-// In mti_temp.c  
-void temp_send_change_based_stream(void) {
-    if (system_is_operational_mode() && temp_stream_enabled) {
-        if (temp_significant_change() || temp_max_interval_exceeded()) {
-            send_temp_status_message();
-        }
-    }
-}
 ```
 
 #### 4.2.3. Current Implementation Status: Void Command Interface
@@ -816,46 +612,61 @@ typedef struct {
 } void_analysis_result_t;
 ```
 
-### 5.2. Simplified Processing Flow
+### 5.2. Continuous Data Streaming Algorithm
 
-**POC Implementation Steps:**
+**Implementation Steps:**
 
-1. **Data Input:**
-      * Raw radar data arrives via CAN interrupt.
-      * Store in `raw_radar_data_t`.
-2. **Data Cleanup:**
-      * Convert metres → millimetres.
-      * Range/SNR validation (`5 cm – 5 m`, SNR \> 100 dB).
-      * Store in `cleaned_radar_data_t`.
-3. **Void Analysis:**
-      * Compare each sensor’s `distance_mm` against expected baseline (e.g. 150 mm).
-      * If \> (baseline + threshold), flag as void.
-      * Calculate confidence.
-      * Populate `void_analysis_result_t`.
-4. **Command Response:**
-      * Uphole sends `@vd` commands.
-      * Retrieve latest results and send `&vd,…` or `!vd,…`.
+1. **Initialization:**
+   * Configure and initialize all radar sensors simultaneously
+   * Configure sensors for continuous operation mode
+   * Enable CAN reception for all sensor IDs
 
-**Simplified Algorithm Example:**
+2. **Data Reception:**
+   * Raw radar data arrives continuously via CAN interrupt
+   * `HAL_CAN_RxFifo0MsgPendingCallback()` processes incoming messages
+   * Data sorted by sensor ID and message type
+   * Store in `raw_radar_data_t`
+
+3. **Data Cleanup:**
+   * Convert metres → millimetres
+   * Range/SNR validation (`5 cm – 5 m`, SNR > 100 dB)
+   * Store in `cleaned_radar_data_t`
+
+4. **Void Analysis:**
+   * Process data from each sensor as it arrives
+   * Compare each sensor's `distance_mm` against expected baseline (e.g. 150 mm)
+   * If > (baseline + threshold), flag as void
+   * Calculate confidence
+   * Populate `void_analysis_result_t`
+
+5. **Command Response:**
+   * Uphole sends `@vd` commands
+   * Retrieve latest results and send `&vd,…` or `!vd,…`
+
+**Continuous Data Streaming Algorithm:**
 
 ```c
-void simple_void_detection(cleaned_radar_data_t sensors[3],
-                           void_analysis_result_t *result) {
-    const uint16_t expected_distance = 150; // mm
-    const uint16_t threshold = 50;          // mm
+// When data arrives via CAN interrupt
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1) {
+    // Process incoming radar data from any sensor
+    // All sensors operate simultaneously and continuously
+    // Each sensor's data processed independently as it arrives
 
-    for (int i = 0; i < 3; i++) {
-        if (sensors[i].is_valid &&
-            sensors[i].distance_mm > (expected_distance + threshold)) {
-            result->void_detected    = true;
-            result->affected_sensor  = i;
-            result->void_size_mm     =
-                sensors[i].distance_mm - expected_distance;
-            result->confidence       =
-                calculate_simple_confidence(sensors[i]);
-            result->detection_time   = HAL_GetTick();
-            break;
-        }
+    // When a complete frame is received for any sensor:
+    process_complete_radar_frame(sensor_idx);
+    
+    // This updates the sensor's data and timestamps
+    // Data from all sensors is available at any time
+}
+
+// Processing radar data as it arrives
+void process_complete_radar_frame(uint8_t sensor_idx) {
+    // Process this sensor's data
+    radar_process_measurement(sensor_idx, detectedPoints, numPoints);
+    
+    // Check if we have enough fresh data from multiple sensors for void detection
+    if (enough_sensors_have_fresh_data()) {
+        void_system_process();  // Trigger void detection
     }
 }
 ```
@@ -874,7 +685,7 @@ The void detection system is implemented with a sophisticated data processing pi
 graph TD
     A[3x AWR1843AOP Radar Sensors] -->|CAN Bus| B[mti_can.c - CAN Handler]
     B -->|Raw Distance/SNR| C[mti_radar.c - Data Processing]
-    C -->|Staggered Cycle Complete| D[void_system_process]
+    C -->|Continuous Data Stream| D[void_system_process]
     D -->|Cleaned Data| E[mti_void.c - Detection Algorithms]
     E -->|Results| F[Command Interface / Events]
     
@@ -923,7 +734,7 @@ typedef struct {
 typedef struct {
     bool             void_detected;        // Primary detection flag
     uint8_t          void_sector;          // Sensor index (0-2)
-    uint16_t         void_diameter_mm;     // Calculated void diameter
+    uint16_t         void_diameter_mm;     // Void size (mm)
     uint8_t          confidence_percent;   // Detection confidence (0-100)
     void_algorithm_t algorithm_used;       // SIMPLE or CIRCLE_FIT
     uint16_t         baseline_diameter_mm; // Expected diameter
@@ -964,9 +775,9 @@ void test_sensor_responses(void);     // Test actual sensor communication
 #### Module 2: Radar Management (`mti_radar.c`)
 
 ```c
-// Staggered radar cycle management
-void radar_start_staggered_cycle(void);
-bool radar_complete_staggered_cycle(void);
+// Continuous radar data stream management
+void radar_init_continuous_mode(void);
+bool radar_check_fresh_data(uint8_t sensor_idx);
 
 // Data cleaning and validation
 bool radar_validate_measurement(const radar_measurement_t *measurement);
@@ -1024,7 +835,8 @@ static void cmd_config(h_str_pointers_t *str_p);
 **Event-Driven Void Detection (in `mti_void.c`):**
 
 ```c
-// Called automatically from radar_complete_staggered_cycle() in mti_radar.c
+// Called when sufficient sensor data has been received via CAN interrupt
+// Triggered by continuous data streaming from sensors
 void void_system_process(void) {
     // Update measurement data from radar sensors
     prv_update_measurement_data();
@@ -1085,10 +897,14 @@ static void cmd_void(h_str_pointers_t *str_p) {
 
 ## 7\. Embedded System Considerations
 
+Now I'll update the Real-Time Requirements section:
+
 ### 7.1. Real-Time Requirements
 
-* **Event-driven processing:** Void detection triggered automatically by `radar_complete_staggered_cycle()`.
-* **Staggered radar cycle:** Sensors started with 20ms intervals; the cycle completes when all sensors finish or timeout.
+* **Event-driven processing:** Void detection triggered automatically by CAN interrupt callbacks.
+* **Continuous data streaming:** All sensors operate simultaneously and continuously, sending data on the same CAN bus.
+* **Asynchronous data processing:** Each sensor's data processed independently as it arrives.
+* **Parallel sensor operation:** No round-robin scheduling; sensors send data concurrently.
 * **Bounded execution time:** All algorithms use integer arithmetic where possible.
 * **Interrupt priorities:** CAN RX ISR (`HAL_CAN_RxFifo0MsgPendingCallback`) kept minimal.
 * **No blocking:** CAN uses non-blocking `HAL_CAN_AddTxMessage()`/`HAL_CAN_GetRxMessage()`.
@@ -1096,13 +912,11 @@ static void cmd_void(h_str_pointers_t *str_p) {
 <!-- end list -->
 
 ```c
-// Timing constraints (in mti_radar.h and mti_void.h)
-#define RADAR_STAGGERED_START_INTERVAL_MS 20    // 20ms between sensor starts
-#define RADAR_STAGGERED_TIMEOUT_MS        150   // Maximum time for staggered cycle
-#define RADAR_STAGGERED_CYCLE_PAUSE_MS    50    // Pause between cycles
-#define VOID_PROCESS_INTERVAL_MS          10    // Process void detection every 10ms
-#define CAN_COMM_TIMEOUT_MS               2000  // 2 s
-#define KEEPALIVE_TIMEOUT_MS              500   // 0.5 s (keepalive to uphole)
+// Timing constraints
+#define RADAR_POLL_INTERVAL_MS   100     // 10 Hz expected data rate per sensor
+#define VOID_PROCESS_INTERVAL_MS 10      // Process void detection every 10ms
+#define CAN_COMM_TIMEOUT_MS      2000    // 2 s timeout for sensor data
+#define KEEPALIVE_TIMEOUT_MS     500     // 0.5 s (keepalive to uphole)
 ```
 
 ### 7.2. Memory Management
@@ -1115,14 +929,14 @@ static void cmd_void(h_str_pointers_t *str_p) {
 ```c
 static void_measurement_t      prv_void_latest_measurements[MAX_RADAR_SENSORS];
 static void_status_t           prv_void_status_history[WALL_HISTORY_SIZE]; 
-// (WALL_HISTORY_SIZE chosen conservatively, e.g. 10)
+// (WALL_HISTORY_SIZE chosen conservatively, e.g. 10, 5)
 ```
 
 > **Tip:** For clarity, track approximate memory footprint in the final release (e.g. “Latest static structures consume \~4 kB RAM”).
 
 ### 7.3. Power Management
 
-Managed by [`vmt_power.c`](https://www.google.com/search?q=../Device/Src/vmt_power.c):
+Managed by [`vmt_power.c`](../Device/Src/vmt_power.c):
 
 ```c
 // Example from vmt_power_enter_sleep_mode()
@@ -1138,9 +952,9 @@ HAL_ResumeTick();
 
 * **STM32 HAL** for CAN, UART, SPI, ADC, GPIO, TIM.
 * **VMT Drivers** (`vmt_adc.c`, `vmt_spi.c`, `vmt_uart.c`) wrap HAL for specific sensors.
-* **Radar Interface**: [`mti_can.c`](https://www.google.com/search?q=../Device/Src/mti_can.c).
-* **IMU Interface**: [`vmt_icm20948.c`](https://www.google.com/search?q=../Device/Src/vmt_icm20948.c).
-* **Temperature Interface**: [`mti_temp.c`](https://www.google.com/search?q=../Device/Src/mti_temp.c).
+* **Radar Interface**: [`mti_can.c`](../Device/Src/mti_can.c).
+* **IMU Interface**: [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c).
+* **Temperature Interface**: [`mti_temp.c`](../Device/Src/mti_temp.c).
 
 ---
 
@@ -1148,49 +962,52 @@ HAL_ResumeTick();
 
 ### 8.1. Current Architecture Implementation Status
 
-| Stage               | Component                      | Status   | Description                                                                                                                              |
-|:------------|:-------------------|:-------|:-----------------------------------------------------------------------------------|
-| **Stage 1: Data Input** | **CAN Communication** | ✅ 98 %  | Functional radar data reception via CAN (`mti_can.c`) with robust error recovery.                                                                                   |
-|                     | **Raw Data Structures** | ✅ 100 % | `radar_input_data_t` defined in `mti_can.h`.                                                                                             |
-|                     | **Data Storage** | ✅ 100 % | Raw data buffering in `multi_radar_system_t`.                                                                                            |
-| **Stage 1.5: Temp Mod** | **Temperature Module** | ✅ 100 % | Complete ADC→C processing, smoothing, thresholds, command interface, automatic streaming (`mti_temp.c`).                                |
-| **Stage 2: Cleanup** | **Radar Cleanup Module** | ✅ 95 %  | Staggered cycle processing with 20ms sensor start intervals and 150ms timeout ([`mti_radar.c`](../Device/Src/mti_radar.c)).                                      |
-|                     | **Cleaned Data Structures** | ✅ 100 % | `radar_measurement_t` defined in `mti_radar.h` with millimetre precision output.                                                                                          |
-|                     | **Validation Logic** | ✅ 95 %  | SNR & distance validation implemented with closest-point selection algorithm.                                                                                                   |
-| **Stage 3: Analysis** | **Void Detection Module** | ✅ 95 %  | Both simple threshold and circle fitting algorithms fully implemented and operational in [`mti_void.c`](../Device/Src/mti_void.c).                      |
-|                     | **Analysis Result Structures** | ✅ 100 % | `void_status_t` and related structures fully defined in `mti_void.h`.                                                                    |
-|                     | **Confidence Calculation** | ✅ 100 % | Dual confidence models implemented for both simple and circle fitting algorithms.                                                    |
-|                     | **Algorithm Switching** | ✅ 100 % | Runtime algorithm selection with automatic fallback protection implemented.                                                    |
-| **Stage 4: Commands** | **Command Framework** | ✅ 90 %  | Basic command parsing functional ([`vmt_command.c`](../Device/Src/vmt_command.c)).                                                      |
-|                     | **Temp Command Handlers** | ✅ 100 % | Complete `@temp` command interface with config, status, get operations.                                                                   |
-|                     | **Void Command Handlers** | ⚠️ 25 % | `cmd_void()` function exists but is basic placeholder, not rich @vd interface.                                                           |
-|                     | **Response Formatting** | ⚠️ 25 % | Basic void response structure exists but limited functionality.                                                                          |
+| Stage                   | Component                      | Status  | Description                                                                                                                        |
+|:------------------------|:-------------------------------|:--------|:-----------------------------------------------------------------------------------------------------------------------------------|
+| **Stage 1: Data Input** | **CAN Communication**          | ✅ 98 %  | Functional radar data reception via CAN (`mti_can.c`) with robust error recovery.                                                  |
+|                         | **Raw Data Structures**        | ✅ 100 % | `radar_input_data_t` defined in `mti_can.h`.                                                                                       |
+|                         | **Data Storage**               | ✅ 100 % | Raw data buffering in `multi_radar_system_t`.                                                                                      |
+| **Stage 1.5: Temp Mod** | **Temperature Module**         | ✅ 100 % | Complete ADC→C processing, smoothing, thresholds, command interface, automatic streaming (`mti_temp.c`).                           |
+| **Stage 2: Cleanup**    | **Radar Cleanup Module**       | ✅ 95 %  | Continuous data streaming mode with simultaneous sensor operation ([`mti_radar.c`](../Device/Src/mti_radar.c)).                    |
+|                         | **Cleaned Data Structures**    | ✅ 100 % | `radar_measurement_t` defined in `mti_radar.h` with millimetre precision output.                                                   |
+|                         | **Validation Logic**           | ✅ 95 %  | SNR & distance validation implemented with closest-point selection algorithm.                                                      |
+| **Stage 3: Analysis**   | **Void Detection Module**      | ✅ 95 %  | Both simple threshold and circle fitting algorithms fully implemented and operational in [`mti_void.c`](../Device/Src/mti_void.c). |
+|                         | **Analysis Result Structures** | ✅ 100 % | `void_status_t` and related structures fully defined in `mti_void.h`.                                                              |
+|                         | **Confidence Calculation**     | ✅ 100 % | Dual confidence models implemented for both simple and circle fitting algorithms.                                                  |
+|                         | **Algorithm Switching**        | ✅ 100 % | Runtime algorithm selection with automatic fallback protection implemented.                                                        |
+| **Stage 4: Commands**   | **Command Framework**          | ✅ 90 %  | Basic command parsing functional ([`vmt_command.c`](../Device/Src/vmt_command.c)).                                                 |
+|                         | **Temp Command Handlers**      | ✅ 100 % | Complete `@temp` command interface with config, status, get operations.                                                            |
+|                         | **Void Command Handlers**      | ⚠️ 25 % | `cmd_void()` function exists but is basic placeholder, not rich @vd interface.                                                     |
+|                         | **Response Formatting**        | ⚠️ 25 % | Basic void response structure exists but limited functionality.                                                                    |
 
 ### 8.2. Completed Implementation Details
 
 #### ✅ Phase 1: Basic Data Flow – COMPLETED
 
-**Radar Data Cleanup (`mti_radar.c`):**
+**Radar Data Processing (`mti_radar.c`):**
 
-The radar system implements a sophisticated staggered cycle approach:
+The radar system implements a continuous operation mode for all sensors:
 
 ```c
-void radar_complete_staggered_cycle(void) {
-    // Staggered sensor start with 20ms intervals
+void radar_process_incoming_data(void) {
+    // Process incoming radar data received via CAN interrupts
+    // Each sensor operates continuously and independently
+    
+    // When data from any sensor arrives via CAN interrupt:
+    // HAL_CAN_RxFifo0MsgPendingCallback() processes it immediately
+    
+    // Check for valid data from each sensor
+    uint8_t valid_sensor_count = 0;
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        radar_start_sensor(i);
-        HAL_Delay(20);  // 20ms stagger between sensors
+        if (radar_check_fresh_data(i)) {
+            valid_sensor_count++;
+        }
     }
     
-    // Wait for all sensors to complete (150ms timeout)
-    uint32_t start_time = HAL_GetTick();
-    while ((HAL_GetTick() - start_time) < 150) {
-        // Process completed measurements
-        radar_process_completed_measurements();
+    // If we have enough fresh data, trigger void detection
+    if (valid_sensor_count >= 2) {
+        void_system_process(); // Trigger void detection
     }
-    
-    // Trigger void detection processing
-    void_system_process();
 }
 
 void radar_process_measurement(uint8_t sensor_idx,
@@ -1218,6 +1035,10 @@ void radar_process_measurement(uint8_t sensor_idx,
     if (found_valid) {
         measurement->distance_mm = (uint16_t)(closest_distance * 1000.0f);
         measurement->data_valid  = true;
+        measurement->timestamp_ms = HAL_GetTick();
+        
+        // Notify system that fresh data is available
+        radar_set_data_fresh(sensor_idx);
     }
 }
 ```
@@ -1239,16 +1060,16 @@ void void_system_process(void)
 
     // Select algorithm based on configuration
     switch (prv_void_system.config.active_algorithm) {
-        case VOID_ALGORITHM_SIMPLE:
+        case VOID_ALG_SIMPLE:
             void_found = prv_simple_threshold_detection(&new_status);
             break;
             
-        case VOID_ALGORITHM_CIRCLE_FIT:
-            void_found = prv_circle_fit_detection(&new_status);
+        case VOID_ALG_CIRCLEFIT:
+            void_found = prv_circle_fit_void_detection(&new_status);
             // Automatic fallback if circle fit fails
             if (!void_found && prv_void_system.config.auto_fallback_enabled) {
                 void_found = prv_simple_threshold_detection(&new_status);
-                new_status.algorithm_used = VOID_ALGORITHM_SIMPLE;
+                new_status.algorithm_used = VOID_ALG_SIMPLE;
             }
             break;
     }
@@ -1273,7 +1094,7 @@ bool prv_simple_threshold_detection(void_status_t *result) {
                 result->void_sector = i;
                 result->void_diameter_mm = (distance_mm - expected_distance) * 2;
                 result->confidence_percent = void_calculate_confidence(distance_mm, expected_distance, threshold);
-                result->algorithm_used = VOID_ALGORITHM_SIMPLE;
+                result->algorithm_used = VOID_ALG_SIMPLE;
                 
                 sprintf(result->status_text, "Void S%d: %dmm (simple)", i, result->void_diameter_mm);
                 return true;
@@ -1283,7 +1104,7 @@ bool prv_simple_threshold_detection(void_status_t *result) {
     return false;
 }
 
-bool prv_circle_fit_detection(void_status_t *result) {
+bool prv_circle_fit_void_detection(void_status_t *result) {
     // Check if we have at least 3 valid sensors for circle fitting
     uint8_t valid_sensors = 0;
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
@@ -1295,7 +1116,7 @@ bool prv_circle_fit_detection(void_status_t *result) {
     if (valid_sensors < 3) {
         return false; // Insufficient data for circle fitting
     }
-
+    
     // Perform 3-point circle fitting
     circle_t fitted_circle;
     float fit_error = prv_circle_fit_3_points(&fitted_circle);
@@ -1311,7 +1132,7 @@ bool prv_circle_fit_detection(void_status_t *result) {
         result->void_detected = true;
         result->void_diameter_mm = (uint16_t)(fitted_circle.radius * 2);
         result->confidence_percent = prv_calculate_circle_confidence(&fitted_circle, fit_error);
-        result->algorithm_used = VOID_ALGORITHM_CIRCLE_FIT;
+        result->algorithm_used = VOID_ALG_CIRCLEFIT;
         
         sprintf(result->status_text, "Void: %dmm (circle fit)", result->void_diameter_mm);
         return true;
@@ -1355,11 +1176,9 @@ bool module_init(void)
 }
 
 void system_main_loop(void) {
-    // Event-driven processing triggered by radar cycle completion
-    if (radar_cycle_completed()) {
-        void_system_process(); // Process void detection
-        radar_reset_cycle_flag();
-    }
+    // Event-driven processing triggered by continuous data streaming
+    // void_system_process() is called directly from CAN interrupt handler
+    // when sufficient fresh data is available
     
     // Handle other system tasks
     temp_system_process();
@@ -1367,130 +1186,6 @@ void system_main_loop(void) {
     keepalive_check();
 }
 ```
-
-### 8.3. Updated POC Development Plan
-
-#### Phase 1: Core Void Detection – ✅ COMPLETED
-
-1. ✅ **Implemented `mti_void.c`** with threshold-based detection.
-2. ✅ **Integrated with radar data** – `void_system_process()` fetches cleaned radar data.
-3. ✅ **Core algorithms implemented** – `void_analyse_sensor_data()`, `void_calculate_confidence()`, `void_characterise_detection()`.
-4. ✅ **System integration** – `void_system_process()` integrated into main system initialization.
-5. ✅ **Basic testing** – System initializes and runs void detection algorithms.
-
-#### Phase 2: Command Interface Enhancement – 🔄 IN PROGRESS
-
-1. ⚠️ **Command handlers partially implemented** – Basic structure exists, needs completion.
-2. ⚠️ **Response formatting** – Some responses implemented, others need work.
-3. ⚠️ **Event generation** – Basic event sending implemented, needs refinement.
-4. ⚠️ **Configuration persistence** – Basic setters exist, may need enhancement.
-
-#### Phase 3: Testing and Optimisation – 📋 NEXT PRIORITY
-
-1. ❌ **Comprehensive testing** with real radar data.
-2. ❌ **Performance validation** – verify 10Hz operation with all modules.
-3. ❌ **Command interface testing** – validate all @vd commands.
-4. ❌ **Long-term stability testing** – confirm operation \> 1 hour.
-
-### 8.4. Detailed Implementation Specifications
-
-#### Core Algorithm Implementation
-
-**File Location:** `Device/Src/mti_void.c`
-
-The void detection system implements two complementary algorithms:
-
-1. **Simple Threshold Detection**
-
-      * Direct comparison against baseline diameter.
-      * Configurable threshold (default: 50mm).
-      * Fast, reliable detection for real-time operation.
-      * Memory efficient with minimal CPU overhead.
-
-2. **Circle Fitting Algorithm**
-
-      * 3-point circle fitting for precision analysis.
-      * Automatic quality assessment with fit error calculation.
-      * Advanced void characterisation with size and position.
-      * Fallback to simple algorithm when circle fit quality is poor.
-
-#### Data Structures
-
-```c
-typedef struct {
-    uint16_t baseline_diameter_mm;      // Expected borehole diameter (150mm default)
-    uint16_t detection_threshold_mm;    // Void detection threshold (50mm default)
-    uint8_t confidence_threshold;       // Minimum confidence (70% default)
-    void_algorithm_t active_algorithm;  // SIMPLE or CIRCLE_FIT
-    bool auto_fallback_enabled;         // Enable automatic fallback
-} void_config_t;
-
-typedef struct {
-    bool void_detected;                 // Current detection state
-    uint8_t void_sector;                // Sensor index (0-2)
-    uint16_t void_diameter_mm;          // Calculated void diameter
-    uint8_t confidence_percent;         // Detection confidence (0-100)
-    void_algorithm_t algorithm_used;    // Algorithm that made detection
-    uint32_t detection_time_ms;         // Timestamp
-} void_status_t;
-```
-
-#### Processing Pipeline
-
-1. **Data Acquisition** (100ms cycle)
-
-      * Triggered by `radar_complete_staggered_cycle()`.
-      * Fetches cleaned radar data in millimetre precision.
-      * Validates data quality and sensor health.
-
-2. **Algorithm Selection**
-
-      * Runtime configurable via `@vd,config,algorithm` command.
-      * Automatic fallback from circle fitting to simple when appropriate.
-      * Performance optimisation based on data quality.
-
-3. **Detection Processing**
-
-      * Simple: Direct threshold comparison per sensor.
-      * Circle Fit: 3-point geometry analysis with error bounds.
-      * Confidence calculation based on SNR and fit quality.
-
-4. **Event Generation**
-
-      * Asynchronous void detection alerts via `!vd,flag` messages.
-      * State change detection (void start/end events).
-      * Debug output via dedicated UART channel.
-
-#### Performance Characteristics
-
-* **Processing Latency:** \<10ms per cycle.
-* **Memory Usage:** 2KB static allocation.
-* **CPU Overhead:** \<5% of main loop time.
-* **Detection Accuracy:** ±5mm for simple, ±2mm for circle fitting.
-* **False Positive Rate:** \<1% with proper threshold configuration.
-
-#### Configuration Interface
-
-Runtime configuration via UART commands:
-
-```bash
-@vd,config,baseline,<diameter_mm>           # Set expected diameter
-@vd,config,thresh,<threshold_mm>            # Set detection threshold
-@vd,config,conf,<confidence_%>              # Set minimum confidence
-@vd,config,algorithm,simple                 # Use threshold detection
-@vd,config,algorithm,circlefit              # Use circle fitting
-```
-
-#### Integration Points
-
-* **Data Source:** `mti_radar.c` via `radar_get_measurement()`.
-* **System Integration:** Called from the main processing loop.
-* **Command Interface:** `vmt_command.c` via `cmd_void()`.
-* **Event Output:** Multi-channel UART for uphole communication.
-
----
-
-## 9\. Next Steps
 
 ## 9. Next Steps
 
@@ -1501,58 +1196,58 @@ With **temperature monitoring complete (100%)**, **void detection algorithms ful
 The void detection core is fully functional, but the command interface needs completion:
 
 1. **Complete `@vd` Command Interface Implementation**
-   - In [`vmt_command.c`](../Device/Src/vmt_command.c), replace the basic `cmd_void()` placeholder with full implementation:
-     - `@vd,status?` → fetch and send complete `void_status_t` with dual-algorithm support
-     - `@vd,config,thresh,<val>` → call `void_set_threshold()`
-     - `@vd,config,baseline,<val>` → call `void_set_baseline()`
-     - `@vd,config,algorithm,simple|circlefit` → runtime algorithm switching
-     - `@vd,config,conf,<val>` → confidence threshold adjustment
-   - Implement asynchronous event reporting: `!vd,flag,<sector>,<diameter>,<confidence>,<algorithm>`
-   - Add comprehensive error handling and response formatting
+   * In [`vmt_command.c`](../Device/Src/vmt_command.c), replace the basic `cmd_void()` placeholder with full implementation:
+     * `@vd,status?` → fetch and send complete `void_status_t` with dual-algorithm support
+     * `@vd,config,thresh,<val>` → call `void_set_threshold()`
+     * `@vd,config,baseline,<val>` → call `void_set_baseline()`
+     * `@vd,config,algorithm,simple|circlefit` → runtime algorithm switching
+     * `@vd,config,conf,<val>` → confidence threshold adjustment
+   * Implement asynchronous event reporting: `!vd,flag,<sector>,<diameter>,<confidence>,<algorithm>`
+   * Add comprehensive error handling and response formatting
 
 2. **Enhanced Status Reporting**
-   - Implement detailed void status responses showing active algorithm
-   - Add diagnostic information (fit quality for circle fitting, sensor health)
-   - Include algorithm performance metrics and fallback status
+   * Implement detailed void status responses showing active algorithm
+   * Add diagnostic information (fit quality for circle fitting, sensor health)
+   * Include algorithm performance metrics and fallback status
 
 ### 9.2. System Validation and Testing (Week 1-2)
 
 With the advanced implementation, comprehensive testing is critical:
 
 1. **Dual-Algorithm Validation**
-   - Test both simple threshold and circle fitting algorithms under various conditions
-   - Validate automatic fallback from circle fitting to simple algorithm
-   - Verify algorithm switching via runtime commands
-   - Confirm confidence calculation accuracy for both algorithms
+   * Test both simple threshold and circle fitting algorithms under various conditions
+   * Validate automatic fallback from circle fitting to simple algorithm
+   * Verify algorithm switching via runtime commands
+   * Confirm confidence calculation accuracy for both algorithms
 
 2. **Performance and Stability Testing**
-   - Validate 10 Hz radar cycle + dual-algorithm void detection + command handling stability
-   - Confirm processing latencies: void detection < 10ms per cycle, commands < 50ms response
-   - Stress-test > 4 hours continuous operation with all modules active
-   - Memory usage verification and leak detection
+   * Validate 10 Hz radar cycle + dual-algorithm void detection + command handling stability
+   * Confirm processing latencies: void detection < 10ms per cycle, commands < 50ms response
+   * Stress-test > 4 hours continuous operation with all modules active
+   * Memory usage verification and leak detection
 
 3. **Integration Testing**
-   - End-to-end testing with complete system: radar + void + temperature + IMU + water
-   - Command interface testing with all `@vd` commands and edge cases
-   - Event generation and streaming validation
-   - Multi-sensor failure scenarios and graceful degradation
+   * End-to-end testing with complete system: radar + void + temperature + IMU + water
+   * Command interface testing with all `@vd` commands and edge cases
+   * Event generation and streaming validation
+   * Multi-sensor failure scenarios and graceful degradation
 
 ### 9.3. Documentation and Optimization (End of Week 2)
 
 1. **Advanced Feature Documentation**
-   - Update implementation guide to reflect dual-algorithm architecture
-   - Document circle fitting algorithm parameters and tuning guidelines
-   - Add troubleshooting guide for algorithm selection and fallback scenarios
+   * Update implementation guide to reflect dual-algorithm architecture
+   * Document circle fitting algorithm parameters and tuning guidelines
+   * Add troubleshooting guide for algorithm selection and fallback scenarios
 
 2. **Performance Optimization**
-   - Fine-tune circle fitting tolerance and confidence thresholds
-   - Optimize processing pipeline for minimal latency
-   - Validate memory usage and optimize static allocations
+   * Fine-tune circle fitting tolerance and confidence thresholds
+   * Optimize processing pipeline for minimal latency
+   * Validate memory usage and optimize static allocations
 
 3. **Production Readiness Assessment**
-   - Complete functional testing checklist
-   - Performance benchmarking and validation
-   - Code review and quality assurance
+   * Complete functional testing checklist
+   * Performance benchmarking and validation
+   * Code review and quality assurance
 
 > **IMPORTANT:** The system has significantly exceeded original POC expectations. With dual-algorithm support, sophisticated data processing, and comprehensive integration, this represents a near-production implementation. The remaining work focuses on interface completion and thorough validation rather than core algorithm development.
 
@@ -1560,10 +1255,10 @@ With the advanced implementation, comprehensive testing is critical:
 
 After core completion, advanced features from Section 14 can be considered:
 
-- **Machine Learning Integration Hooks:** Prepare framework for ML-based void classification
-- **Statistical Analysis:** Add void pattern analysis and trending
-- **Advanced Confidence Models:** Implement multi-factor confidence scoring
-- **Cross-Sensor Correlation:** Enhanced multi-sensor validation algorithms
+* **Machine Learning Integration Hooks:** Prepare framework for ML-based void classification
+* **Statistical Analysis:** Add void pattern analysis and trending
+* **Advanced Confidence Models:** Implement multi-factor confidence scoring
+* **Cross-Sensor Correlation:** Enhanced multi-sensor validation algorithms
 
 ---
 
@@ -1571,8 +1266,8 @@ After core completion, advanced features from Section 14 can be considered:
 
 ### 10.1. Infrastructure: 98% Complete ✅
 
-* **CAN communication (98%):** Fully functional with robust error recovery and staggered cycle integration.
-* **Radar management (95%):** Staggered cycle processing with 20ms sensor intervals and 150ms timeout, clean mm output.
+* **CAN communication (98%):** Fully functional with robust error recovery and continuous data streaming.
+* **Radar management (95%):** Continuous operation with all sensors running simultaneously, clean data in millimetres.
 * **System initialisation (100%):** Multi-step startup in `mti_system.c` including complete temperature and void initialization.
 * **IMU (70%):** Dual ICM20948 with motion detection (basic functionality).
 * **Water detection (85%):** ADC-based threshold logic with event generation.
@@ -1614,11 +1309,12 @@ After core completion, advanced features from Section 14 can be considered:
 The void detection system has evolved significantly beyond the original POC concept to a sophisticated, near-production implementation. Key achievements:
 
 * **Advanced Algorithms:** Both simple threshold and circle fitting algorithms fully implemented
-* **Robust Data Processing:** Staggered radar cycle with millimetre precision and automatic sensor management
+* **Robust Data Processing:** Continuous data streaming with millimetre precision and automatic sensor management
 * **Comprehensive Integration:** All supporting modules operational with sophisticated error handling
 * **Performance Optimized:** Real-time processing meeting all timing constraints
 
 **Remaining 5% consists primarily of:**
+
 1. **Command Interface Completion:** Replace basic void command placeholder with full @vd interface
 2. **Comprehensive Testing:** End-to-end validation and stress testing
 3. **Documentation Updates:** Reflect advanced implementation status
@@ -1703,7 +1399,7 @@ typedef struct {
     uint8_t  void_sector;           // Which sector (0–2)
     uint16_t void_magnitude_mm;     // Void size (mm)
     uint8_t  detection_confidence;  // Confidence (0–100)
-    uint32_t analysis_time_ms;      // When analysis completed
+    uint32_t analysis_time_ms;     // When analysis completed
     char     status_text[32];       // Human-readable status
 } void_detection_result_t;
 ```
@@ -1891,11 +1587,11 @@ bool run_poc_void_detection_tests(void) {
 
 ### 13.4. Implementation Priorities and Timeline
 
-| Week | Tasks                                                                                                        |
-|:---|:-------------------------------------------------------------------|
-| **1** | Implement threshold detection (`mti_void.c`), basic confidence, integrate with `mti_radar.c`.              |
-| **2** | Add hysteresis, multi-sensor checks, implement `@vd` command handlers in `vmt_command.c`.                  |
-| **3** | Full integration, performance tuning, end-to-end tests, documentation updates (Sections 9–10).             |
+| Week  | Tasks                                                                                          |
+|:------|:-----------------------------------------------------------------------------------------------|
+| **1** | Implement threshold detection (`mti_void.c`), basic confidence, integrate with `mti_radar.c`.  |
+| **2** | Add hysteresis, multi-sensor checks, implement `@vd` command handlers in `vmt_command.c`.      |
+| **3** | Full integration, performance tuning, end-to-end tests, documentation updates (Sections 9–10). |
 
 ---
 
@@ -2006,11 +1702,11 @@ bool check_hysteresis(uint8_t idx, bool raw,
 
 ### 14.6. Implementation Strategy and Timeline (Post-POC)
 
-| Phase       | Tasks                                                                                              | Target            |
-|:--------|:-------------------------------------------------------------|:------------|
-| **Phase 1** | Implement circle fitting routines (3-point). Integrate into `void_analyse_sensor_data()`.          | Week 1 (post-POC) |
-| **Phase 2** | Add runtime algorithm switch commands; ensure seamless fallback.                                   | Week 2 (post-POC) |
-| **Phase 3** | Cross-sensor consistency, advanced confidence integration, performance optimisation.               | Week 3 (post-POC) |
+| Phase       | Tasks                                                                                     | Target            |
+|:------------|:------------------------------------------------------------------------------------------|:------------------|
+| **Phase 1** | Implement circle fitting routines (3-point). Integrate into `void_analyse_sensor_data()`. | Week 1 (post-POC) |
+| **Phase 2** | Add runtime algorithm switch commands; ensure seamless fallback.                          | Week 2 (post-POC) |
+| **Phase 3** | Cross-sensor consistency, advanced confidence integration, performance optimisation.      | Week 3 (post-POC) |
 
 ### 14.7. Operational Guidelines
 
