@@ -1,23 +1,74 @@
+/**
+ * @file mti_can.c
+ * @brief Implementation of CAN bus communication for multi-radar sensor system
+ *
+ * Provides functions for initializing and managing CAN communication with
+ * multiple radar sensors, including command handling and data processing.
+ *
+ * File organization:
+ * - Global variables
+ * - CAN initialization functions
+ * - Message transmission functions
+ * - Message reception and processing
+ * - Sensor status management
+ * - Testing and diagnostic functions
+ *
+ * @author MTi Group
+ * @copyright Copyright (c) 2025 MTi Group
+ */
+
 #include "can.h"
 #include "mti_can.h"
 #include "vmt_uart.h"
 #include "mti_system.h"
 #include "mti_radar.h"
-#include "mti_void.h" // ADD THIS LINE
+#include "mti_void.h"
 #include <string.h>
 
+/** @brief CAN receive header structure */
 CAN_RxHeaderTypeDef rxHeader;
-CAN_TxHeaderTypeDef txHeader;
-uint8_t             canRX[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-CAN_FilterTypeDef   canfil;
-uint32_t            canMailbox;
 
-// Multi-sensor system instance
+/** @brief CAN transmit header structure */
+CAN_TxHeaderTypeDef txHeader;
+
+/** @brief Buffer for CAN received data */
+uint8_t canRX[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
+/** @brief CAN filter configuration structure */
+CAN_FilterTypeDef canfil;
+
+/** @brief CAN transmit mailbox indicator */
+uint32_t canMailbox;
+
+/** @brief Multi-sensor system instance */
 multi_radar_system_t radar_system = { 0 };
 
+/*------------------------------------------------------------------------------
+ * CAN Initialization
+ *----------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize CAN interface and set up filters
+ *
+ * Configures CAN hardware with appropriate filters for command and data messages,
+ * then starts the CAN peripheral.
+ *
+ * @return true if setup was successful
+ * @return false if any error occurred during setup
+ */
+/**
+ * @brief Initialize CAN interface and set up filters
+ *
+ * Configures two filters:
+ * 1. Filter 0 for command messages (0x80-0x8F)
+ * 2. Filter 1 for data messages (0xA0-0xBF)
+ *
+ * @return true if setup was successful
+ * @return false if any error occurred during setup
+ */
 bool can_setup(void)
 {
-// Configure filter to accept both command (0x80-0x8F) and data (0xA0-0xBF) messages
+/* Configure filter to accept both command (0x80-0x8F) and data (0xA0-0xBF) messages */
 #define FILTER_ID_CMD    ((0x00000080 << 3) | 0x4)
 #define FILTER_MASK_CMD  ((0x000000F0 << 3) | 0x4)
 #define FILTER_ID_DATA   ((0x000000A0 << 3) | 0x4)
@@ -50,10 +101,27 @@ bool can_setup(void)
 
     debug_send("CAN setup complete for %d sensors", MAX_RADAR_SENSORS);
 
-
     return true;
 }
 
+/* Undefine local macros to prevent namespace pollution */
+#undef FILTER_ID_CMD
+#undef FILTER_MASK_CMD
+#undef FILTER_ID_DATA
+#undef FILTER_MASK_DATA
+
+/*------------------------------------------------------------------------------
+ * Message Transmission Functions
+ *----------------------------------------------------------------------------*/
+
+/**
+ * @brief Send a single byte CAN message
+ *
+ * @param ID CAN message identifier
+ * @param message Single byte payload to send
+ * @return true if message was successfully queued
+ * @return false if transmission failed
+ */
 bool can_send(uint32_t ID, uint8_t message)
 {
     txHeader.DLC                = 1;
@@ -75,6 +143,15 @@ bool can_send(uint32_t ID, uint8_t message)
     }
 }
 
+/**
+ * @brief Send a multi-byte CAN message
+ *
+ * @param ID CAN message identifier
+ * @param message Pointer to message data
+ * @param length Length of message data (max 8 bytes)
+ * @return true if message was successfully queued
+ * @return false if transmission failed
+ */
 bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
 {
     txHeader.DLC                = length;
@@ -102,7 +179,15 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
     }
 }
 
-// Send command to specific sensor
+/**
+ * @brief Send a command to a specific sensor
+ *
+ * @param sensor_idx Index of the target sensor (0 to MAX_RADAR_SENSORS-1)
+ * @param base_id Base CAN ID for the message type
+ * @param message Command code to send
+ * @return true if message was successfully queued
+ * @return false if invalid sensor index or transmission failed
+ */
 bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
@@ -114,7 +199,12 @@ bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message)
     return can_send(sensor_id, message);
 }
 
-// Broadcast command to all sensors
+/**
+ * @brief Send a command to all connected sensors
+ *
+ * @param base_id Base CAN ID for the message type
+ * @param message Command code to send
+ */
 void broadcast_to_all_sensors(uint32_t base_id, uint8_t message)
 {
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
@@ -123,7 +213,20 @@ void broadcast_to_all_sensors(uint32_t base_id, uint8_t message)
     }
 }
 
-// Fix sensor index extraction
+/*------------------------------------------------------------------------------
+ * Message Reception and Processing
+ *----------------------------------------------------------------------------*/
+
+/**
+ * @brief Extract sensor index from a CAN message ID
+ *
+ * Analyzes the CAN message ID to determine which sensor it belongs to.
+ * For command messages (0x80-0x82), extracts index from the lower 4 bits.
+ * For data messages (0xA0-0xC4), determines index from the message type range.
+ *
+ * @param can_id CAN message identifier
+ * @return uint8_t Sensor index (0 to MAX_RADAR_SENSORS-1) or 0xFF if invalid
+ */
 uint8_t get_sensor_index_from_can_id(uint32_t can_id)
 {
     // Handle command messages (0x80-0x82)
@@ -173,6 +276,14 @@ uint8_t get_sensor_index_from_can_id(uint32_t can_id)
     return 0xFF; // Invalid sensor index
 }
 
+/**
+ * @brief CAN receive callback function
+ *
+ * Called by the HAL when a CAN message is received in FIFO0.
+ * Processes both command and data messages from connected radar sensors.
+ *
+ * @param hcan1 Pointer to the CAN handle structure
+ */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1)
 {
     if (HAL_CAN_GetRxMessage(hcan1, CAN_RX_FIFO0, &rxHeader, canRX) == HAL_OK)
@@ -293,6 +404,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1)
     }
 }
 
+/**
+ * @brief Process a command received for a specific sensor
+ *
+ * Handles various commands like start, stop, status, and calibration
+ * for a specific radar sensor.
+ *
+ * @param sensor_idx Index of the target sensor
+ * @param command Command code received
+ * @param data Pointer to the complete CAN message data
+ */
 void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_t *data)
 {
     radar_data_t *sensor = &radar_system.sensors[sensor_idx];
@@ -330,6 +451,15 @@ void process_sensor_command(uint8_t sensor_idx, uint8_t command, can_data_union_
     }
 }
 
+/**
+ * @brief Process a complete radar data frame
+ *
+ * Called when all expected points for a frame have been received.
+ * Processes the radar measurement data and handles frame completion
+ * based on the current operational mode.
+ *
+ * @param sensor_idx Index of the sensor that completed a frame
+ */
 void process_complete_radar_frame(uint8_t sensor_idx)
 {
     radar_data_t *sensor = &radar_system.sensors[sensor_idx];
@@ -355,7 +485,14 @@ void process_complete_radar_frame(uint8_t sensor_idx)
     // REMOVE sequential mode logic entirely
 }
 
-// Add this function if it's missing
+/**
+ * @brief Get the number of currently active sensors
+ *
+ * Counts how many sensors are currently marked as online
+ * in the radar system structure.
+ *
+ * @return uint8_t Number of online sensors (0 to MAX_RADAR_SENSORS)
+ */
 uint8_t get_active_sensor_count(void)
 {
     uint8_t count = 0;
@@ -369,7 +506,16 @@ uint8_t get_active_sensor_count(void)
     return count;
 }
 
-// Add these missing functions at the end
+/**
+ * @brief Check if a sensor is currently online
+ *
+ * A sensor is considered online if a message has been received
+ * within the last 2 seconds.
+ *
+ * @param sensor_idx Index of the sensor to check
+ * @return true if sensor is online
+ * @return false if sensor is offline or index is invalid
+ */
 bool is_sensor_online(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
@@ -384,6 +530,14 @@ bool is_sensor_online(uint8_t sensor_idx)
     return (current_time - last_message) < 2000; // 2 second timeout
 }
 
+/**
+ * @brief Reset all data for a specific sensor
+ *
+ * Clears all data associated with the specified sensor
+ * and marks it as offline.
+ *
+ * @param sensor_idx Index of the sensor to reset
+ */
 void reset_sensor_data(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
@@ -396,8 +550,16 @@ void reset_sensor_data(uint8_t sensor_idx)
     radar_system.sensor_online[sensor_idx] = false;
 }
 
-// Add this function after the get_sensor_index_from_can_id function
+/*------------------------------------------------------------------------------
+ * Testing and Diagnostic Functions
+ *----------------------------------------------------------------------------*/
 
+/**
+ * @brief Run tests on sensor index extraction functionality
+ *
+ * Tests the sensor index extraction function against various
+ * CAN ID values to verify correct operation.
+ */
 void test_sensor_indexing(void)
 {
     debug_send("=== Testing Sensor Indexing Fix ===");
@@ -457,7 +619,9 @@ void test_sensor_indexing(void)
                    pass ? "PASS" : "FAIL");
 
         if (pass)
+        {
             passed++;
+        }
     }
 
     debug_send("=== Sensor Indexing Test Results: %d/%d PASSED ===", passed, test_count);
@@ -474,6 +638,12 @@ void test_sensor_indexing(void)
 
 // Add this function after test_sensor_indexing()
 
+/**
+ * @brief Test connectivity with physical sensors
+ *
+ * Sends status requests to all configured sensors and checks
+ * for responses to determine which sensors are online.
+ */
 void test_sensor_responses(void)
 {
     debug_send("=== Testing Real Sensor Responses ===");
@@ -498,7 +668,9 @@ void test_sensor_responses(void)
         bool online = is_sensor_online(i);
         debug_send("Sensor %d: %s", i, online ? "ONLINE" : "OFFLINE");
         if (online)
+        {
             responding_sensors++;
+        }
     }
 
     debug_send("=== Sensor Response Test: %d/%d sensors responding ===", responding_sensors, MAX_RADAR_SENSORS);
