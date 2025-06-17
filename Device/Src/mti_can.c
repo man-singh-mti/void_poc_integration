@@ -571,7 +571,9 @@ void test_sensor_responses(void)
         bool online = can_is_sensor_online(i);
         debug_send("Sensor %d (Header ID 0x%02X): %s", i, CAN_DATA_HEADER_BASE_ID + (i * 0x10), online ? "RESPONDING" : "NO RESPONSE");
         if (online)
+        {
             responding++;
+        }
     }
 
     debug_send("Response Test: %d/%d sensors responding", responding, MAX_RADAR_SENSORS);

@@ -556,12 +556,17 @@ static void update_measurement_data(const radar_distance_t *radar_data)
     // Set flags for transmission
     latest_measurement.flags = 0;
     if (latest_results.void_detected)
+    {
         latest_measurement.flags |= 0x01;
+    }
     if (radar_data->system_healthy)
+    {
         latest_measurement.flags |= 0x02;
+    }
     if (config.algorithm == VOID_ALGORITHM_CIRCLEFIT)
+    {
         latest_measurement.flags |= 0x04;
-
+    }
     void_state.new_measurement_available = true;
 }
 
@@ -777,11 +782,17 @@ void void_run_diagnostics(void)
 void void_get_statistics(uint32_t *total_detections, uint32_t *algorithm_switches, uint32_t *uptime_ms)
 {
     if (total_detections)
+    {
         *total_detections = void_state.total_detections;
+    }
     if (algorithm_switches)
+    {
         *algorithm_switches = void_state.algorithm_switches;
+    }
     if (uptime_ms)
+    {
         *uptime_ms = HAL_GetTick() - void_state.init_time_ms;
+    }
 }
 
 // Add this internal function to mti_void.c

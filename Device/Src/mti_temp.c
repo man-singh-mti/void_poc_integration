@@ -158,7 +158,9 @@ bool temp_significant_change_detected(void)
 
     int16_t change = prv_temp_current_status.current_temperature - prv_temp_current_status.last_streamed_temperature;
     if (change < 0)
+    {
         change = -change; // Absolute value
+    }
 
     return (change >= TEMP_CHANGE_THRESHOLD_C);
 }
