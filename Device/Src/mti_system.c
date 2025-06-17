@@ -27,6 +27,12 @@ static const char *str_radar_status[4] = { "Not Initialised", "Ready", "Chirping
 // Add missing function declaration at the top
 bool void_is_system_ready(void); // Add this line after includes
 
+// Add forward declarations at the top of the file, after includes:
+static void debug_init_status(void);
+static void debug_can_diagnostics(void);
+static void debug_radar_diagnostics(void);
+static void debug_void_diagnostics(void);
+
 bool debug_get(void)
 {
     return debug;
@@ -415,8 +421,7 @@ bool system_is_operational_mode(void)
     return (state == measure_state && initialised);
 }
 
-// Add this helper function
-static void debug_init_status(void)
+void debug_init_status(void)
 {
     if (debug_get())
     {
@@ -520,7 +525,7 @@ static void debug_init_status(void)
 
 // Add these helper functions for detailed diagnostics
 
-static void debug_can_diagnostics(void)
+void debug_can_diagnostics(void)
 {
     if (debug_get())
     {
@@ -542,7 +547,7 @@ static void debug_can_diagnostics(void)
     }
 }
 
-static void debug_radar_diagnostics(void)
+void debug_radar_diagnostics(void)
 {
     if (debug_get())
     {
@@ -567,7 +572,7 @@ static void debug_radar_diagnostics(void)
     }
 }
 
-static void debug_void_diagnostics(void)
+void debug_void_diagnostics(void)
 {
     if (debug_get())
     {

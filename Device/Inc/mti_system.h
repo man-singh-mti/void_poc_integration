@@ -41,15 +41,6 @@ typedef enum step_
     STEP_FINISH     = 8
 } init_step_t;
 
-// Add radar init status tracking
-typedef enum
-{
-    RADAR_INIT_NOT_STARTED,
-    RADAR_INIT_IN_PROGRESS,
-    RADAR_INIT_OK,
-    RADAR_INIT_ERROR
-} radar_init_status_t;
-
 void     imu_validate(h_imu_t *h_imu);
 bool     debug_get(void);
 bool     initialised_get(void);
@@ -67,6 +58,12 @@ void     keepalive_reset(void);
 radar_init_status_t radar_init_status_get(void);
 void                radar_init_status_set(radar_init_status_t status);
 bool                system_is_operational_mode(void);
+
+// Add forward declarations for diagnostic functions
+static void debug_init_status(void);
+static void debug_can_diagnostics(void);
+static void debug_radar_diagnostics(void);
+static void debug_void_diagnostics(void);
 
 // Add missing declarations
 extern bool              debug;

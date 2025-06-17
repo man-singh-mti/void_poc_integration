@@ -16,6 +16,9 @@
 #include "mti_system.h"
 #include "mti_temp.h" // Add include
 #include "mti_void.h" // Add this include at the top
+#include "main.h"
+#include "mti_can.h"
+#include "mti_radar_types.h" // Add this line for radar types
 
 
 /* type define */

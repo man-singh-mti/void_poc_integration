@@ -180,6 +180,34 @@ void void_set_median_filter(bool enabled);
  */
 void void_get_config(void_config_t *config);
 
+/**
+ * @brief Get algorithm name as string
+ *
+ * @param algorithm Algorithm type
+ * @return Pointer to algorithm name string
+ */
+const char *void_get_algorithm_string(void_algorithm_t algorithm);
+
+/**
+ * @brief Set baseline diameter
+ *
+ * @param baseline_mm Baseline diameter in millimeters
+ */
+void void_set_baseline(uint16_t baseline_mm);
+
+/**
+ * @brief Set distance range
+ *
+ * @param min_mm Minimum distance in millimeters
+ * @param max_mm Maximum distance in millimeters
+ */
+void void_set_range(uint16_t min_mm, uint16_t max_mm);
+
+/**
+ * @brief Clear detection statistics
+ */
+void void_clear_statistics(void);
+
 /** @name Algorithm-Specific Functions */
 
 /**
