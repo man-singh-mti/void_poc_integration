@@ -38,13 +38,13 @@
 #define CAN_CMD_PAYLOAD_SELECT_PROFILE  0x07
 #define CAN_CMD_PAYLOAD_SET_FOV         0x08
 
-// --- Sensor Command IDs ---
+// --- Sensor Command IDs (0x60 base) ---
 #define CAN_S0_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR0_OFFSET) // 0x60
 #define CAN_S1_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR1_OFFSET) // 0x70
 #define CAN_S2_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR2_OFFSET) // 0x80
 #define CAN_S3_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR3_OFFSET) // 0x90
 
-// --- Sensor Data IDs ---
+// --- Sensor Data IDs (0xA0 base) ---
 #define CAN_S0_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR0_OFFSET)        // 0xA0
 #define CAN_S0_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR0_OFFSET)        // 0xA1
 #define CAN_S0_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR0_OFFSET)  // 0xA3
@@ -97,6 +97,9 @@ bool         can_is_sensor_online(uint8_t sensor_idx);
 /** @name CAN System Health */
 bool can_system_is_healthy(void);
 void can_run_diagnostics(void);
+
+/** @name Compatibility Functions (for existing code) */
+uint8_t get_active_sensor_count(void); // Alias for can_get_online_sensor_count()
 
 /** @name Testing Functions */
 void test_sensor_indexing(void);

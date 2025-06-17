@@ -21,6 +21,22 @@
 #define SENSOR_1_ANGLE 120
 #define SENSOR_2_ANGLE 240
 
+/** @name Radar Hardware Status Types (for compatibility) */
+typedef enum {
+    RADAR_HW_NOT_INITIALISED = 0,
+    RADAR_HW_READY = 1,
+    RADAR_HW_CHIRPING = 2,
+    RADAR_HW_STOPPED = 3
+} radar_hw_status_t;
+
+/** @name Radar Initialization Status */
+typedef enum {
+    RADAR_INIT_NOT_STARTED = 0,
+    RADAR_INIT_IN_PROGRESS = 1,
+    RADAR_INIT_OK = 2,
+    RADAR_INIT_ERROR = 3
+} radar_init_status_t;
+
 /**
  * @brief Raw sensor data from CAN bus (Stage 1)
  * 
@@ -44,6 +60,8 @@ typedef struct {
     uint16_t distance_mm[MAX_RADAR_SENSORS];  // Clean distances in millimeters
     uint16_t angle_deg[MAX_RADAR_SENSORS];    // Sensor angles (0, 120, 240)
     bool data_valid[MAX_RADAR_SENSORS];       // Validity flags per sensor
+    float confidence[MAX_RADAR_SENSORS];      // Confidence per sensor (0.0-1.0)
+    uint8_t quality_score[MAX_RADAR_SENSORS]; // Signal quality (0-100)
     uint8_t valid_sensor_count;               // Number of sensors with valid data
     uint32_t timestamp_ms;                    // When processing completed
     bool system_healthy;                      // Overall system health

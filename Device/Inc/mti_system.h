@@ -1,6 +1,7 @@
 #include "main.h"
 #include "vmt_device.h"
 #include "mti_can.h"
+#include "mti_radar_types.h" // Add this line for radar types
 
 #define HW_VER 3
 #if HW_VER >= 3
@@ -29,15 +30,15 @@ typedef enum
 
 typedef enum step_
 {
-    STEP_START,      // 0
-    STEP_VER_SYNC,   // 1
-    STEP_WATER_SYNC, // 2
-    STEP_IMU_SYNC,   // 3
-    STEP_IMU_TEST,   // 4
-    STEP_RADAR,      // 5
-    STEP_TEMP,       // 6
-    STEP_VOID,       // 7 - Add void initialization step
-    STEP_FINISH,     // 8
+    STEP_START      = 0,
+    STEP_VER_SYNC   = 1,
+    STEP_WATER_SYNC = 2,
+    STEP_IMU_SYNC   = 3,
+    STEP_IMU_TEST   = 4,
+    STEP_RADAR      = 5, // Updated name
+    STEP_TEMP       = 6,
+    STEP_VOID       = 7, // Add void step
+    STEP_FINISH     = 8
 } init_step_t;
 
 // Add radar init status tracking
@@ -65,4 +66,19 @@ void     keepalive_reset(void);
 // Add these missing function declarations
 radar_init_status_t radar_init_status_get(void);
 void                radar_init_status_set(radar_init_status_t status);
-bool                system_is_operational_mode(void); // Add this function declaration
+bool                system_is_operational_mode(void);
+
+// Add missing declarations
+extern bool              debug;
+extern bool              initialised;
+extern bool              water_synced;
+extern radar_hw_status_t radar_status;
+extern status_t          module_status;
+extern bool              version_sent;
+extern init_step_t       init_step;
+extern uint8_t           retries_ver;
+extern uint8_t           retries_water;
+extern uint8_t           retries_imu;
+extern uint8_t           retries_radar;
+extern uint8_t           state;
+extern uint32_t          keepalive_timer;

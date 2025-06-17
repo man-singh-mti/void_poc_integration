@@ -576,3 +576,13 @@ void test_sensor_responses(void)
 
     debug_send("Response Test: %d/%d sensors responding", responding, MAX_RADAR_SENSORS);
 }
+
+/*------------------------------------------------------------------------------
+ * Compatibility Functions (for existing code)
+ *----------------------------------------------------------------------------*/
+
+uint8_t get_active_sensor_count(void)
+{
+    // Alias for existing function name used in mti_system.c
+    return can_get_online_sensor_count();
+}
