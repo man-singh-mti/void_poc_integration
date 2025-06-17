@@ -145,6 +145,12 @@ void void_system_process(void)
             radar_mark_data_processed();
         }
     }
+
+    // Handle automatic data streaming (ADD THIS)
+    if (system_is_operational_mode())
+    {
+        void_send_automatic_stream_internal(); // Internal function
+    }
 }
 
 static bool process_radar_data(void)
@@ -773,4 +779,50 @@ void void_get_statistics(uint32_t *total_detections, uint32_t *algorithm_switche
         *algorithm_switches = void_state.algorithm_switches;
     if (uptime_ms)
         *uptime_ms = HAL_GetTick() - void_state.init_time_ms;
+}
+
+// Add this internal function to mti_void.c
+static void void_send_automatic_stream_internal(void)
+{
+    // Only send when we have new measurement data
+    if (!void_state.new_measurement_available)
+    {
+        return;
+    }
+
+    uart_tx_channel_set(UART_UPHOLE);
+
+    void_measurement_t measurement = latest_measurement;
+    void_data_t        result      = latest_results;
+
+    // Format: &vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>
+    uint8_t flags = 0;
+    flags |= (config.algorithm & 0x03); // Bits 0-1: Algorithm
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (measurement.data_valid[i])
+        {
+            flags |= (0x04 << i); // Bits 2-4: Sensor validity
+        }
+    }
+    if (result.void_detected)
+    {
+        flags |= 0x20; // Bit 5: Void detected
+    }
+
+    // Send measurement data
+    printf("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+           flags,
+           measurement.distance_mm[0],
+           measurement.distance_mm[1],
+           measurement.distance_mm[2],
+           result.void_detected ? 1 : 0,
+           0, // Reserved
+           0, // Reserved
+           result.confidence_percent);
+
+    uart_tx_channel_undo();
+
+    // Mark data as transmitted
+    void_mark_results_processed();
 }

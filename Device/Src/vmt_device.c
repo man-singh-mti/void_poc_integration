@@ -1,25 +1,28 @@
+// Device and board includes
 #include "vmt_device.h"
-#include "mti_can.h"
-#include "mti_radar.h"
-#include "mti_temp.h"
-#include "mti_void.h" // Add this include
-
-#include <math.h>
-#include <stdlib.h>
 #include "tim.h"
 #include "spi.h"
 
+// MTI system modules
+#include "mti_can.h"
+#include "mti_radar.h"
+#include "mti_temp.h"
+#include "mti_void.h" // Void detection system
+#include "mti_imu.h"
+#include "mti_water.h"
+#include "mti_system.h"
+
+// VMT modules
 #include "vmt_adc.h"
 #include "vmt_uart.h"
 #include "vmt_command.h"
 #include "vmt_icm20948.h"
-#include "mti_imu.h"
-#include "mti_water.h"
 #include "vmt_flash.h"
 #include "vmt_flash_fifo.h"
-#include "mti_system.h"
-#include "mti_can.h"
-#include "mti_radar.h"
+
+// Standard libraries
+#include <math.h>
+#include <stdlib.h>
 
 flash_values_t flash_value;
 
@@ -30,27 +33,6 @@ typedef struct h_dev_spi_ch_
     uint16_t           cs_pin;
     clk_source_get_t   clk_source_get;
 } h_dev_spi_t;
-
-// typedef struct h_imu_ { //dupe
-//	uint8_t id;
-//	h_icm20948_t *p_h_icm20948;
-//	union {
-//		int16_t data[ICM20948_DATA_NUM];
-//		struct {
-//			int16_t accel_x, accel_y, accel_z;
-//			int16_t gyro_x, gyro_y, gyro_z;
-//			int16_t mag_x, mag_y, mag_z;
-//		};
-//	};
-
-//	uint8_t step;
-//	bool b_g_log_en :1, b_g_log_busy :1, b_update :1, b_overflow :1;
-//	h_moving_avg_i16_t *p_h_g_squ_avg[DEV_IMU_VECTOR_AXIS_N];
-//	int16_t gravity[DEV_IMU_VECTOR_AXIS_N];
-//	double gravity_len;
-//	h_vector_t h_accel;
-//	h_vector_t h_gyro;
-//} h_imu_t;
 
 /* function declaration */
 extern void SystemClock_Config(void);
@@ -160,45 +142,6 @@ static h_moving_avg_i16_t h_imu_gravity_squ_avg[DEV_IMU_NUM][DEV_IMU_VECTOR_AXIS
 				.p_buff = imu_gravity_squ_avg_buff[1][2],
 				.buff_len = DEV_IMU_AVG_BUFF_SIZE, }, };
 
-// static float imu_acc_avg_buff[DEV_IMU_NUM][DEV_IMU_AVG_BUFF_SIZE] = {
-//	0x0 };
-// static h_moving_avg_f_t h_imu_acc_avg[DEV_IMU_NUM] = {
-//	[0] = {
-//		.p_buff = imu_acc_avg_buff[0],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
-//	[1] = {
-//		.p_buff = imu_acc_avg_buff[1],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, }, };
-//
-// static float imu_gyro_avg_buff[DEV_IMU_NUM][DEV_IMU_AVG_BUFF_SIZE] = {
-//	0x0 };
-// static h_moving_avg_f_t h_imu_gyro_avg[DEV_IMU_NUM] = {
-//	[0] = {
-//		.p_buff = imu_gyro_avg_buff[0],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
-//	[1] = {
-//		.p_buff = imu_gyro_avg_buff[1],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, }, };
-//
-// static float imu_acc_squ_avg_buff[DEV_IMU_NUM][DEV_IMU_AVG_BUFF_SIZE] = {
-//	0x0 };
-// static h_moving_avg_f_t h_imu_a_squ_avg[DEV_IMU_NUM] = {
-//	[0] = {
-//		.p_buff = imu_acc_squ_avg_buff[0],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
-//	[1] = {
-//		.p_buff = imu_acc_squ_avg_buff[1],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, }, };
-//
-// static float imu_gyro_squ_avg_buff[DEV_IMU_NUM][DEV_IMU_AVG_BUFF_SIZE] = {
-//	0x0 };
-// static h_moving_avg_f_t h_imu_gyro_squ_avg[DEV_IMU_NUM] = {
-//	[0] = {
-//		.p_buff = imu_gyro_squ_avg_buff[0],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
-//	[1] = {
-//		.p_buff = imu_gyro_squ_avg_buff[1],
-//		.buff_len = DEV_IMU_AVG_BUFF_SIZE, }, };
 
 static h_imu_t h_imu[DEV_IMU_NUM] = {
 	[0] = {
@@ -208,12 +151,6 @@ static h_imu_t h_imu[DEV_IMU_NUM] = {
 		.p_h_g_squ_avg[0] = &h_imu_gravity_squ_avg[0][0],
 		.p_h_g_squ_avg[1] = &h_imu_gravity_squ_avg[0][1],
 		.p_h_g_squ_avg[2] = &h_imu_gravity_squ_avg[0][2],
-//		.h_accel = {
-//			.p_h_avg = &h_imu_acc_avg[0],
-//			.p_h_squ_avg = &h_imu_a_squ_avg[0], },
-//		.h_gyro = {
-//			.p_h_avg = &h_imu_gyro_avg[0],
-//			.p_h_squ_avg = &h_imu_gyro_squ_avg[0], },
 			},
 	[1] = {
 		.id = 1,
@@ -222,12 +159,6 @@ static h_imu_t h_imu[DEV_IMU_NUM] = {
 		.p_h_g_squ_avg[0] = &h_imu_gravity_squ_avg[1][0],
 		.p_h_g_squ_avg[1] = &h_imu_gravity_squ_avg[1][1],
 		.p_h_g_squ_avg[2] = &h_imu_gravity_squ_avg[1][2],
-//		.h_accel = {
-//			.p_h_avg = &h_imu_acc_avg[0],
-//			.p_h_squ_avg = &h_imu_a_squ_avg[0], },
-//		.h_gyro = {
-//			.p_h_avg = &h_imu_gyro_avg[0],
-//			.p_h_squ_avg = &h_imu_gyro_squ_avg[0], },
 			}, };
 
 const double math_pi = 3.1415926535897932;
@@ -607,9 +538,9 @@ void device_process(void)
     module_init();
     cmd_process();
 
-    radar_system_process();
-    temp_system_process();
-    void_system_process(); // Add this call to process void detection system
+    radar_system_process(); // Processes radar data
+    temp_system_process();  // Handles temp data + streaming internally
+    void_system_process();  // Should handle void data + streaming internally
 
     icm20948_process(&h_icm20948[0]);
     icm20948_process(&h_icm20948[1]);
@@ -1160,6 +1091,29 @@ static void dev_debug_process(void)
                    status.high_temp_alert ? 1 : 0,
                    status.low_temp_alert ? 1 : 0,
                    status.system_ready ? 1 : 0);
+        }
+    }
+
+    // Add void debug - every 2 seconds
+    if (h_dev_debug.b_void_sample)
+    {
+        static uint32_t void_debug_time = 0;
+        if (HAL_GetTick() - void_debug_time >= 2000)
+        {
+            void_debug_time = HAL_GetTick();
+            uart_tx_channel_set(UART_DEBUG);
+
+            void_data_t void_result;
+            if (void_get_latest_results(&void_result))
+            {
+                printf("@void_debug: detected=%s, conf=%d%%, size=%dmm, algo=%d\n",
+                       void_result.void_detected ? "YES" : "NO",
+                       void_result.confidence_percent,
+                       void_result.void_size_mm,
+                       void_result.algorithm_used);
+            }
+
+            uart_tx_channel_undo();
         }
     }
 }

@@ -181,7 +181,8 @@ typedef union h_dev_debug_
     uint8_t byte;
     struct
     {
-        bool b_init : 1, b_spi_init : 1, b_imu_sample_set : 1, b_adc_sample : 1, b_imu_sample : 1, b_radar_sample : 1, b_temp_sample : 1;
+        bool b_init : 1, b_spi_init : 1, b_imu_sample_set : 1, b_adc_sample : 1, b_imu_sample : 1, b_radar_sample : 1, b_temp_sample : 1,
+            b_void_sample : 1; // Add void debug
     };
 } h_dev_debug_t;
 

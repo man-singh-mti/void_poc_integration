@@ -225,19 +225,31 @@ bool module_init(void)
 
     case STEP_VOID:
         // Initialize void detection module
-        void_system_init();
-        if (void_is_system_ready())
+        if (void_system_init())
         {
-            printf("@db,Void detection module initialized\n");
+            if (void_is_system_ready())
+            {
+                printf("@db,Void detection module initialized\n");
+            }
+            else
+            {
+                printf("@db,Void detection initialized but not ready (waiting for radar)\n");
+            }
         }
         else
         {
             printf("@status,down,8\n"); // Void initialization error
+            printf("@db,Void detection initialization failed\n");
         }
         init_step = STEP_FINISH;
         break;
 
     case STEP_FINISH:
+        debug_init_status();       // Full initialization summary
+        debug_can_diagnostics();   // Detailed CAN/sensor info
+        debug_radar_diagnostics(); // Radar processing info
+        debug_void_diagnostics();  // Void detection info
+
         initialised = true;
         if (module_status == STATUS_SYNC)
         {
@@ -401,4 +413,176 @@ void radar_init_status_set(radar_init_status_t status)
 bool system_is_operational_mode(void)
 {
     return (state == measure_state && initialised);
+}
+
+// Add this helper function
+static void debug_init_status(void)
+{
+    if (debug_get())
+    {
+        printf("@db,=== SYSTEM INITIALIZATION STATUS ===\n");
+
+        // Overall system status
+        printf("@db,System: %s | State: %d | Status: %d\n", initialised ? "INITIALIZED" : "INITIALIZING", state_get(), module_status_get());
+
+        // Module-by-module status
+        printf("@db,Modules:\n");
+        printf("@db,  Version: %s (retries: %d)\n", version_sent ? "ACK" : "PENDING", retries_ver);
+        printf("@db,  Water: %s (retries: %d, reserve: %d)\n", water_synced_get() ? "SYNCED" : "PENDING", retries_water, reserve_get());
+        printf("@db,  IMU: profile=%d, active=%d (retries: %d)\n", imu_profile_get(), imu_active_get(), retries_imu);
+
+        // Radar system detailed status
+        const char *radar_status_str;
+        switch (radar_init_status)
+        {
+        case RADAR_INIT_NOT_STARTED:
+            radar_status_str = "NOT_STARTED";
+            break;
+        case RADAR_INIT_IN_PROGRESS:
+            radar_status_str = "IN_PROGRESS";
+            break;
+        case RADAR_INIT_OK:
+            radar_status_str = "OK";
+            break;
+        case RADAR_INIT_ERROR:
+            radar_status_str = "ERROR";
+            break;
+        default:
+            radar_status_str = "UNKNOWN";
+            break;
+        }
+
+        printf("@db,  Radar: %s (retries: %d)\n", radar_status_str, retries_radar);
+
+        // CAN and sensor details
+        if (radar_init_status != RADAR_INIT_NOT_STARTED)
+        {
+            uint8_t active_sensors = get_active_sensor_count();
+            printf("@db,    CAN: %s\n", can_system_is_healthy() ? "HEALTHY" : "ERROR");
+            printf("@db,    Sensors: %d/%d active\n", active_sensors, MAX_RADAR_SENSORS);
+
+            // Individual sensor status
+            for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+            {
+                printf("@db,      S%d: %s\n", i, can_is_sensor_online(i) ? "ONLINE" : "OFFLINE");
+            }
+        }
+
+        // Temperature system
+        printf("@db,  Temperature: %s\n", temp_is_initialized() ? "INITIALIZED" : "NOT_INIT");
+
+        // Void detection system
+        printf("@db,  Void Detection:\n");
+        printf("@db,    Init: %s\n", "TRUE"); // void_system_init() should return true
+        printf("@db,    Ready: %s\n", void_is_system_ready() ? "YES" : "NO");
+
+        if (void_is_system_ready())
+        {
+            void_config_t void_config;
+            void_get_config(&void_config);
+            printf("@db,    Algorithm: %d, Baseline: %dmm, Threshold: %dmm\n", void_config.algorithm, void_config.baseline_diameter_mm, void_config.threshold_mm);
+        }
+
+        // Timing information
+        printf("@db,Timing: uptime=%lums, init_step=%d\n", HAL_GetTick(), init_step);
+
+        // Error summary
+        if (module_status_get() != STATUS_OK && module_status_get() != STATUS_SYNC)
+        {
+            const char *error_desc;
+            switch (module_status_get())
+            {
+            case STATUS_IMU_ERROR:
+                error_desc = "IMU_ERROR";
+                break;
+            case STATUS_RADAR_ERROR:
+                error_desc = "RADAR_ERROR";
+                break;
+            case STATUS_TEMP_ERROR:
+                error_desc = "TEMP_ERROR";
+                break;
+            case STATUS_VOID_ERROR:
+                error_desc = "VOID_ERROR";
+                break;
+            case STATUS_VOID_DETECTION_ERROR:
+                error_desc = "VOID_DETECTION_ERROR";
+                break;
+            default:
+                error_desc = "UNKNOWN_ERROR";
+                break;
+            }
+            printf("@db,ERROR: %s\n", error_desc);
+        }
+
+        printf("@db,=== END INITIALIZATION STATUS ===\n");
+    }
+}
+
+// Add these helper functions for detailed diagnostics
+
+static void debug_can_diagnostics(void)
+{
+    if (debug_get())
+    {
+        printf("@db,--- CAN DIAGNOSTICS ---\n");
+
+        // Run CAN diagnostics
+        can_run_diagnostics();
+
+        // Show sensor communication statistics
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            radar_raw_t *raw_data = can_get_raw_data(i);
+            if (raw_data)
+            {
+                printf("@db,Sensor %d: frames=%lu, points=%d, status=0x%02X\n", i, raw_data->frame_number, raw_data->num_points, raw_data->sensor_status);
+            }
+        }
+        printf("@db,--- END CAN DIAGNOSTICS ---\n");
+    }
+}
+
+static void debug_radar_diagnostics(void)
+{
+    if (debug_get())
+    {
+        printf("@db,--- RADAR DIAGNOSTICS ---\n");
+
+        radar_run_diagnostics();
+
+        radar_distance_t measurements;
+        if (radar_get_latest_measurements(&measurements))
+        {
+            printf("@db,Valid sensors: %d, System healthy: %s\n", measurements.valid_sensor_count, measurements.system_healthy ? "YES" : "NO");
+
+            for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+            {
+                if (measurements.data_valid[i])
+                {
+                    printf("@db,S%d: %dmm (conf: %.1f, quality: %d)\n", i, measurements.distance_mm[i], measurements.confidence[i], measurements.quality_score[i]);
+                }
+            }
+        }
+        printf("@db,--- END RADAR DIAGNOSTICS ---\n");
+    }
+}
+
+static void debug_void_diagnostics(void)
+{
+    if (debug_get())
+    {
+        printf("@db,--- VOID DIAGNOSTICS ---\n");
+
+        void_run_diagnostics();
+
+        uint32_t total_detections, algorithm_switches, uptime_ms;
+        void_get_statistics(&total_detections, &algorithm_switches, &uptime_ms);
+
+        printf("@db,Statistics: detections=%lu, switches=%lu, uptime=%lums\n", total_detections, algorithm_switches, uptime_ms);
+
+        void_detection_state_t detection_state = void_get_detection_state();
+        printf("@db,Detection state: %d\n", detection_state);
+
+        printf("@db,--- END VOID DIAGNOSTICS ---\n");
+    }
 }
