@@ -194,4 +194,11 @@ bool radar_has_valid_data(uint8_t sensor_idx);
  */
 uint16_t radar_get_distance_mm(uint8_t sensor_idx);
 
+/**
+ * @brief Get number of active sensors
+ *
+ * @return Number of active sensors
+ */
+uint8_t radar_get_active_sensor_count(void);
+
 #endif // MTI_RADAR_H

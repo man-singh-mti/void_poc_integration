@@ -309,6 +309,11 @@ uint8_t radar_get_valid_sensor_count(void)
     return latest_measurements.valid_sensor_count;
 }
 
+uint8_t radar_get_active_sensor_count(void)
+{
+    return get_active_sensor_count();
+}
+
 void radar_run_diagnostics(void)
 {
     debug_send("=== RADAR System Diagnostics ===");

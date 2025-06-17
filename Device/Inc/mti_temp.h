@@ -52,6 +52,7 @@ bool temp_process_raw_data(temp_raw_data_t *raw, temp_processed_data_t *processe
 void temp_update_flags(temp_processed_data_t *processed, temp_status_t *status);
 void temp_get_latest_status(temp_status_t *status);
 bool temp_init(void);
+bool temp_is_initialized(void); // Add this function declaration
 
 /* Configuration functions */
 void    temp_set_high_threshold(int16_t threshold_c);

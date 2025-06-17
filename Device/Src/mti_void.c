@@ -829,3 +829,44 @@ static void void_send_automatic_stream_internal(void)
     // Mark data as transmitted
     void_mark_results_processed();
 }
+
+const char *void_get_algorithm_string(void_algorithm_t algorithm)
+{
+    switch (algorithm)
+    {
+    case VOID_ALGORITHM_BYPASS:
+        return "bypass";
+    case VOID_ALGORITHM_SIMPLE:
+        return "simple";
+    case VOID_ALGORITHM_CIRCLEFIT:
+        return "circlefit";
+    default:
+        return "unknown";
+    }
+}
+
+bool void_set_baseline(uint16_t baseline_mm)
+{
+    return void_set_baseline_diameter(baseline_mm);
+}
+
+bool void_set_range(uint16_t min_mm, uint16_t max_mm)
+{
+    if (min_mm >= max_mm || min_mm < 50 || max_mm > 5000)
+    {
+        return false;
+    }
+
+    config.min_distance_mm = min_mm;
+    config.max_distance_mm = max_mm;
+    debug_send("VOID: Range set to %d-%dmm", min_mm, max_mm);
+    return true;
+}
+
+void void_clear_statistics(void)
+{
+    void_state.total_detections   = 0;
+    void_state.algorithm_switches = 0;
+    void_state.init_time_ms       = HAL_GetTick();
+    debug_send("VOID: Statistics cleared");
+}

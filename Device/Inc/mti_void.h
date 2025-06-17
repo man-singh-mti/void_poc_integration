@@ -193,7 +193,7 @@ const char *void_get_algorithm_string(void_algorithm_t algorithm);
  *
  * @param baseline_mm Baseline diameter in millimeters
  */
-void void_set_baseline(uint16_t baseline_mm);
+bool void_set_baseline(uint16_t baseline_mm);
 
 /**
  * @brief Set distance range
@@ -201,7 +201,7 @@ void void_set_baseline(uint16_t baseline_mm);
  * @param min_mm Minimum distance in millimeters
  * @param max_mm Maximum distance in millimeters
  */
-void void_set_range(uint16_t min_mm, uint16_t max_mm);
+bool void_set_range(uint16_t min_mm, uint16_t max_mm);
 
 /**
  * @brief Clear detection statistics

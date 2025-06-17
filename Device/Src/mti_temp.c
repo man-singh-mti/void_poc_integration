@@ -352,6 +352,12 @@ bool temp_init(void)
     return true;
 }
 
+/* Check if temperature system is initialized */
+bool temp_is_initialized(void)
+{
+    return prv_temp_current_status.system_ready;
+}
+
 /* Convert ADC reading to Celsius (integer-based) */
 static int16_t prv_temp_convert_adc_to_celsius(uint16_t adc_value)
 {
