@@ -1,3 +1,9 @@
+/**
+ * @file vmt_device.c
+ * @brief Implementation file for the VMT device, handling device-specific operations,
+ *        including IMU, ADC, SPI communication, data logging, and system lifecycle.
+ */
+
 // Device and board includes
 #include "vmt_device.h"
 #include "tim.h"
@@ -24,17 +30,21 @@
 #include <math.h>
 #include <stdlib.h>
 
-flash_values_t flash_value;
+// Global Variables
+flash_values_t flash_value; ///< Holds values for flash storage, primarily max accelerations.
 
+/**
+ * @brief Structure for SPI channel hardware configuration.
+ */
 typedef struct h_dev_spi_ch_
 {
-    SPI_HandleTypeDef *p_h_hal;
-    GPIO_TypeDef      *p_cs_port;
-    uint16_t           cs_pin;
-    clk_source_get_t   clk_source_get;
+    SPI_HandleTypeDef *p_h_hal;        ///< Pointer to HAL SPI handle.
+    GPIO_TypeDef      *p_cs_port;      ///< Pointer to Chip Select GPIO port.
+    uint16_t           cs_pin;         ///< Chip Select GPIO pin.
+    clk_source_get_t   clk_source_get; ///< Function pointer to get SPI clock source frequency.
 } h_dev_spi_t;
 
-/* function declaration */
+/* Static Function Declarations */
 extern void SystemClock_Config(void);
 
 static void dev_icm_pin_set_cb(uint8_t id, icm20948_pin_t pin, bool b_status);
@@ -50,104 +60,120 @@ static bool log_save_process(void);
 static bool log_load_process(void);
 static void dev_debug_process(void);
 
+// Moving average function declarations (consider moving to a utility file if used elsewhere)
 void moving_avg_i16_update(h_moving_avg_i16_t *p_h_avg, int16_t new_data);
 void moving_avg_i16_reset(h_moving_avg_i16_t *p_h_avg);
 
 void moving_avg_f_update(h_moving_avg_f_t *p_h_avg, float new_data);
 void moving_avg_f_reset(h_moving_avg_f_t *p_h_avg);
 
-/* parameter */
-static bool b_init_finish = false;
+/* Static Parameters */
+static bool b_init_finish = false; ///< Flag indicating if device initialization is complete.
 
-static h_sensor_t h_sensor = {
+static h_sensor_t h_sensor = { ///< Sensor data structure, initialized with thresholds.
 	.h_adc[ADC_SEQ_TEMP] = {
-		.thre_h = 6.0,
-		.thre_l = 5.8, },
+		.thre_h = 6.0, // Default high threshold for temperature sensor
+		.thre_l = 5.8, // Default low threshold for temperature sensor
+    },
 	.h_adc[ADC_SEQ_WATER_1] = {
-		.thre_h = 1.0,
-		.thre_l = 0.8,
+		.thre_h = 1.0, // Default high threshold for water sensor 1
+		.thre_l = 0.8, // Default low threshold for water sensor 1
 	},
 	.h_adc[ADC_SEQ_WATER_2] = {
-		.thre_h = 1.0,
-		.thre_l = 0.8, }, };
+		.thre_h = 1.0, // Default high threshold for water sensor 2
+		.thre_l = 0.8, // Default low threshold for water sensor 2
+    },
+};
 
 static SPI_HandleTypeDef *p_h_spi_hal[DEV_SPI_CH_NUM] = {
+    ///< Array of HAL SPI handles.
     [0] = &hspi2,
     [1] = &hspi1,
 };
 
-static h_dev_spi_t h_dev_spi[DEV_SPI_CH_NUM] = {
+static h_dev_spi_t h_dev_spi[DEV_SPI_CH_NUM] = { ///< Array of device SPI configurations.
 	[0] = {
-		.p_h_hal = &hspi2,
-		.p_cs_port = IMU1_nCS_GPIO_Port,
-		.cs_pin = IMU1_nCS_Pin,
-		.clk_source_get = HAL_RCC_GetPCLK2Freq, },
+		.p_h_hal = &hspi2,             // SPI2 for IMU1
+		.p_cs_port = IMU1_nCS_GPIO_Port, // CS port for IMU1
+		.cs_pin = IMU1_nCS_Pin,         // CS pin for IMU1
+		.clk_source_get = HAL_RCC_GetPCLK2Freq, // Clock source for SPI2
+    },
 	[1] = {
-		.p_h_hal = &hspi1,
-		.p_cs_port = IMU2_nCS_GPIO_Port,
-		.cs_pin = IMU2_nCS_Pin,
-		.clk_source_get = HAL_RCC_GetPCLK1Freq, }, };
+		.p_h_hal = &hspi1,             // SPI1 for IMU2
+		.p_cs_port = IMU2_nCS_GPIO_Port, // CS port for IMU2
+		.cs_pin = IMU2_nCS_Pin,         // CS pin for IMU2
+		.clk_source_get = HAL_RCC_GetPCLK1Freq, // Clock source for SPI1
+    },
+};
 
-static h_dev_spi_send_t h_spi = { 0x0 };
+static h_dev_spi_send_t h_spi = { 0x0 }; ///< SPI send operation parameters.
 
-static h_icm20948_t h_icm20948[DEV_IMU_NUM] = {
+static h_icm20948_t h_icm20948[DEV_IMU_NUM] = { ///< Array of ICM20948 IMU handles.
 	[0] = {
 		.id = 0,
-		.systick_get_cb = HAL_GetTick,
-		.pin_set_cb = dev_icm_pin_set_cb,
-		.spi_sent_cb = dev_icm_spi_sent_cb,
-		.sample_finish_cb = dev_icm_sample_finish_cb,
-		.sent_sel = ICM20948_SENT_SPI,
+		.systick_get_cb = HAL_GetTick,       // System tick getter callback
+		.pin_set_cb = dev_icm_pin_set_cb,     // Pin set callback
+		.spi_sent_cb = dev_icm_spi_sent_cb,   // SPI send callback
+		.sample_finish_cb = dev_icm_sample_finish_cb, // Sample finish callback
+		.sent_sel = ICM20948_SENT_SPI,       // SPI communication selected
 		.h_sample_p = {
-			.timeout = 5, },
+			.timeout = 5, // Sample timeout in ms
+        },
 		.h_debug = {
-			.b_init = true,
-//			.b_setting = true,
-//			.b_sample = true,
-				}, },
+			.b_init = true, // Enable init debug messages for IMU0
+        },
+    },
 	[1] = {
 		.id = 1,
-		.systick_get_cb = HAL_GetTick,
-		.pin_set_cb = dev_icm_pin_set_cb,
-		.spi_sent_cb = dev_icm_spi_sent_cb,
-		.sample_finish_cb = dev_icm_sample_finish_cb,
-		.sent_sel = ICM20948_SENT_SPI,
+		.systick_get_cb = HAL_GetTick,       // System tick getter callback
+		.pin_set_cb = dev_icm_pin_set_cb,     // Pin set callback
+		.spi_sent_cb = dev_icm_spi_sent_cb,   // SPI send callback
+		.sample_finish_cb = dev_icm_sample_finish_cb, // Sample finish callback
+		.sent_sel = ICM20948_SENT_SPI,       // SPI communication selected
 		.h_sample_p = {
-			.timeout = 5, },
+			.timeout = 5, // Sample timeout in ms
+        },
 		.h_debug = {
-			.b_init = true,
-//			.b_setting = true,
-//			.b_sample = true,
-				}, }, };
+			.b_init = true, // Enable init debug messages for IMU1
+        },
+    },
+};
 
-static int16_t imu_gravity_squ_avg_buff[DEV_IMU_NUM][DEV_IMU_VECTOR_AXIS_N][DEV_IMU_AVG_BUFF_SIZE] = { 0x0 };
-static h_moving_avg_i16_t h_imu_gravity_squ_avg[DEV_IMU_NUM][DEV_IMU_VECTOR_AXIS_N] =
+static int16_t imu_gravity_squ_avg_buff[DEV_IMU_NUM][DEV_IMU_VECTOR_AXIS_N][DEV_IMU_AVG_BUFF_SIZE] = { 0x0 }; ///< Buffer for IMU gravity square moving average.
+static h_moving_avg_i16_t h_imu_gravity_squ_avg[DEV_IMU_NUM][DEV_IMU_VECTOR_AXIS_N] = ///< Array of moving average handles for IMU gravity square.
 		{
 			[0][0] = {
 				.p_buff = imu_gravity_squ_avg_buff[0][0],
-				.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
+				.buff_len = DEV_IMU_AVG_BUFF_SIZE,
+            },
 			[0][1] = {
 				.p_buff = imu_gravity_squ_avg_buff[0][1],
-				.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
+				.buff_len = DEV_IMU_AVG_BUFF_SIZE,
+            },
 			[0][2] = {
 				.p_buff = imu_gravity_squ_avg_buff[0][2],
-				.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
+				.buff_len = DEV_IMU_AVG_BUFF_SIZE,
+            },
 			[1][0] = {
 				.p_buff = imu_gravity_squ_avg_buff[1][0],
-				.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
+				.buff_len = DEV_IMU_AVG_BUFF_SIZE,
+            },
 			[1][1] = {
 				.p_buff = imu_gravity_squ_avg_buff[1][1],
-				.buff_len = DEV_IMU_AVG_BUFF_SIZE, },
+				.buff_len = DEV_IMU_AVG_BUFF_SIZE,
+            },
 			[1][2] = {
 				.p_buff = imu_gravity_squ_avg_buff[1][2],
-				.buff_len = DEV_IMU_AVG_BUFF_SIZE, }, };
+				.buff_len = DEV_IMU_AVG_BUFF_SIZE,
+            },
+};
 
 
-static h_imu_t h_imu[DEV_IMU_NUM] = {
+static h_imu_t h_imu[DEV_IMU_NUM] = { ///< Array of IMU device handles.
 	[0] = {
 		.id = 0,
 		.p_h_icm20948 = &h_icm20948[0],
-		.b_g_log_en = true,
+		.b_g_log_en = true, // Enable gravity logging for IMU0 by default
 		.p_h_g_squ_avg[0] = &h_imu_gravity_squ_avg[0][0],
 		.p_h_g_squ_avg[1] = &h_imu_gravity_squ_avg[0][1],
 		.p_h_g_squ_avg[2] = &h_imu_gravity_squ_avg[0][2],
@@ -155,51 +181,57 @@ static h_imu_t h_imu[DEV_IMU_NUM] = {
 	[1] = {
 		.id = 1,
 		.p_h_icm20948 = &h_icm20948[1],
-		.b_g_log_en = true,
+		.b_g_log_en = true, // Enable gravity logging for IMU1 by default
 		.p_h_g_squ_avg[0] = &h_imu_gravity_squ_avg[1][0],
 		.p_h_g_squ_avg[1] = &h_imu_gravity_squ_avg[1][1],
 		.p_h_g_squ_avg[2] = &h_imu_gravity_squ_avg[1][2],
-			}, };
+			},
+};
 
-const double math_pi = 3.1415926535897932;
+const double math_pi = 3.1415926535897932; ///< Mathematical constant PI.
 
-static double dump_angle       = 60.0;
-static bool   b_dump           = false;
-static bool   b_dump_log       = false;
-static bool   b_dump_printf_en = false;
+static double dump_angle       = 60.0;  ///< Angle threshold for dump detection (degrees).
+static bool   b_dump           = false; ///< Flag indicating if dump is currently detected.
+static bool   b_dump_log       = false; ///< Logged state of dump detection (to detect changes).
+static bool   b_dump_printf_en = false; ///< Flag to enable printf messages for dump detection.
 
-static bool b_water_det     = false;
-static bool b_water_det_log = false;
-static bool b_water_det_en  = false;
+static bool b_water_det     = false; ///< Flag indicating if water is currently detected.
+static bool b_water_det_log = false; ///< Logged state of water detection (to detect changes).
+static bool b_water_det_en  = false; ///< Flag to enable water detection processing.
 
-#define DEV_LOG_SAVE_Q_LEN (2)
-static h_dev_log_t h_log_save_q[DEV_LOG_SAVE_Q_LEN];
-static uint8_t     log_save_q_update = 0;
-static uint8_t     log_save_q_new    = 0;
+#define DEV_LOG_SAVE_Q_LEN (2)                       ///< Length of the log save queue.
+static h_dev_log_t h_log_save_q[DEV_LOG_SAVE_Q_LEN]; ///< Queue for log entries to be saved.
+static uint8_t     log_save_q_update = 0;            ///< Index for updating the log save queue.
+static uint8_t     log_save_q_new    = 0;            ///< Index of the newest entry in the log save queue.
 
-static uint32_t log_save_time_start = 0;
+static uint32_t log_save_time_start = 0; ///< Start time for log saving period.
 
-static bool b_log_save_act      = false;
-static bool b_log_save_trigger  = false;
-static bool b_log_save_overflow = false;
-// static bool b_log_next_busy = false;
+static bool b_log_save_act      = false; ///< Flag indicating if log saving is active.
+static bool b_log_save_trigger  = false; ///< Flag to trigger saving a new log entry.
+static bool b_log_save_overflow = false; ///< Flag indicating log save queue overflow.
 
-static bool b_log_erase_all_printf = false;
+static bool b_log_erase_all_printf = false; ///< Flag to enable printf message after erasing all logs.
 
-static h_dev_log_t h_log_load;
+static h_dev_log_t h_log_load; ///< Buffer for loading a single log entry for reporting.
 
-static bool          b_log_report_act   = false;
-static uart_select_t log_report_uart_ch = UART_ALL;
+static bool          b_log_report_act   = false;    ///< Flag indicating if log reporting is active.
+static uart_select_t log_report_uart_ch = UART_ALL; ///< UART channel for log reporting.
 
 static h_dev_debug_t h_dev_debug = {
-    .b_init = true, .b_spi_init = true, .b_imu_sample_set = true,
-    //	.b_adc_sample = true,
-    //	.b_imu_sample = true,
+    ///< Device debug flags, initialized.
+    .b_init           = true,
+    .b_spi_init       = true,
+    .b_imu_sample_set = true,
 };
-static uint32_t imu_debug_sample_count = 0;
+static uint32_t imu_debug_sample_count = 0; ///< Counter for IMU samples for debugging.
 
-/* function */
+/* Function Definitions */
 
+/**
+ * @brief TIM period elapsed callback, used for IMU sampling trigger.
+ * @param htim Pointer to the TIM_HandleTypeDef structure that contains
+ *             the configuration information for the specified TIM module.
+ */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim == &IMU_SAMPLE_HAL_TIMER)
@@ -210,6 +242,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }
 
+/**
+ * @brief SPI TxRx complete callback.
+ *        Handles de-asserting CS and calling the finish callback.
+ * @param hspi Pointer to the SPI_HandleTypeDef structure that contains
+ *             the configuration information for the specified SPI module.
+ */
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     uint8_t channel = h_spi.channel;
@@ -229,6 +267,11 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
     }
 }
 
+/**
+ * @brief ADC sample finish callback (Placeholder/Legacy).
+ *        This function appears to be a placeholder or legacy code and may need review for removal or refactoring.
+ * @param sequence ADC sequence that finished sampling.
+ */
 void adc_sample_finish_cb(adc_seq_t sequence)
 { // POC3 review for removal
     h_sensor.adc_value[sequence] = adc_value_get(sequence);
@@ -272,21 +315,40 @@ void adc_sample_finish_cb(adc_seq_t sequence)
     }
 }
 
+/**
+ * @brief Flash FIFO write finish callback.
+ * @param p_h_flash Pointer to the flash FIFO handle.
+ * @param res Result of the flash FIFO write operation.
+ */
 void flash_fifo_write_finish_cb(h_flash_fifo_t *p_h_flash, flash_fifo_res_t res)
 {
     cmd_print_flash_fifo_write_finish(UART_DEBUG);
 }
 
+/**
+ * @brief Flash FIFO delete finish callback.
+ * @param p_h_flash Pointer to the flash FIFO handle.
+ * @param seq Sequence number of the deleted entry.
+ */
 void flash_fifo_delete_finish_cb(h_flash_fifo_t *p_h_flash, size_t seq)
 {
     cmd_print_flash_fifo_delete_finish(UART_DEBUG);
 }
 
+/**
+ * @brief Flash FIFO mark set finish callback.
+ * @param p_h_flash Pointer to the flash FIFO handle.
+ * @param p_h_mark Pointer to the mark structure.
+ */
 void flash_fifo_mark_set_finish_cb(h_flash_fifo_t *p_h_flash, h_flash_fifo_mark_t *p_h_mark)
 {
     cmd_print_flash_fifo_delete_finish(UART_DEBUG);
 }
 
+/**
+ * @brief Flash FIFO erase finish callback.
+ * @param p_h_flash Pointer to the flash FIFO handle.
+ */
 void flash_fifo_erase_finish_cb(h_flash_fifo_t *p_h_flash)
 {
     if (b_log_erase_all_printf)
@@ -296,6 +358,12 @@ void flash_fifo_erase_finish_cb(h_flash_fifo_t *p_h_flash)
     }
 }
 
+/**
+ * @brief Callback to set ICM20948 pin state.
+ * @param id IMU ID.
+ * @param pin Pin to set (e.g., power pin).
+ * @param b_status Desired pin state (true for high, false for low).
+ */
 static void dev_icm_pin_set_cb(uint8_t id, icm20948_pin_t pin, bool b_status)
 {
     switch (pin)
@@ -307,6 +375,12 @@ static void dev_icm_pin_set_cb(uint8_t id, icm20948_pin_t pin, bool b_status)
     }
 }
 
+/**
+ * @brief Callback to send data over SPI for ICM20948.
+ * @param id IMU ID.
+ * @param p_h_spi Pointer to ICM20948 SPI transaction parameters.
+ * @return True if SPI send was initiated successfully, false otherwise.
+ */
 static bool dev_icm_spi_sent_cb(uint8_t id, h_icm20948_spi_t *p_h_spi)
 {
     if (id >= DEV_IMU_NUM)
@@ -323,6 +397,10 @@ static bool dev_icm_spi_sent_cb(uint8_t id, h_icm20948_spi_t *p_h_spi)
     return dev_spi_send(&h_spi_sent) == DEV_RES_SUCCESS;
 }
 
+/**
+ * @brief Callback for ICM20948 SPI transaction completion.
+ * @param p_h_spi Pointer to device SPI send parameters.
+ */
 static void dev_icm_spi_finish_cb(h_dev_spi_send_t *p_h_spi)
 {
     uint8_t id = p_h_spi->channel;
@@ -333,6 +411,11 @@ static void dev_icm_spi_finish_cb(h_dev_spi_send_t *p_h_spi)
     icm20948_sent_finish(&h_icm20948[id], ICM20948_RES_OK);
 }
 
+/**
+ * @brief Callback for ICM20948 sample data ready.
+ *        Copies sample data, handles overflow, and triggers further processing.
+ * @param id IMU ID.
+ */
 static void dev_icm_sample_finish_cb(uint8_t id)
 {
     static bool    imu_status[2];
@@ -383,6 +466,10 @@ static void dev_icm_sample_finish_cb(uint8_t id)
 //__weak void imu_update_finish_cb(void) {
 //}
 
+/**
+ * @brief Callback function called when IMU data update is finished.
+ *        Processes IMU data for dump detection and logging.
+ */
 void imu_update_finish_cb(void)
 {
     b_dump = h_imu[0].h_accel.angle >= dump_angle;
@@ -463,6 +550,9 @@ void imu_update_finish_cb(void)
     // if(live_imu) imu_compare(&h_imu[0], &h_imu[1]);
 }
 
+/**
+ * @brief Resets the maximum acceleration values stored in flash_value.
+ */
 void flash_data_reset(void)
 {
     flash_value.acc_x_max = 0;
@@ -470,7 +560,11 @@ void flash_data_reset(void)
     flash_value.acc_z_max = 0;
 }
 
-void dev_spi_init(uint8_t channel)
+/**
+ * @brief Initializes an SPI channel with the correct prescaler for ICM20948 communication.
+ * @param channel SPI channel index.
+ */
+static void dev_spi_init(uint8_t channel)
 {
     if (channel >= DEV_SPI_CH_NUM)
     {
@@ -508,10 +602,18 @@ void dev_spi_init(uint8_t channel)
     }
 }
 
+/**
+ * @brief Starts the device initialization process.
+ */
 void device_init_start(void)
 {
     b_init_finish = false;
 }
+
+/**
+ * @brief Gets the device initialization completion status.
+ * @return True if initialization is complete, false otherwise.
+ */
 bool device_init_finish_get(void)
 {
     //	uart_tx_channel_set(UART_UPHOLE);
@@ -523,6 +625,10 @@ bool device_init_finish_get(void)
     return b_init_finish;
 }
 
+/**
+ * @brief Main processing loop for the device. Handles initialization, command processing,
+ *        sensor data processing (Radar, Temp, Void, IMU), and logging.
+ */
 void device_process(void)
 {
     if (b_init_finish == false)
@@ -554,13 +660,21 @@ void device_process(void)
     dev_debug_process();
 }
 
+/**
+ * @brief Restarts device components, resetting IMU and water detection.
+ */
 void device_restart(void)
 {
     imu_reset(&h_imu[0], &h_imu[1]); // NC
     water_reset();
 }
 
-bool dev_init_process(void)
+/**
+ * @brief Internal state machine for device initialization.
+ *        Initializes SPI, ADC, UART, Command handling, Flash, and ICM20948 IMUs.
+ * @return True when initialization is complete, false otherwise.
+ */
+static bool dev_init_process(void)
 {
     typedef enum step_
     {
@@ -704,6 +818,12 @@ bool dev_init_process(void)
     return b_init_finish;
 }
 
+/**
+ * @brief Processes data from a single IMU.
+ *        Calculates vector lengths, angles, and handles gravity vector calibration.
+ * @param p_h_imu Pointer to the IMU handle.
+ * @return True if IMU processing is ongoing, false if idle.
+ */
 static bool imu_process(h_imu_t *p_h_imu)
 {
     typedef enum step_
@@ -874,6 +994,10 @@ static bool imu_process(h_imu_t *p_h_imu)
     return p_h_imu->step != STEP_IDLE;
 }
 
+/**
+ * @brief Manages saving log data to flash FIFO.
+ * @return True if log saving is active, false otherwise.
+ */
 static bool log_save_process(void)
 {
     typedef enum step_
@@ -934,6 +1058,10 @@ static bool log_save_process(void)
     return step != STEP_IDLE;
 }
 
+/**
+ * @brief Manages loading and reporting log data from flash FIFO.
+ * @return True if log reporting is active, false otherwise.
+ */
 static bool log_load_process(void)
 {
     typedef enum step_
@@ -989,6 +1117,9 @@ static bool log_load_process(void)
     return true;
 }
 
+/**
+ * @brief Handles periodic debug printouts for various device modules.
+ */
 static void dev_debug_process(void)
 {
     if (h_dev_debug.b_adc_sample)
@@ -1118,15 +1249,29 @@ static void dev_debug_process(void)
     }
 }
 
+/**
+ * @brief Sets the device debug print flags.
+ * @param p_h_flag Pointer to the debug flag structure to set.
+ */
 void dev_printf_debug_set(h_dev_debug_t *p_h_flag)
 {
     memcpy(&h_dev_debug, p_h_flag, sizeof(h_dev_debug_t));
 }
+
+/**
+ * @brief Gets the current device debug print flags.
+ * @param p_h_flag Pointer to a structure to store the current debug flags.
+ */
 void dev_printf_debug_get(h_dev_debug_t *p_h_flag)
 {
     memcpy(p_h_flag, &h_dev_debug, sizeof(h_dev_debug_t));
 }
 
+/**
+ * @brief Sends data over SPI using DMA.
+ * @param p_h_spi Pointer to the SPI send parameters structure.
+ * @return Result of the SPI send operation (dev_res_t).
+ */
 dev_res_t dev_spi_send(h_dev_spi_send_t *p_h_spi)
 {
     uint8_t channel = p_h_spi->channel;
@@ -1175,6 +1320,10 @@ dev_res_t dev_spi_send(h_dev_spi_send_t *p_h_spi)
     return res;
 }
 
+/**
+ * @brief Enables or disables dump detection printf messages.
+ * @param b_enable True to enable, false to disable.
+ */
 void dev_dump_printf_set(bool b_enable)
 {
     b_dump_printf_en = b_enable;
@@ -1184,11 +1333,19 @@ void dev_dump_printf_set(bool b_enable)
     }
 }
 
+/**
+ * @brief Gets the current dump detection status.
+ * @return True if dump is detected, false otherwise.
+ */
 bool dev_dump_get(void)
 {
     return b_dump;
 }
 
+/**
+ * @brief Enables or disables water detection printf messages.
+ * @param b_enable True to enable, false to disable.
+ */
 void dev_water_det_printf_set(bool b_enable)
 {
     b_water_det_en = b_enable;
@@ -1198,11 +1355,19 @@ void dev_water_det_printf_set(bool b_enable)
     }
 }
 
+/**
+ * @brief Gets the current water detection status.
+ * @return True if water is detected, false otherwise.
+ */
 bool dev_water_det_get(void)
 {
     return b_water_det;
 }
 
+/**
+ * @brief Sets the IMU sample rate by configuring the timer period.
+ * @param sample_rate The desired sample rate in Hz.
+ */
 void imu_sample_rate_set(double sample_rate)
 {
     uint32_t period_tick = HAL_RCC_GetPCLK1Freq() / sample_rate;
@@ -1222,6 +1387,11 @@ void imu_sample_rate_set(double sample_rate)
     }
 }
 
+/**
+ * @brief Enables or disables gravity vector logging for a specific IMU.
+ * @param imu_select IMU index (0 or 1).
+ * @param b_enable True to enable, false to disable.
+ */
 void imu_g_log_en_set(uint8_t imu_select, bool b_enable)
 {
     if (imu_select >= DEV_IMU_NUM)
@@ -1231,6 +1401,11 @@ void imu_g_log_en_set(uint8_t imu_select, bool b_enable)
     h_imu[imu_select].b_g_log_en = b_enable;
 }
 
+/**
+ * @brief Checks if gravity vector logging is busy for a specific IMU.
+ * @param imu_select IMU index (0 or 1).
+ * @return True if logging is busy or enabled, false otherwise.
+ */
 bool imu_g_log_busy_get(uint8_t imu_select)
 {
     h_imu_t *p_h_imu  = &h_imu[imu_select];
@@ -1239,6 +1414,11 @@ bool imu_g_log_busy_get(uint8_t imu_select)
     return b_finish;
 }
 
+/**
+ * @brief Checks if an IMU data overflow has occurred.
+ * @param imu_select IMU index (0 or 1).
+ * @return True if no overflow, false if overflow occurred.
+ */
 bool imu_overflow_get(uint8_t imu_select)
 {
     if (imu_select >= DEV_IMU_NUM)
@@ -1248,6 +1428,10 @@ bool imu_overflow_get(uint8_t imu_select)
     return h_imu[imu_select].b_overflow == false;
 }
 
+/**
+ * @brief Clears the IMU data overflow flag for a specific IMU.
+ * @param imu_select IMU index (0 or 1).
+ */
 void imu_overflow_clear(uint8_t imu_select)
 {
     if (imu_select >= DEV_IMU_NUM)
@@ -1258,6 +1442,10 @@ void imu_overflow_clear(uint8_t imu_select)
 }
 
 
+/**
+ * @brief Initiates erasing all logs from flash.
+ * @return True if erase command was accepted, false if busy.
+ */
 bool dev_log_erase_all_set(void)
 {
     b_log_erase_all_printf = true;
@@ -1270,11 +1458,20 @@ bool dev_log_erase_all_set(void)
     return true;
 }
 
+/**
+ * @brief Checks if the log erase operation is busy.
+ * @return True if erase is in progress, false otherwise.
+ */
 bool dev_log_erase_busy_get(void)
 {
     return h_flash_fifo_1.b_erase_busy;
 }
 
+/**
+ * @brief Enables or disables saving logs to flash.
+ * @param b_enable True to enable, false to disable.
+ * @return True if the new state was set, false if enabling failed (e.g., no space).
+ */
 bool dev_log_save_enable_set(bool b_enable)
 {
     if (flash_fifo_pack_n_get_free(&h_flash_fifo_1) <= 0)
@@ -1295,25 +1492,38 @@ bool dev_log_save_enable_set(bool b_enable)
     return b_enable;
 }
 
+/**
+ * @brief Checks if the log saving operation is busy.
+ * @return True if saving is active or flash write is busy, false otherwise.
+ */
 bool dev_log_save_busy_get(void)
 {
     return b_log_save_act || h_flash_fifo_1.h_write.b_busy;
 }
 
+/**
+ * @brief Checks if a log save overflow has occurred.
+ * @return True if an overflow occurred, false otherwise.
+ */
 bool dev_log_save_overflow_get(void)
 {
     return b_log_save_overflow;
 }
 
-// size_t dev_log_save_free_space_get(void) {
-//	return flash_fifo_pack_n_get_free(&h_flash_fifo_1);
-// }
-
+/**
+ * @brief Sets the UART channel for log reporting.
+ * @param channel The UART channel to use for reporting.
+ */
 void dev_log_report_uart_ch_set(uart_select_t channel)
 {
     log_report_uart_ch = channel;
 }
 
+/**
+ * @brief Enables or disables reporting logs via UART.
+ * @param b_enable True to enable, false to disable.
+ * @return True if the new state was set, false if enabling failed (e.g., no logs).
+ */
 bool dev_log_report_enable_set(bool b_enable)
 {
     if (flash_fifo_pack_n_get_saved(&h_flash_fifo_1) <= 0)
@@ -1324,33 +1534,28 @@ bool dev_log_report_enable_set(bool b_enable)
     return b_enable;
 }
 
+/**
+ * @brief Checks if the log reporting operation is busy.
+ * @return True if reporting is active, false otherwise.
+ */
 bool dev_log_report_busy_get(void)
 {
     return b_log_report_act;
 }
 
+/**
+ * @brief Gets the currently loaded log data (used during report).
+ * @param p_h_log Pointer to a structure to store the log data.
+ */
 void dev_log_data_get(h_dev_log_t *p_h_log)
 {
     memcpy(p_h_log, &h_log_load, sizeof(h_dev_log_t));
 }
 
-// log_res_t dev_log_data_next(void) {
-//	if (b_log_next_busy)
-//		return LOG_RES_BUSY;
-//	b_log_next_busy = true;
-//	flash_fifo_res_t res = flash_fifo_delete_front(&h_flash_fifo_1);
-//	switch (res) {
-//	case FLASH_FIFO_RES_OK:
-//		return LOG_RES_OK;
-//	case FLASH_FIFO_RES_BUSY:
-//		b_log_next_busy = false;
-//		return LOG_RES_BUSY;
-//	default:
-//		b_log_next_busy = false;
-//		return LOG_RES_ERROR;
-//	}
-// }
-
+/**
+ * @brief Puts the device into a low-power sleep mode (STOP mode).
+ *        Disables peripherals and configures wakeup from UART RX event.
+ */
 void dev_sleep(void)
 {
     printf("@db,Downhole sleep\r\n");
@@ -1420,6 +1625,11 @@ void dev_sleep(void)
     cmd_print_wake(UART_ALL);
 }
 
+/**
+ * @brief Updates a moving average filter for float values.
+ * @param p_h_avg Pointer to the moving average filter handle.
+ * @param new_data New data point to add to the average.
+ */
 void moving_avg_f_update(h_moving_avg_f_t *p_h_avg, float new_data)
 {
     if (p_h_avg->p_buff == NULL)
@@ -1442,6 +1652,10 @@ void moving_avg_f_update(h_moving_avg_f_t *p_h_avg, float new_data)
     p_h_avg->avg = p_h_avg->sum / p_h_avg->data_len;
 }
 
+/**
+ * @brief Resets a moving average filter for float values.
+ * @param p_h_avg Pointer to the moving average filter handle.
+ */
 void moving_avg_f_reset(h_moving_avg_f_t *p_h_avg)
 {
     memset(p_h_avg->p_buff, 0x0, sizeof(*p_h_avg->p_buff) * p_h_avg->buff_len);
@@ -1451,6 +1665,11 @@ void moving_avg_f_reset(h_moving_avg_f_t *p_h_avg)
     p_h_avg->avg      = 0;
 }
 
+/**
+ * @brief Updates a moving average filter for int16_t values.
+ * @param p_h_avg Pointer to the moving average filter handle.
+ * @param new_data New data point to add to the average.
+ */
 void moving_avg_i16_update(h_moving_avg_i16_t *p_h_avg, int16_t new_data)
 {
     if (p_h_avg->p_buff == NULL)
@@ -1473,6 +1692,10 @@ void moving_avg_i16_update(h_moving_avg_i16_t *p_h_avg, int16_t new_data)
     p_h_avg->avg = p_h_avg->sum / p_h_avg->data_len;
 }
 
+/**
+ * @brief Resets a moving average filter for int16_t values.
+ * @param p_h_avg Pointer to the moving average filter handle.
+ */
 void moving_avg_i16_reset(h_moving_avg_i16_t *p_h_avg)
 {
     //	memset(p_h_avg->p_buff, 0x0, sizeof(*p_h_avg->p_buff) * p_h_avg->buff_len);
