@@ -63,6 +63,8 @@ static uint8_t  calculate_confidence(const radar_distance_t *radar_data, bool vo
 static void     update_measurement_data(const radar_distance_t *radar_data);
 static void     generate_void_event(bool detected, uint8_t confidence, const char *algorithm_name);
 static bool     validate_radar_data(const radar_distance_t *radar_data);
+static void     void_send_automatic_stream_internal(void);
+
 
 /*------------------------------------------------------------------------------
  * Circle Fitting Functions
@@ -122,7 +124,8 @@ bool void_is_system_ready(void)
 
 void void_system_process(void)
 {
-    if (!void_state.system_initialized)
+    // Update system state
+    if (!void_is_system_ready())
     {
         return;
     }
@@ -146,10 +149,10 @@ void void_system_process(void)
         }
     }
 
-    // Handle automatic data streaming (ADD THIS)
+    // Handle automatic data streaming
     if (system_is_operational_mode())
     {
-        void_send_automatic_stream_internal(); // Internal function
+        void_send_automatic_stream_internal(); // This call is now properly declared
     }
 }
 
