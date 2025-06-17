@@ -2,12 +2,12 @@
 
 ## Overview
 
-This document provides a complete step-by-step guide for implementing a clean, layered radar system data flow. The system consists of three distinct layers with clear data structures and minimal coupling between non-adjacent layers.
+This document provides a complete step-by-step guide for implementing a clean, layered radar system data flow. The system consists of three distinct layers with clear data structures and minimal coupling between non-adjacent layers. The CAN layer handles both sensor configuration and continuous data reception.
 
 ## Target Architecture
 
 ```
-CAN Bus → CAN Layer (radar_raw) → Radar Layer (radar_distance) → Void Detection Layer (void_data) → Reporting
+CAN Bus → CAN Layer (radar_raw + config) → Radar Layer (radar_distance) → Void Detection Layer (void_data) → Reporting
 ```
 
 ### Design Principles
@@ -17,14 +17,32 @@ CAN Bus → CAN Layer (radar_raw) → Radar Layer (radar_distance) → Void Dete
 3. **Unidirectional Data Flow**: Data flows forward through layers without circular dependencies
 4. **Event-Driven Processing**: New data triggers processing cascades through the system
 5. **Robust Error Handling**: Each layer validates inputs and handles errors gracefully
+6. **Complete CAN Management**: CAN layer handles both sensor configuration and data reception
+
+## CAN Layer Responsibilities
+
+The CAN layer has two primary responsibilities:
+
+### 1. Sensor Configuration and Control
+- Initialize sensors via CAN commands
+- Configure sensor parameters (power, FOV, detection thresholds)
+- Monitor sensor status and health
+- Handle sensor start/stop operations
+
+### 2. Continuous Data Reception
+- Receive raw radar data from multiple sensors
+- Parse and validate incoming CAN messages
+- Store raw data in `radar_raw_t` structures
+- Notify radar layer of new data availability
 
 ## Current State Analysis
 
 ### What's Working Well
 
 - ✅ CAN message reception and parsing
-- ✅ Multi-sensor management and indexing
+- ✅ Multi-sensor management and indexing  
 - ✅ Basic data validation and filtering
+- ✅ Sensor command transmission
 - ✅ Void detection algorithms (bypass, threshold, circle fitting)
 - ✅ Debug output and system monitoring
 
@@ -34,922 +52,1242 @@ CAN Bus → CAN Layer (radar_raw) → Radar Layer (radar_distance) → Void Dete
 - ❌ Direct void layer calls from CAN layer
 - ❌ Inconsistent struct naming conventions
 - ❌ No clear `radar_raw` → `radar_distance` → `void_data` flow
+- ❌ Configuration and data handling mixed in interface
 - ❌ Processing triggered from wrong layers
 
 ## Implementation Plan
 
 ---
 
-## PHASE 1: CAN Layer Restructuring
+## PHASE 1: CAN Layer Complete Restructuring (PRIORITY 1)
 
-### File: `mti_can.h`
+### File: `mti_radar_types.h` (NEW FILE - CREATE FIRST)
 
-#### Changes Required
-
-1. **Rename data structures for clarity**
+Create comprehensive type definitions for the entire pipeline:
 
 ```c
-// BEFORE: Inconsistent naming
-typedef struct radar_data_s {
-    float detectedPoints[MAX_RADAR_DETECTED_POINTS][2];
-    uint8_t numDetPoints;
-    // ... other fields
-} radar_data_t;
+/**
+ * @file mti_radar_types.h
+ * @brief Common type definitions for radar data processing pipeline
+ * @author MTi Group
+ * @copyright 2025 MTi Group
+ */
 
-// AFTER: Clear naming convention
-typedef struct radar_raw_s {
-    float detectedPoints[MAX_RADAR_DETECTED_POINTS][2];  // Raw sensor data [distance_m, SNR]
-    uint8_t numDetPoints;                                // Number of valid detection points
-    uint32_t frameNumber;                                // Frame sequence number
-    uint16_t totalPacketLength;                          // Total packet size in bytes
-    uint8_t pointIndex;                                  // Current point being processed
-    float maxSNR;                                        // Maximum SNR in this frame
-    bool new_data_ready;                                 // Flag indicating new frame complete
-    radar_hw_status_t status;                            // Hardware status from sensor
-    radar_version_t version;                             // Firmware version information
-    uint32_t timestamp_ms;                               // When this data was received
+#ifndef MTI_RADAR_TYPES_H
+#define MTI_RADAR_TYPES_H
+
+#include "stm32f7xx.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+/** @name System Configuration Constants */
+#define MAX_RADAR_SENSORS 3U
+#define MAX_RADAR_DETECTED_POINTS 20U
+
+/** @name Sensor Angular Positions */
+#define SENSOR_0_ANGLE 0
+#define SENSOR_1_ANGLE 120
+#define SENSOR_2_ANGLE 240
+
+/** @name CAN Configuration Constants */
+#define CAN_SENSOR_ID_OFFSET(sensor_idx) ((sensor_idx) * 0x10U)
+#define CAN_CONFIG_RETRY_COUNT 3
+#define CAN_CONFIG_TIMEOUT_MS 1000
+#define CAN_INIT_SEQUENCE_TIMEOUT_MS 5000
+
+/** @name Data Processing Constants */
+#define RADAR_MIN_SNR_THRESHOLD 50.0f
+#define RADAR_MIN_DISTANCE_M 0.05f
+#define RADAR_MAX_DISTANCE_M 3.0f
+#define RADAR_DATA_TIMEOUT_MS 2000
+#define RADAR_INVALID_DISTANCE 0xFFFF
+
+/**
+ * @brief Radar hardware status enumeration
+ */
+typedef enum {
+    RADAR_HW_NOT_INITIALISED = 0,
+    RADAR_HW_READY = 1,
+    RADAR_HW_CHIRPING = 2,
+    RADAR_HW_STOPPED = 3,
+    RADAR_HW_ERROR = 4
+} radar_hw_status_t;
+
+/**
+ * @brief Radar firmware version information
+ */
+typedef struct {
+    uint8_t major;
+    uint8_t minor;
+    uint8_t patch;
+    uint32_t build_number;
+} radar_version_t;
+
+/**
+ * @brief Sensor configuration parameters
+ */
+typedef struct {
+    uint8_t sensor_id;              // CAN sensor ID (0-2)
+    uint8_t power_level;            // TX power (0-100%)
+    uint8_t fov_degrees;            // Field of view (60-150°)
+    float cfar_threshold;           // CFAR detection threshold
+    uint8_t profile_id;             // Chirp profile (1-4)
+    bool spread_spectrum_enabled;   // Spread spectrum on/off
+} radar_sensor_config_t;
+
+/**
+ * @brief Sensor status and health information
+ */
+typedef struct {
+    uint8_t sensor_id;              // Sensor index
+    radar_hw_status_t hw_status;    // Hardware status from sensor
+    radar_version_t version;        // Firmware version
+    uint32_t last_response_ms;      // Last successful command response
+    uint32_t message_count;         // Total messages received
+    bool configuration_complete;    // Sensor fully configured
+    bool online;                    // Currently responding
+} radar_sensor_status_t;
+
+/**
+ * @brief Raw sensor data from CAN bus (Stage 1)
+ * 
+ * Contains unprocessed data exactly as received from radar sensors
+ */
+typedef struct {
+    float detected_points[MAX_RADAR_DETECTED_POINTS][2];  // [distance_m, SNR]
+    uint8_t num_points;                                   // Number of valid points
+    uint32_t frame_number;                                // Frame counter from sensor
+    uint16_t total_packet_length;                         // Total packet size
+    uint8_t point_index;                                  // Current point being processed
+    float max_snr;                                        // Maximum SNR in frame
+    uint32_t timestamp_ms;                                // When data was received
+    bool new_data_available;                              // Flag for event processing
+    radar_sensor_status_t sensor_status;                  // Complete sensor status
 } radar_raw_t;
 
-typedef struct multi_radar_system_s {
-    radar_raw_t sensors[MAX_RADAR_SENSORS];              // Raw data from each sensor
-    bool sensor_online[MAX_RADAR_SENSORS];               // Online status flags
-    uint32_t last_message_timestamp[MAX_RADAR_SENSORS];  // Last message received time
-    uint32_t msgs_received[MAX_RADAR_SENSORS];           // Message counters for diagnostics
-    uint8_t active_sensor_count;                         // Cached count of online sensors
-} multi_radar_system_t;
+/**
+ * @brief Processed distance measurements (Stage 2)
+ * 
+ * Contains clean, validated measurements ready for void detection
+ */
+typedef struct {
+    uint16_t distance_mm[MAX_RADAR_SENSORS];  // Clean distances in millimeters
+    uint16_t angle_deg[MAX_RADAR_SENSORS];    // Sensor angles (0, 120, 240)
+    bool data_valid[MAX_RADAR_SENSORS];       // Validity flags per sensor
+    float confidence[MAX_RADAR_SENSORS];      // Confidence per sensor (0.0-1.0)
+    uint8_t quality_score[MAX_RADAR_SENSORS]; // Signal quality (0-100)
+    uint8_t valid_sensor_count;               // Number of sensors with valid data
+    uint32_t timestamp_ms;                    // When processing completed
+    bool system_healthy;                      // Overall system health
+} radar_distance_t;
+
+/**
+ * @brief Void detection algorithm enumeration
+ */
+typedef enum {
+    VOID_ALG_BYPASS = 0,
+    VOID_ALG_SIMPLE_THRESHOLD = 1,
+    VOID_ALG_CIRCLEFIT = 2
+} void_algorithm_t;
+
+/**
+ * @brief Void severity levels
+ */
+typedef enum {
+    VOID_SEVERITY_NONE = 0,
+    VOID_SEVERITY_MINOR = 1,
+    VOID_SEVERITY_MAJOR = 2,
+    VOID_SEVERITY_CRITICAL = 3
+} void_severity_t;
+
+/**
+ * @brief Void detection results (Stage 3)
+ * 
+ * Contains final analysis results ready for uphole transmission
+ */
+typedef struct {
+    bool void_detected;                       // Primary detection result
+    void_severity_t severity;                 // Severity level
+    uint8_t confidence_percent;               // Detection confidence (0-100)
+    void_algorithm_t algorithm_used;          // Algorithm that produced result
+    uint16_t void_size_mm;                    // Estimated void size
+    uint8_t sensor_count_used;                // Sensors used for detection
+    uint32_t detection_time_ms;               // When analysis completed
+    char status_text[64];                     // Human-readable status
+    bool new_result_available;                // Flag for transmission
+    
+    // Individual sensor results
+    struct {
+        bool detected[MAX_RADAR_SENSORS];         // Per-sensor detection flags
+        uint8_t confidence[MAX_RADAR_SENSORS];    // Per-sensor confidence
+        uint16_t distance_mm[MAX_RADAR_SENSORS];  // Distances used for detection
+    } sensor_data;
+    
+    // Algorithm-specific results
+    union {
+        struct {
+            uint16_t threshold_used_mm;
+            uint16_t baseline_used_mm;
+        } threshold_data;
+        
+        struct {
+            uint16_t center_x_mm;
+            uint16_t center_y_mm;
+            uint16_t radius_mm;
+            uint8_t sensors_used;
+            uint16_t fit_error_mm;
+        } circle_data;
+    } algorithm_result;
+} void_data_t;
+
+#endif // MTI_RADAR_TYPES_H
 ```
 
-**Why**: Establishes clear naming convention and eliminates confusion between raw sensor data and processed measurements.
-
-2. **Add new accessor functions**
+### File: `mti_can.h` (COMPLETE REWRITE)
 
 ```c
-// New function declarations
-radar_raw_t* can_get_raw_sensor_data(uint8_t sensor_idx);
-bool can_has_new_data(uint8_t sensor_idx);
-void can_mark_data_processed(uint8_t sensor_idx);
-bool can_is_sensor_online(uint8_t sensor_idx);
-uint8_t can_get_active_sensor_count(void);
-```
+/**
+ * @file mti_can.h
+ * @brief CAN bus communication interface for radar sensors
+ * @author MTi Group
+ * @copyright 2025 MTi Group
+ */
 
-**Why**: Provides clean interface for radar layer to access raw data without exposing internal CAN structures.
+#ifndef MTI_CAN_H
+#define MTI_CAN_H
 
-### File: `mti_can.c`
+#include "stm32f7xx.h"
+#include <stdbool.h>
+#include "vmt_uart.h"
+#include "mti_radar_types.h"
 
-#### Changes Required
+/** @name CAN Message ID Definitions
+ * Based on actual IWR1843 AOP firmware implementation
+ * @{
+ */
+#define CAN_CMD_BASE      0x80U  /**< Base address for command messages */
+#define CAN_CMD_START     0x00U  /**< Command to start sensor operation */
+#define CAN_CMD_STOP      0x01U  /**< Command to stop sensor operation */
+#define CAN_CMD_CAL       0x02U  /**< Command to perform DC calibration */
+#define CAN_CMD_POWER     0x03U  /**< Command to set TX power backoff */
+#define CAN_CMD_STATUS    0x04U  /**< Command to request status and version */
+#define CAN_CMD_THRESHOLD 0x05U  /**< Command to set CFAR detection threshold */
+#define CAN_CMD_SPREAD    0x06U  /**< Command to enable/disable spread spectrum */
+#define CAN_CMD_PROFILE   0x07U  /**< Command to set chirp configuration profile */
+#define CAN_CMD_FOV       0x08U  /**< Command to set field of view */
+#define CAN_CMD_INIT      0x09U  /**< Command to initialize sensor */
 
-1. **Update global variable declaration**
+#define CAN_ID_HEADER_BASE   0xA0U  /**< Frame header messages */
+#define CAN_ID_OBJECT_BASE   0xA1U  /**< Detected object data */
+#define CAN_ID_STATUS_BASE   0xA8U  /**< Status response messages */
+#define CAN_ID_VERSION_BASE  0xA9U  /**< Version information messages */
+/** @} */
 
-```c
-// BEFORE:
-multi_radar_system_t radar_system = { 0 };
+/** @name Power Level Definitions
+ * @{
+ */
+#define RADAR_POWER_OFF    0     /**< Radar powered off */
+#define RADAR_POWER_LOW    25    /**< Low power mode (25%) */
+#define RADAR_POWER_MEDIUM 50    /**< Medium power mode (50%) */
+#define RADAR_POWER_HIGH   75    /**< High power mode (75%) */
+#define RADAR_POWER_MAX    100   /**< Maximum power (100%) */
+/** @} */
 
-// AFTER: (no change in declaration, but usage clarified)
-multi_radar_system_t radar_system = { 0 };  // This contains radar_raw_t data
-```
+/** @name Field of View Definitions
+ * @{
+ */
+#define RADAR_FOV_NARROW 60      /**< Narrow field of view (60°) */
+#define RADAR_FOV_MEDIUM 90      /**< Medium field of view (90°) */
+#define RADAR_FOV_WIDE   120     /**< Wide field of view (120°) */
+#define RADAR_FOV_MAX    150     /**< Maximum field of view (150°) */
+/** @} */
 
-2. **Modify `process_complete_radar_frame()` function**
+/**
+ * @brief Multi-sensor raw data system
+ */
+typedef struct {
+    radar_raw_t sensors[MAX_RADAR_SENSORS];                    // Raw data from each sensor
+    radar_sensor_status_t sensor_status[MAX_RADAR_SENSORS];    // Status for each sensor
+    uint32_t last_message_time[MAX_RADAR_SENSORS];             // Last message timestamps
+    uint32_t msgs_received[MAX_RADAR_SENSORS];                 // Message counters
+    uint8_t active_sensor_count;                               // Cached count
+    bool system_initialized;                                   // Initialization complete
+} multi_radar_raw_system_t;
 
-```c
-// BEFORE: Direct coupling to void layer
-void process_complete_radar_frame(uint8_t sensor_idx)
-{
-    radar_data_t *sensor = &radar_system.sensors[sensor_idx];
-    
-    debug_send("S%d: Frame %d complete with %d points", sensor_idx, sensor->frameNumber, sensor->numDetPoints);
-    
-    radar_system.last_message_timestamp[sensor_idx] = HAL_GetTick();
-    radar_system.sensor_online[sensor_idx] = true;
-    
-    // PROBLEM: Direct call to radar layer AND void layer
-    radar_process_measurement(sensor_idx, sensor->detectedPoints, sensor->numDetPoints);
-    void_process_new_sensor_data(sensor_idx);  // <- REMOVE THIS
-    
-    sensor->new_data_ready = false;
-}
+/** @name CAN System Initialization
+ * @{
+ */
 
-// AFTER: Clean separation - only call radar layer
-void process_complete_radar_frame(uint8_t sensor_idx)
-{
-    if (sensor_idx >= MAX_RADAR_SENSORS) {
-        debug_send("Error: Invalid sensor index %d", sensor_idx);
-        return;
-    }
-    
-    radar_raw_t *sensor = &radar_system.sensors[sensor_idx];
-    
-    debug_send("S%d: Frame %d complete with %d points", sensor_idx, sensor->frameNumber, sensor->numDetPoints);
-    
-    // Update system state
-    radar_system.last_message_timestamp[sensor_idx] = HAL_GetTick();
-    radar_system.sensor_online[sensor_idx] = true;
-    sensor->timestamp_ms = HAL_GetTick();
-    sensor->new_data_ready = true;
-    
-    // Update active sensor count cache
-    radar_system.active_sensor_count = get_active_sensor_count();
-    
-    // ONLY call radar layer - let it handle void layer notification
-    radar_notify_new_raw_data(sensor_idx);
-}
-```
+/**
+ * @brief Initialize complete CAN system with sensor configuration
+ * 
+ * Performs complete sensor initialization sequence:
+ * 1. Set up CAN filters and interrupts
+ * 2. Send initialization commands to all sensors
+ * 3. Configure sensor parameters (power, FOV, etc.)
+ * 4. Start continuous data streaming
+ * 
+ * @return true if initialization successful
+ */
+bool can_initialize_system(void);
 
-**Why**: Eliminates tight coupling between CAN and void layers. CAN layer now only knows about radar layer.
+/**
+ * @brief Setup CAN hardware filters and interrupts
+ * 
+ * @return true if hardware setup successful
+ */
+bool can_setup_hardware(void);
+/** @} */
 
-3. **Add new accessor functions**
+/** @name CAN Sensor Configuration
+ * @{
+ */
 
-```c
-// Add these new functions to mti_can.c
+/**
+ * @brief Configure a specific sensor with parameters
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param config Configuration parameters
+ * @return true if configuration successful
+ */
+bool can_configure_sensor(uint8_t sensor_idx, const radar_sensor_config_t* config);
+
+/**
+ * @brief Start continuous data streaming from a sensor
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @return true if start command sent successfully
+ */
+bool can_start_sensor_streaming(uint8_t sensor_idx);
+
+/**
+ * @brief Stop data streaming from a sensor
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @return true if stop command sent successfully
+ */
+bool can_stop_sensor_streaming(uint8_t sensor_idx);
+
+/**
+ * @brief Send power level command to sensor
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param power_percent Power level (0-100%)
+ * @return true if command sent successfully
+ */
+bool can_set_sensor_power(uint8_t sensor_idx, uint8_t power_percent);
+
+/**
+ * @brief Set sensor field of view
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param fov_degrees Field of view in degrees (60-150)
+ * @return true if command sent successfully
+ */
+bool can_set_sensor_fov(uint8_t sensor_idx, uint8_t fov_degrees);
+
+/**
+ * @brief Set sensor detection threshold
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param threshold CFAR threshold value
+ * @return true if command sent successfully
+ */
+bool can_set_sensor_threshold(uint8_t sensor_idx, float threshold);
+
+/**
+ * @brief Set sensor chirp profile
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param profile_id Profile ID (1-4)
+ * @return true if command sent successfully
+ */
+bool can_set_sensor_profile(uint8_t sensor_idx, uint8_t profile_id);
+
+/**
+ * @brief Enable/disable spread spectrum
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param enabled Enable spread spectrum
+ * @return true if command sent successfully
+ */
+bool can_set_sensor_spread_spectrum(uint8_t sensor_idx, bool enabled);
+
+/**
+ * @brief Request sensor status and version information
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @return true if request sent successfully
+ */
+bool can_request_sensor_status(uint8_t sensor_idx);
+/** @} */
+
+/** @name CAN Data Access Functions
+ * @{
+ */
 
 /**
  * @brief Get raw sensor data for processing by radar layer
- * @param sensor_idx Index of sensor (0 to MAX_RADAR_SENSORS-1)
+ * 
+ * @param sensor_idx Sensor index (0-2)
  * @return Pointer to raw sensor data or NULL if invalid
  */
-radar_raw_t* can_get_raw_sensor_data(uint8_t sensor_idx)
-{
-    if (sensor_idx >= MAX_RADAR_SENSORS) {
-        return NULL;
-    }
-    return &radar_system.sensors[sensor_idx];
-}
+radar_raw_t* can_get_raw_data(uint8_t sensor_idx);
 
 /**
  * @brief Check if sensor has new unprocessed data
- * @param sensor_idx Index of sensor
+ * 
+ * @param sensor_idx Sensor index (0-2)
  * @return true if new data is available
  */
-bool can_has_new_data(uint8_t sensor_idx)
+bool can_has_new_raw_data(uint8_t sensor_idx);
+
+/**
+ * @brief Mark sensor data as processed by radar layer
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ */
+void can_mark_raw_data_processed(uint8_t sensor_idx);
+
+/**
+ * @brief Get number of currently online sensors
+ * 
+ * @return Number of responding sensors (0-3)
+ */
+uint8_t can_get_online_sensor_count(void);
+
+/**
+ * @brief Check if specific sensor is online and responding
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @return true if sensor is online
+ */
+bool can_is_sensor_online(uint8_t sensor_idx);
+
+/**
+ * @brief Get complete sensor status information
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @return Pointer to sensor status or NULL if invalid
+ */
+radar_sensor_status_t* can_get_sensor_status(uint8_t sensor_idx);
+/** @} */
+
+/** @name CAN System Health and Diagnostics
+ * @{
+ */
+
+/**
+ * @brief Get overall CAN system health
+ * 
+ * @return true if system is healthy (>=2 sensors online)
+ */
+bool can_system_is_healthy(void);
+
+/**
+ * @brief Reset sensor data and status
+ * 
+ * @param sensor_idx Sensor index (0-2), or 0xFF for all sensors
+ */
+void can_reset_sensor_data(uint8_t sensor_idx);
+
+/**
+ * @brief Run CAN system diagnostics
+ */
+void can_run_diagnostics(void);
+
+/**
+ * @brief Get sensor index from CAN ID
+ * 
+ * @param can_id CAN message ID
+ * @return Sensor index or 0xFF if invalid
+ */
+uint8_t get_sensor_index_from_can_id(uint32_t can_id);
+/** @} */
+
+/** @name Low-Level CAN Functions
+ * @{
+ */
+
+/**
+ * @brief Send single byte command
+ * 
+ * @param ID CAN message ID
+ * @param message Command byte
+ * @return true if sent successfully
+ */
+bool can_send(uint32_t ID, uint8_t message);
+
+/**
+ * @brief Send array of data
+ * 
+ * @param ID CAN message ID
+ * @param message Data array
+ * @param length Data length
+ * @return true if sent successfully
+ */
+bool can_send_array(uint32_t ID, uint8_t *message, size_t length);
+
+/**
+ * @brief Send command to specific sensor
+ * 
+ * @param sensor_idx Sensor index (0-2)
+ * @param base_id Base command ID
+ * @param message Command data
+ * @return true if sent successfully
+ */
+bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message);
+/** @} */
+
+#endif // MTI_CAN_H
+```
+
+### File: `mti_can.c` (COMPLETE REWRITE)
+
+Since this is the priority, here's the complete implementation:
+
+````c
+/**
+ * @file mti_can.c
+ * @brief CAN bus communication implementation for radar sensors
+ * @author MTi Group
+ * @copyright 2025 MTi Group
+ */
+
+#include "can.h"
+#include "mti_can.h"
+#include "vmt_uart.h"
+#include "mti_system.h"
+#include <string.h>
+
+/*------------------------------------------------------------------------------
+ * Static Variables and Configuration
+ *----------------------------------------------------------------------------*/
+
+/** @brief Multi-sensor system instance */
+static multi_radar_raw_system_t raw_radar_system = { 0 };
+
+/** @brief Default sensor configurations */
+static const radar_sensor_config_t default_sensor_configs[MAX_RADAR_SENSORS] = {
+    { .sensor_id = 0, .power_level = 75, .fov_degrees = 120, .cfar_threshold = 100.0f, .profile_id = 2, .spread_spectrum_enabled = true },
+    { .sensor_id = 1, .power_level = 75, .fov_degrees = 120, .cfar_threshold = 100.0f, .profile_id = 2, .spread_spectrum_enabled = true },
+    { .sensor_id = 2, .power_level = 75, .fov_degrees = 120, .cfar_threshold = 100.0f, .profile_id = 2, .spread_spectrum_enabled = true }
+};
+
+/** @brief CAN hardware handles */
+static CAN_RxHeaderTypeDef rxHeader;
+static CAN_TxHeaderTypeDef txHeader;
+static uint8_t canRX[8] = { 0 };
+static CAN_FilterTypeDef canfil;
+static uint32_t canMailbox;
+
+/*------------------------------------------------------------------------------
+ * Forward Declarations
+ *----------------------------------------------------------------------------*/
+static bool can_configure_sensor_sequence(uint8_t sensor_idx, const radar_sensor_config_t* config);
+static bool can_wait_for_response(uint8_t sensor_idx, uint32_t timeout_ms);
+static bool can_send_init_command(uint8_t sensor_idx);
+static uint8_t get_active_sensor_count_internal(void);
+
+/*------------------------------------------------------------------------------
+ * CAN System Initialization
+ *----------------------------------------------------------------------------*/
+
+/**
+ * @brief Initialize complete CAN system with sensor configuration
+ */
+bool can_initialize_system(void)
+{
+    debug_send("CAN: Starting system initialization");
+    
+    // Step 1: Initialize CAN hardware
+    if (!can_setup_hardware()) {
+        debug_send("CAN: Hardware setup failed");
+        return false;
+    }
+    
+    // Step 2: Initialize data structures
+    memset(&raw_radar_system, 0, sizeof(raw_radar_system));
+    
+    // Step 3: Configure each sensor
+    uint8_t configured_sensors = 0;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
+        debug_send("CAN: Configuring sensor %d", i);
+        
+        if (can_configure_sensor_sequence(i, &default_sensor_configs[i])) {
+            configured_sensors++;
+            raw_radar_system.sensor_status[i].configuration_complete = true;
+            debug_send("CAN: Sensor %d configured successfully", i);
+        } else {
+            debug_send("CAN: Sensor %d configuration failed", i);
+        }
+        
+        // Small delay between sensor configurations
+        HAL_Delay(100);
+    }
+    
+    // Step 4: Start data streaming from configured sensors
+    uint8_t streaming_sensors = 0;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
+        if (raw_radar_system.sensor_status[i].configuration_complete) {
+            if (can_start_sensor_streaming(i)) {
+                streaming_sensors++;
+                debug_send("CAN: Sensor %d streaming started", i);
+            }
+            HAL_Delay(50);
+        }
+    }
+    
+    // Step 5: Update system state
+    raw_radar_system.active_sensor_count = streaming_sensors;
+    raw_radar_system.system_initialized = (streaming_sensors >= 2);
+    
+    debug_send("CAN: System initialization complete - %d/%d sensors online", 
+               streaming_sensors, MAX_RADAR_SENSORS);
+    
+    return raw_radar_system.system_initialized;
+}
+
+/**
+ * @brief Setup CAN hardware filters and interrupts
+ */
+bool can_setup_hardware(void)
+{
+    debug_send("CAN: Setting up hardware");
+    
+    // Configure filter 0 for command acknowledgments (0x80-0x8F)
+    canfil.FilterBank           = 0;
+    canfil.FilterMode           = CAN_FILTERMODE_IDMASK;
+    canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
+    canfil.FilterIdHigh         = ((0x00000080 << 3) | 0x4) >> 16;
+    canfil.FilterIdLow          = ((0x00000080 << 3) | 0x4) & 0xFFFF;
+    canfil.FilterMaskIdHigh     = ((0x000000F0 << 3) | 0x4) >> 16;
+    canfil.FilterMaskIdLow      = ((0x000000F0 << 3) | 0x4) & 0xFFFF;
+    canfil.FilterActivation     = ENABLE;
+    
+    if (HAL_CAN_ConfigFilter(&hcan1, &canfil) != HAL_OK) {
+        debug_send("CAN: Filter 0 configuration failed");
+        return false;
+    }
+    
+    // Configure filter 1 for data messages (0xA0-0xDF)
+    canfil.FilterBank           = 1;
+    canfil.FilterIdHigh         = ((0x000000A0 << 3) | 0x4) >> 16;
+    canfil.FilterIdLow          = ((0x000000A0 << 3) | 0x4) & 0xFFFF;
+    canfil.FilterMaskIdHigh     = ((0x000000E0 << 3) | 0x4) >> 16;
+    canfil.FilterMaskIdLow      = ((0x000000E0 << 3) | 0x4) & 0xFFFF;
+    
+    if (HAL_CAN_ConfigFilter(&hcan1, &canfil) != HAL_OK) {
+        debug_send("CAN: Filter 1 configuration failed");
+        return false;
+    }
+    
+    // Start CAN
+    if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+        debug_send("CAN: Start failed");
+        return false;
+    }
+    
+    // Enable receive interrupt
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
+        debug_send("CAN: Interrupt activation failed");
+        return false;
+    }
+    
+    debug_send("CAN: Hardware setup complete");
+    return true;
+}
+
+/*------------------------------------------------------------------------------
+ * Sensor Configuration Functions
+ *----------------------------------------------------------------------------*/
+
+/**
+ * @brief Complete sensor configuration sequence
+ */
+static bool can_configure_sensor_sequence(uint8_t sensor_idx, const radar_sensor_config_t* config)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !config) {
+        return false;
+    }
+    
+    debug_send("CAN: Starting configuration sequence for sensor %d", sensor_idx);
+    uint32_t start_time = HAL_GetTick();
+    uint8_t retry_count = 0;
+    
+    // Step 1: Send initialization command with retries
+    while (retry_count < CAN_CONFIG_RETRY_COUNT) {
+        if (can_send_init_command(sensor_idx)) {
+            if (can_wait_for_response(sensor_idx, CAN_CONFIG_TIMEOUT_MS)) {
+                debug_send("CAN: Sensor %d init acknowledged", sensor_idx);
+                break;
+            } else {
+                debug_send("CAN: Sensor %d init timeout (retry %d)", sensor_idx, retry_count + 1);
+            }
+        } else {
+            debug_send("CAN: Sensor %d init send failed (retry %d)", sensor_idx, retry_count + 1);
+        }
+        retry_count++;
+        HAL_Delay(200);
+    }
+    
+    if (retry_count >= CAN_CONFIG_RETRY_COUNT) {
+        debug_send("CAN: Sensor %d init failed after %d retries", sensor_idx, retry_count);
+        return false;
+    }
+    
+    // Step 2: Configure power level
+    if (!can_set_sensor_power(sensor_idx, config->power_level)) {
+        debug_send("CAN: Sensor %d power config failed", sensor_idx);
+        return false;
+    }
+    HAL_Delay(100);
+    
+    // Step 3: Configure field of view
+    if (!can_set_sensor_fov(sensor_idx, config->fov_degrees)) {
+        debug_send("CAN: Sensor %d FOV config failed", sensor_idx);
+        return false;
+    }
+    HAL_Delay(100);
+    
+    // Step 4: Set detection threshold
+    if (!can_set_sensor_threshold(sensor_idx, config->cfar_threshold)) {
+        debug_send("CAN: Sensor %d threshold config failed", sensor_idx);
+        return false;
+    }
+    HAL_Delay(100);
+    
+    // Step 5: Select chirp profile
+    if (!can_set_sensor_profile(sensor_idx, config->profile_id)) {
+        debug_send("CAN: Sensor %d profile config failed", sensor_idx);
+        return false;
+    }
+    HAL_Delay(100);
+    
+    // Step 6: Enable/disable spread spectrum
+    if (!can_set_sensor_spread_spectrum(sensor_idx, config->spread_spectrum_enabled)) {
+        debug_send("CAN: Sensor %d spread spectrum config failed", sensor_idx);
+        return false;
+    }
+    HAL_Delay(100);
+    
+    // Step 7: Request final status
+    can_request_sensor_status(sensor_idx);
+    HAL_Delay(100);
+    
+    uint32_t total_time = HAL_GetTick() - start_time;
+    debug_send("CAN: Sensor %d configured in %dms", sensor_idx, total_time);
+    
+    return true;
+}
+
+/**
+ * @brief Wait for response from sensor
+ */
+static bool can_wait_for_response(uint8_t sensor_idx, uint32_t timeout_ms)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS) {
         return false;
     }
-    return radar_system.sensors[sensor_idx].new_data_ready;
+    
+    uint32_t start_time = HAL_GetTick();
+    uint32_t initial_msg_count = raw_radar_system.msgs_received[sensor_idx];
+    
+    while ((HAL_GetTick() - start_time) < timeout_ms) {
+        if (raw_radar_system.msgs_received[sensor_idx] > initial_msg_count) {
+            return true;
+        }
+        HAL_Delay(10);
+    }
+    
+    return false;
 }
 
 /**
- * @brief Mark sensor data as processed by radar layer
- * @param sensor_idx Index of sensor
+ * @brief Send initialization command to sensor
  */
-void can_mark_data_processed(uint8_t sensor_idx)
+static bool can_send_init_command(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    return can_send(cmd_id, CAN_CMD_INIT);
+}
+
+/*------------------------------------------------------------------------------
+ * Individual Configuration Command Functions
+ *----------------------------------------------------------------------------*/
+
+bool can_configure_sensor(uint8_t sensor_idx, const radar_sensor_config_t* config)
+{
+    return can_configure_sensor_sequence(sensor_idx, config);
+}
+
+bool can_start_sensor_streaming(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    
+    if (can_send(cmd_id, CAN_CMD_START)) {
+        debug_send("CAN: Start command sent to sensor %d", sensor_idx);
+        return true;
+    }
+    
+    debug_send("CAN: Failed to send start command to sensor %d", sensor_idx);
+    return false;
+}
+
+bool can_stop_sensor_streaming(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    
+    if (can_send(cmd_id, CAN_CMD_STOP)) {
+        raw_radar_system.sensor_status[sensor_idx].online = false;
+        debug_send("CAN: Stop command sent to sensor %d", sensor_idx);
+        return true;
+    }
+    
+    return false;
+}
+
+bool can_set_sensor_power(uint8_t sensor_idx, uint8_t power_percent)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || power_percent > 100) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    uint8_t cmd_data[2] = { CAN_CMD_POWER, power_percent };
+    
+    return can_send_array(cmd_id, cmd_data, 2);
+}
+
+bool can_set_sensor_fov(uint8_t sensor_idx, uint8_t fov_degrees)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || fov_degrees < 60 || fov_degrees > 150) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    uint8_t cmd_data[2] = { CAN_CMD_FOV, fov_degrees };
+    
+    return can_send_array(cmd_id, cmd_data, 2);
+}
+
+bool can_set_sensor_threshold(uint8_t sensor_idx, float threshold)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    uint16_t threshold_int = (uint16_t)(threshold * 10.0f); // Convert to fixed point
+    uint8_t cmd_data[3] = { CAN_CMD_THRESHOLD, 
+                           (uint8_t)(threshold_int & 0xFF), 
+                           (uint8_t)((threshold_int >> 8) & 0xFF) };
+    
+    return can_send_array(cmd_id, cmd_data, 3);
+}
+
+bool can_set_sensor_profile(uint8_t sensor_idx, uint8_t profile_id)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || profile_id < 1 || profile_id > 4) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    uint8_t cmd_data[2] = { CAN_CMD_PROFILE, profile_id };
+    
+    return can_send_array(cmd_id, cmd_data, 2);
+}
+
+bool can_set_sensor_spread_spectrum(uint8_t sensor_idx, bool enabled)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    uint8_t cmd_data[2] = { CAN_CMD_SPREAD, enabled ? 1 : 0 };
+    
+    return can_send_array(cmd_id, cmd_data, 2);
+}
+
+bool can_request_sensor_status(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    
+    uint32_t cmd_id = CAN_CMD_BASE + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    return can_send(cmd_id, CAN_CMD_STATUS);
+}
+
+/*------------------------------------------------------------------------------
+ * CAN Message Reception and Processing
+ *----------------------------------------------------------------------------*/
+
+/**
+ * @brief CAN message reception interrupt handler
+ */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX) != HAL_OK) {
+        return;
+    }
+    
+    uint8_t sensor_idx = get_sensor_index_from_can_id(rxHeader.StdId);
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return;
+    }
+    
+    // Update sensor online status
+    raw_radar_system.last_message_time[sensor_idx] = HAL_GetTick();
+    raw_radar_system.sensor_status[sensor_idx].online = true;
+    raw_radar_system.msgs_received[sensor_idx]++;
+    
+    // Process based on message type
+    uint32_t base_msg_id = rxHeader.StdId & 0xF0; // Remove sensor offset
+    
+    switch (base_msg_id) {
+        case CAN_ID_HEADER_BASE:
+            process_header_message(sensor_idx, canRX);
+            break;
+            
+        case CAN_ID_OBJECT_BASE:
+            process_object_message(sensor_idx, canRX);
+            break;
+            
+        case CAN_ID_STATUS_BASE:
+            process_status_message(sensor_idx, canRX);
+            break;
+            
+        case CAN_ID_VERSION_BASE:
+            process_version_message(sensor_idx, canRX);
+            break;
+            
+        default:
+            debug_send("CAN: Unknown message ID 0x%03X from sensor %d", rxHeader.StdId, sensor_idx);
+    }
+}
+
+/**
+ * @brief Process header message from sensor
+ */
+void process_header_message(uint8_t sensor_idx, uint8_t *data)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !data) {
+        return;
+    }
+    
+    radar_raw_t *sensor = &raw_radar_system.sensors[sensor_idx];
+    
+    // Extract header information
+    sensor->frame_number = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | 
+                          ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+    sensor->total_packet_length = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+    sensor->num_points = data[6];
+    sensor->point_index = 0; // Reset for new frame
+    sensor->max_snr = 0.0f;  // Reset for new frame
+    
+    debug_send("CAN: S%d header - frame %d, %d points, %d bytes", 
+               sensor_idx, sensor->frame_number, sensor->num_points, sensor->total_packet_length);
+}
+
+/**
+ * @brief Process object detection message from sensor
+ */
+void process_object_message(uint8_t sensor_idx, uint8_t *data)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !data) {
+        return;
+    }
+    
+    radar_raw_t *sensor = &raw_radar_system.sensors[sensor_idx];
+    
+    if (sensor->point_index >= MAX_RADAR_DETECTED_POINTS) {
+        debug_send("CAN: S%d point buffer overflow", sensor_idx);
+        return;
+    }
+    
+    // Extract distance and SNR (assuming specific data format)
+    // This needs to match actual IWR1843 CAN message format
+    uint16_t distance_mm = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+    uint16_t snr_raw = (uint16_t)data[2] | ((uint16_t)data[3] << 8);
+    
+    // Convert to float values
+    float distance_m = (float)distance_mm / 1000.0f;
+    float snr = (float)snr_raw / 10.0f; // Assuming SNR is scaled by 10
+    
+    // Store in detected points array
+    sensor->detected_points[sensor->point_index][0] = distance_m;
+    sensor->detected_points[sensor->point_index][1] = snr;
+    
+    // Track maximum SNR
+    if (snr > sensor->max_snr) {
+        sensor->max_snr = snr;
+    }
+    
+    sensor->point_index++;
+    
+    // Check if frame is complete
+    if (sensor->point_index >= sensor->num_points) {
+        process_complete_radar_frame(sensor_idx);
+    }
+}
+
+/**
+ * @brief Process status message from sensor
+ */
+void process_status_message(uint8_t sensor_idx, uint8_t *data)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !data) {
+        return;
+    }
+    
+    radar_sensor_status_t *status = &raw_radar_system.sensor_status[sensor_idx];
+    
+    // Extract status information
+    status->hw_status = (radar_hw_status_t)data[0];
+    status->last_response_ms = HAL_GetTick();
+    
+    debug_send("CAN: S%d status - HW status: %d", sensor_idx, status->hw_status);
+}
+
+/**
+ * @brief Process version message from sensor
+ */
+void process_version_message(uint8_t sensor_idx, uint8_t *data)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !data) {
+        return;
+    }
+    
+    radar_sensor_status_t *status = &raw_radar_system.sensor_status[sensor_idx];
+    
+    // Extract version information
+    status->version.major = data[0];
+    status->version.minor = data[1];
+    status->version.patch = data[2];
+    status->version.build_number = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | 
+                                  ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    
+    debug_send("CAN: S%d version - %d.%d.%d build %d", 
+               sensor_idx, status->version.major, status->version.minor, 
+               status->version.patch, status->version.build_number);
+}
+
+/**
+ * @brief Process complete radar frame and notify radar layer
+ */
+void process_complete_radar_frame(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS) {
         return;
     }
-    radar_system.sensors[sensor_idx].new_data_ready = false;
+    
+    radar_raw_t *sensor = &raw_radar_system.sensors[sensor_idx];
+    
+    debug_send("CAN: S%d frame %d complete (%d points, max SNR=%.1f)", 
+               sensor_idx, sensor->frame_number, sensor->num_points, sensor->max_snr);
+    
+    // Update system state
+    sensor->timestamp_ms = HAL_GetTick();
+    sensor->new_data_available = true;
+    
+    // Update active sensor count
+    raw_radar_system.active_sensor_count = get_active_sensor_count_internal();
+    
+    // ONLY notify radar layer when both layers exist
+    #ifdef MTI_RADAR_H  // Only call if radar layer is implemented
+    radar_notify_new_raw_data(sensor_idx);
+    #else
+    debug_send("CAN: Radar layer not yet implemented - data stored in buffer");
+    #endif
 }
 
-/**
- * @brief Check if sensor is currently online
- * @param sensor_idx Index of sensor
- * @return true if sensor is responding
- */
+/*------------------------------------------------------------------------------
+ * Data Access Functions
+ *----------------------------------------------------------------------------*/
+
+radar_raw_t* can_get_raw_data(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return NULL;
+    }
+    return &raw_radar_system.sensors[sensor_idx];
+}
+
+bool can_has_new_raw_data(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
+    }
+    return raw_radar_system.sensors[sensor_idx].new_data_available;
+}
+
+void can_mark_raw_data_processed(uint8_t sensor_idx)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return;
+    }
+    raw_radar_system.sensors[sensor_idx].new_data_available = false;
+}
+
+uint8_t can_get_online_sensor_count(void)
+{
+    return raw_radar_system.active_sensor_count;
+}
+
 bool can_is_sensor_online(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS) {
         return false;
     }
-    return is_sensor_online(sensor_idx);  // Use existing function
+    
+    uint32_t current_time = HAL_GetTick();
+    uint32_t last_msg = raw_radar_system.last_message_time[sensor_idx];
+    
+    return (current_time - last_msg) < 3000; // 3 second timeout
 }
 
-/**
- * @brief Get number of currently active sensors
- * @return Number of online sensors (0 to MAX_RADAR_SENSORS)
- */
-uint8_t can_get_active_sensor_count(void)
-{
-    return radar_system.active_sensor_count;
-}
-```
-
-**Why**: Provides clean interface for radar layer to interact with CAN data without accessing internal structures directly.
-
----
-
-## PHASE 2: Radar Layer Restructuring
-
-### File: `mti_radar.h`
-
-#### Changes Required
-
-1. **Define `radar_distance_t` structure**
-
-```c
-// BEFORE: Single measurement structure
-typedef struct
-{
-    uint16_t distance_mm;    // Single distance to borehole wall in millimeters
-    uint16_t angle_deg;      // Angular position of this sensor (0, 120, 240)
-    bool     data_valid;     // Flag indicating if the measurement is valid
-    uint32_t timestamp_ms;   // Timestamp when measurement was taken
-} radar_measurement_t;
-
-// AFTER: Add clean data structure for processed measurements
-typedef struct
-{
-    uint16_t distance_mm;    // Single distance to borehole wall in millimeters
-    uint16_t angle_deg;      // Angular position of this sensor (0, 120, 240)
-    bool     data_valid;     // Flag indicating if the measurement is valid
-    uint32_t timestamp_ms;   // Timestamp when measurement was taken
-    float    confidence;     // Confidence in measurement (0.0 to 1.0)
-    uint8_t  quality_score;  // Signal quality score (0-100)
-} radar_measurement_t;
-
-// New structure for multi-sensor clean data
-typedef struct
-{
-    uint16_t distance_mm[MAX_RADAR_SENSORS];  // Clean distances in millimeters
-    uint16_t angle_deg[MAX_RADAR_SENSORS];    // Angular positions
-    bool     data_valid[MAX_RADAR_SENSORS];   // Validity flags per sensor
-    float    confidence[MAX_RADAR_SENSORS];   // Confidence per sensor
-    uint8_t  quality_score[MAX_RADAR_SENSORS]; // Quality scores
-    uint32_t timestamp_ms;                    // When this set was processed
-    uint8_t  valid_sensor_count;              // Number of sensors with valid data
-    bool     system_healthy;                  // Overall system health status
-} radar_distance_t;
-```
-
-**Why**: Creates clear distinction between individual sensor measurements and system-wide processed data ready for void detection.
-
-2. **Update function declarations**
-
-```c
-// BEFORE: Mixed responsibilities
-void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADAR_DETECTED_POINTS][2], uint8_t numPoints);
-radar_measurement_t *radar_get_measurement(uint8_t sensor_idx);
-
-// AFTER: Clear layer responsibilities
-// Raw data processing functions
-void radar_notify_new_raw_data(uint8_t sensor_idx);
-bool radar_process_raw_to_distance(radar_distance_t* output_data);
-void radar_update_single_sensor(uint8_t sensor_idx);
-
-// Clean data access functions  
-radar_distance_t* radar_get_distance_data(void);
-radar_measurement_t* radar_get_measurement(uint8_t sensor_idx);
-bool radar_has_valid_distance_data(void);
-
-// System status functions
-uint8_t radar_get_valid_sensor_count(void);
-bool radar_is_system_ready(void);
-```
-
-**Why**: Separates raw data processing from clean data access, making the API clearer.
-
-### File: `mti_radar.c`
-
-#### Changes Required
-
-1. **Add new static variables**
-
-```c
-// BEFORE: Only individual measurements
-static radar_measurement_t radar_measurements[MAX_RADAR_SENSORS] = { 0 };
-
-// AFTER: Add system-wide clean data structure
-static radar_measurement_t radar_measurements[MAX_RADAR_SENSORS] = { 0 };
-static radar_distance_t radar_clean_data = { 0 };  // NEW: System-wide clean data
-static bool sensors_updated[MAX_RADAR_SENSORS] = { false };  // NEW: Track updates
-```
-
-**Why**: Maintains both individual sensor data and system-wide processed data for different use cases.
-
-2. **Replace `radar_process_measurement()` with new functions**
-
-```c
-// REMOVE: Old function with mixed responsibilities
-void radar_process_measurement(uint8_t sensor_idx, float detectedPoints[MAX_RADAR_DETECTED_POINTS][2], uint8_t numPoints)
-{
-    // OLD IMPLEMENTATION - REMOVE ENTIRELY
-}
-
-// ADD: New notification function called by CAN layer
-void radar_notify_new_raw_data(uint8_t sensor_idx)
+radar_sensor_status_t* can_get_sensor_status(uint8_t sensor_idx)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS) {
-        debug_send("Error: Invalid sensor index %d", sensor_idx);
-        return;
+        return NULL;
     }
+    return &raw_radar_system.sensor_status[sensor_idx];
+}
+
+bool can_system_is_healthy(void)
+{
+    return raw_radar_system.system_initialized && 
+           (raw_radar_system.active_sensor_count >= 2);
+}
+
+/*------------------------------------------------------------------------------
+ * System Management Functions
+ *----------------------------------------------------------------------------*/
+
+void can_reset_sensor_data(uint8_t sensor_idx)
+{
+    if (sensor_idx == 0xFF) {
+        // Reset all sensors
+        memset(&raw_radar_system, 0, sizeof(raw_radar_system));
+        debug_send("CAN: All sensor data reset");
+    } else if (sensor_idx < MAX_RADAR_SENSORS) {
+        // Reset specific sensor
+        memset(&raw_radar_system.sensors[sensor_idx], 0, sizeof(radar_raw_t));
+        memset(&raw_radar_system.sensor_status[sensor_idx], 0, sizeof(radar_sensor_status_t));
+        raw_radar_system.last_message_time[sensor_idx] = 0;
+        raw_radar_system.msgs_received[sensor_idx] = 0;
+        debug_send("CAN: Sensor %d data reset", sensor_idx);
+    }
+}
+
+void can_run_diagnostics(void)
+{
+    debug_send("=== CAN System Diagnostics ===");
+    debug_send("System initialized: %s", raw_radar_system.system_initialized ? "YES" : "NO");
+    debug_send("Active sensors: %d/%d", raw_radar_system.active_sensor_count, MAX_RADAR_SENSORS);
     
-    debug_send("Radar: New raw data available from sensor %d", sensor_idx);
+    uint32_t current_time = HAL_GetTick();
     
-    // Process this sensor's raw data immediately
-    radar_update_single_sensor(sensor_idx);
-    
-    // Check if we should update system-wide clean data
-    uint8_t updated_count = 0;
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        if (sensors_updated[i]) {
-            updated_count++;
-        }
+        radar_sensor_status_t* status = &raw_radar_system.sensor_status[i];
+        uint32_t last_msg_age = current_time - raw_radar_system.last_message_time[i];
+        
+        debug_send("Sensor %d:", i);
+        debug_send("  Online: %s", status->online ? "YES" : "NO");
+        debug_send("  Configured: %s", status->configuration_complete ? "YES" : "NO");
+        debug_send("  Messages: %d", raw_radar_system.msgs_received[i]);
+        debug_send("  Last message: %dms ago", last_msg_age);
+        debug_send("  HW Status: %d", status->hw_status);
+        debug_send("  Version: %d.%d.%d", status->version.major, status->version.minor, status->version.patch);
     }
     
-    // If we have updates from multiple sensors, process system-wide data
-    if (updated_count >= 2) {
-        if (radar_process_raw_to_distance(&radar_clean_data)) {
-            // Notify void detection layer of new clean data
-            if (system_is_operational_mode()) {
-                void_process_new_distance_data(&radar_clean_data);
-            }
-        }
-        
-        // Reset update flags
-        memset(sensors_updated, false, sizeof(sensors_updated));
-    }
+    debug_send("===============================");
 }
 
-// ADD: Process single sensor raw data
-void radar_update_single_sensor(uint8_t sensor_idx)
+uint8_t get_sensor_index_from_can_id(uint32_t can_id)
 {
-    if (sensor_idx >= MAX_RADAR_SENSORS) {
-        return;
-    }
+    // Extract sensor index from CAN ID
+    // Assuming sensor offset of 0x10 per sensor
+    uint8_t offset = (can_id & 0x0F);
+    if (offset == 0) return 0;
+    if (offset == 1) return 1;  
+    if (offset == 2) return 2;
     
-    // Get raw data from CAN layer
-    radar_raw_t* raw_data = can_get_raw_sensor_data(sensor_idx);
-    if (!raw_data || !can_has_new_data(sensor_idx)) {
-        return;
-    }
-    
-    radar_measurement_t* measurement = &radar_measurements[sensor_idx];
-    
-    // Process the raw detected points
-    float closest_distance = 100.0f;  // Initialize with large value
-    float best_snr = 0.0f;
-    bool valid_point_found = false;
-    
-    // Find closest valid point with good SNR
-    for (uint8_t i = 0; i < raw_data->numDetPoints; i++) {
-        float distance = raw_data->detectedPoints[i][0];  // meters
-        float snr = raw_data->detectedPoints[i][1];       // SNR value
-        
-        // Validate using thresholds
-        if (snr > RADAR_MIN_SNR_THRESHOLD && 
-            distance > RADAR_MIN_DISTANCE_M && 
-            distance < RADAR_MAX_DISTANCE_M &&
-            distance < closest_distance) {
-            
-            closest_distance = distance;
-            best_snr = snr;
-            valid_point_found = true;
-        }
-    }
-    
-    // Update measurement structure
-    if (valid_point_found) {
-        measurement->distance_mm = (uint16_t)(closest_distance * 1000.0f);
-        measurement->angle_deg = sensor_angles[sensor_idx];
-        measurement->data_valid = true;
-        measurement->timestamp_ms = HAL_GetTick();
-        measurement->confidence = (best_snr > 200.0f) ? 1.0f : (best_snr / 200.0f);
-        measurement->quality_score = (uint8_t)((best_snr / 300.0f) * 100.0f);
-        if (measurement->quality_score > 100) measurement->quality_score = 100;
-        
-        debug_send("Radar %d: %u mm, conf=%.2f, qual=%d", 
-                   sensor_idx, measurement->distance_mm, 
-                   measurement->confidence, measurement->quality_score);
-    } else {
-        measurement->data_valid = false;
-        measurement->confidence = 0.0f;
-        measurement->quality_score = 0;
-        debug_send("Radar %d: No valid measurement", sensor_idx);
-    }
-    
-    // Mark this sensor as updated
-    sensors_updated[sensor_idx] = true;
-    
-    // Mark CAN data as processed
-    can_mark_data_processed(sensor_idx);
+    return 0xFF; // Invalid sensor
 }
 
-// ADD: Process system-wide clean data
-bool radar_process_raw_to_distance(radar_distance_t* output_data)
+/*------------------------------------------------------------------------------
+ * Low-Level CAN Functions  
+ *----------------------------------------------------------------------------*/
+
+bool can_send(uint32_t ID, uint8_t message)
 {
-    if (!output_data) {
+    uint8_t data[1] = { message };
+    return can_send_array(ID, data, 1);
+}
+
+bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
+{
+    if (!message || length == 0 || length > 8) {
         return false;
     }
     
-    uint32_t current_time = HAL_GetTick();
-    uint8_t valid_count = 0;
+    txHeader.StdId = ID;
+    txHeader.ExtId = 0x00;
+    txHeader.RTR = CAN_RTR_DATA;
+    txHeader.IDE = CAN_ID_STD;
+    txHeader.DLC = length;
+    txHeader.TransmitGlobalTime = DISABLE;
     
-    // Copy individual measurements to system structure
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        radar_measurement_t* meas = &radar_measurements[i];
-        
-        // Check if data is still fresh (within last 2 seconds)
-        bool data_fresh = (current_time - meas->timestamp_ms) < RADAR_DATA_TIMEOUT_MS;
-        bool data_valid = meas->data_valid && data_fresh;
-        
-        output_data->distance_mm[i] = data_valid ? meas->distance_mm : RADAR_INVALID_DISTANCE;
-        output_data->angle_deg[i] = meas->angle_deg;
-        output_data->data_valid[i] = data_valid;
-        output_data->confidence[i] = data_valid ? meas->confidence : 0.0f;
-        output_data->quality_score[i] = data_valid ? meas->quality_score : 0;
-        
-        if (data_valid) {
-            valid_count++;
-        }
+    HAL_StatusTypeDef status = HAL_CAN_AddTxMessage(&hcan1, &txHeader, message, &canMailbox);
+    
+    if (status != HAL_OK) {
+        debug_send("CAN: Send failed - ID=0x%03X, status=%d", ID, status);
+        return false;
     }
     
-    output_data->timestamp_ms = current_time;
-    output_data->valid_sensor_count = valid_count;
-    output_data->system_healthy = (valid_count >= 2);
-    
-    debug_send("Radar: System update - %d valid sensors", valid_count);
-    
-    return (valid_count >= 2);  // Return true if system has enough data
-}
-```
-
-**Why**: Completely separates raw data processing from system-wide data aggregation. Creates clear pipeline: CAN → individual sensor processing → system-wide processing → void detection.
-
-3. **Update `radar_system_process()` for maintenance only**
-
-```c
-// BEFORE: Mixed data processing and maintenance
-void radar_system_process(void)
-{
-    // Complex processing code mixed with maintenance
+    return true;
 }
 
-// AFTER: Pure maintenance function
-void radar_system_process(void)
+bool can_send_to_sensor(uint8_t sensor_idx, uint32_t base_id, uint8_t message)
 {
-    /* Skip processing if system isn't ready */
-    if (radar_status == RADAR_INITIALISING) {
-        return;
-    }
-
-    uint32_t current_time = HAL_GetTick();
-    
-    /* Check for stale data and invalidate if necessary */
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        radar_measurement_t* meas = &radar_measurements[i];
-        
-        if (meas->data_valid && 
-            (current_time - meas->timestamp_ms) > RADAR_DATA_TIMEOUT_MS) {
-            meas->data_valid = false;
-            debug_send("Radar %d: Data timeout, marking invalid", i);
-        }
-    }
-
-    /* Monitor sensor health every 1 second */
-    static uint32_t last_health_check = 0;
-    if (current_time - last_health_check >= 1000) {
-        last_health_check = current_time;
-        monitor_sensor_health();  // Calls CAN layer function
+    if (sensor_idx >= MAX_RADAR_SENSORS) {
+        return false;
     }
     
-    /* Update system health status */
-    uint8_t valid_count = radar_get_valid_sensor_count();
-    radar_clean_data.system_healthy = (valid_count >= 2);
-    
-    /* No data processing here - that's event-driven now */
-}
-```
-
-**Why**: Separates maintenance tasks from data processing. Data processing is now event-driven through `radar_notify_new_raw_data()`.
-
-4. **Add new accessor functions**
-
-```c
-// ADD: New clean data accessor
-radar_distance_t* radar_get_distance_data(void)
-{
-    return &radar_clean_data;
+    uint32_t sensor_id = base_id + CAN_SENSOR_ID_OFFSET(sensor_idx);
+    return can_send(sensor_id, message);
 }
 
-// ADD: System readiness check
-bool radar_has_valid_distance_data(void)
-{
-    return radar_clean_data.system_healthy && 
-           (radar_clean_data.valid_sensor_count >= 2);
-}
+/*------------------------------------------------------------------------------
+ * Internal Helper Functions
+ *----------------------------------------------------------------------------*/
 
-// ADD: Valid sensor count
-uint8_t radar_get_valid_sensor_count(void)
+static uint8_t get_active_sensor_count_internal(void)
 {
     uint8_t count = 0;
     uint32_t current_time = HAL_GetTick();
     
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        radar_measurement_t* meas = &radar_measurements[i];
-        bool data_fresh = (current_time - meas->timestamp_ms) < RADAR_DATA_TIMEOUT_MS;
-        
-        if (meas->data_valid && data_fresh) {
+        if ((current_time - raw_radar_system.last_message_time[i]) < 3000) {
             count++;
         }
     }
     
     return count;
 }
-
-// ADD: System readiness
-bool radar_is_system_ready(void)
-{
-    return (radar_status == RADAR_READY || radar_status == RADAR_CHIRPING) &&
-           radar_has_valid_distance_data();
-}
-```
-
-**Why**: Provides clean interface for void detection layer to access processed radar data.
-
----
-
-## PHASE 3: Void Detection Layer Enhancement
-
-### File: `mti_void.h`
-
-#### Changes Required
-
-1. **Update data structures**
-
-```c
-// BEFORE: Unclear naming
-typedef void_status_t void_data_t;
-
-// AFTER: Clear naming and enhanced structure
-typedef struct {
-    bool void_detected;                    // Primary detection result
-    void_severity_t severity;              // Severity level (minor/major/critical)
-    uint8_t confidence_percent;            // Overall confidence (0-100)
-    void_algorithm_t algorithm_used;       // Which algorithm produced this result
-    uint32_t detection_timestamp_ms;      // When detection was made
-    
-    // Individual sensor results
-    struct {
-        bool detected[MAX_RADAR_SENSORS];      // Per-sensor detection flags
-        uint8_t confidence[MAX_RADAR_SENSORS]; // Per-sensor confidence
-        uint16_t distance_mm[MAX_RADAR_SENSORS]; // Distances used for detection
-    } sensor_data;
-    
-    // Algorithm-specific data
-    union {
-        struct {
-            uint16_t threshold_used_mm;        // Threshold that was applied
-            uint16_t baseline_used_mm;         // Baseline that was used
-        } threshold_data;
-        
-        struct {
-            uint16_t center_x_mm;              // Circle center X coordinate
-            uint16_t center_y_mm;              // Circle center Y coordinate  
-            uint16_t radius_mm;                // Fitted circle radius
-            uint8_t sensors_used;              // Number of sensors in fit
-            uint16_t fit_error_mm;             // RMS fit error
-        } circle_data;
-    } algorithm_result;
-} void_data_t;
-```
-
-**Why**: Creates comprehensive result structure that contains all information needed for reporting and debugging.
-
-2. **Add new function declarations**
-
-```c
-// BEFORE: Mixed function responsibilities
-void void_process_new_sensor_data(uint8_t sensor_idx);
-
-// AFTER: Clear data flow functions
-void void_process_new_distance_data(const radar_distance_t* distance_data);
-void_data_t* void_get_latest_result(void);
-bool void_has_new_result(void);
-void void_mark_result_processed(void);
-```
-
-**Why**: Aligns function names with new data flow where void layer receives `radar_distance_t` instead of individual sensor updates.
-
-### File: `mti_void.c`
-
-#### Changes Required
-
-1. **Update static variables**
-
-```c
-// BEFORE: Mixed naming
-static void_system_state_t prv_void_system = { 0 };
-
-// AFTER: Clear naming and enhanced state
-static struct {
-    bool system_initialized;
-    void_config_t config;
-    void_data_t latest_result;
-    bool new_result_available;
-    uint32_t last_processing_time_ms;
-    uint32_t last_distance_update_ms;
-    
-    // Current measurement data (copy of radar_distance_t)
-    struct {
-        uint16_t distance_mm[MAX_RADAR_SENSORS];
-        uint16_t angle_deg[MAX_RADAR_SENSORS];
-        bool data_valid[MAX_RADAR_SENSORS];
-        float confidence[MAX_RADAR_SENSORS];
-        uint32_t timestamp_ms;
-        uint8_t valid_sensor_count;
-    } current_measurements;
-} prv_void_system = { 0 };
-```
-
-**Why**: Simplifies state management and clearly separates configuration, current data, and results.
-
-2. **Replace `void_process_new_sensor_data()` with new function**
-
-```c
-// REMOVE: Old sensor-specific function
-void void_process_new_sensor_data(uint8_t sensor_idx) {
-    // REMOVE ENTIRELY
-}
-
-// ADD: New distance data processing function
-void void_process_new_distance_data(const radar_distance_t* distance_data)
-{
-    if (!prv_void_system.system_initialized || !distance_data) {
-        debug_send("Void: System not ready or invalid data");
-        return;
-    }
-    
-    // Rate limiting - don't process too frequently
-    uint32_t current_time = HAL_GetTick();
-    if (current_time - prv_void_system.last_processing_time_ms < VOID_MIN_PROCESS_INTERVAL_MS) {
-        return;
-    }
-    
-    // Copy distance data to internal structure
-    memcpy(&prv_void_system.current_measurements, distance_data, 
-           sizeof(prv_void_system.current_measurements));
-    
-    prv_void_system.last_distance_update_ms = current_time;
-    
-    debug_send("Void: Processing new distance data (%d valid sensors)", 
-               distance_data->valid_sensor_count);
-    
-    // Only process if we have enough valid sensors
-    if (distance_data->valid_sensor_count < prv_void_system.config.min_sensors_circle) {
-        prv_send_insufficient_sensor_fault(distance_data->valid_sensor_count, 
-                                           prv_void_system.config.algorithm);
-        return;
-    }
-    
-    // Process the detection
-    void_data_t result = {0};
-    bool detection_successful = false;
-    
-    // Run the configured algorithm
-    switch (prv_void_system.config.algorithm) {
-        case VOID_ALG_BYPASS:
-            detection_successful = prv_bypass_detection(&result);
-            break;
-            
-        case VOID_ALG_SIMPLE_THRESHOLD:
-            detection_successful = prv_simple_threshold_detection(&result);
-            break;
-            
-        case VOID_ALG_CIRCLEFIT:
-            detection_successful = prv_circle_fit_void_detection(&result);
-            break;
-            
-        default:
-            debug_send("Void: Unknown algorithm %d", prv_void_system.config.algorithm);
-            return;
-    }
-    
-    if (detection_successful) {
-        // Store result and mark as new
-        prv_void_system.latest_result = result;
-        prv_void_system.new_result_available = true;
-        prv_void_system.last_processing_time_ms = current_time;
-        
-        // Send automatic streams if enabled
-        void_send_automatic_stream();
-        
-        // Send detection events if state changed
-        static bool previous_detection = false;
-        if (result.void_detected != previous_detection) {
-            void_send_detection_events(result.void_detected, previous_detection);
-            previous_detection = result.void_detected;
-        }
-    }
-}
-```
-
-**Why**: Completely changes the interface to accept processed radar data instead of individual sensor updates. This aligns with the new data flow architecture.
-
-3. **Update algorithm functions to use new data structure**
-
-```c
-// UPDATE: Modify existing algorithm functions to use current_measurements
-static bool prv_simple_threshold_detection(void_data_t *result)
-{
-    if (!result) {
-        return false;
-    }
-    
-    // Initialize result structure
-    memset(result, 0, sizeof(void_data_t));
-    result->algorithm_used = VOID_ALG_SIMPLE_THRESHOLD;
-    result->detection_timestamp_ms = HAL_GetTick();
-    result->algorithm_result.threshold_data.threshold_used_mm = prv_void_system.config.threshold_mm;
-    result->algorithm_result.threshold_data.baseline_used_mm = prv_void_system.config.baseline_mm;
-    
-    uint8_t detections = 0;
-    uint8_t total_confidence = 0;
-    
-    // Check each sensor against threshold
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        if (!prv_void_system.current_measurements.data_valid[i]) {
-            continue;
-        }
-        
-        uint16_t distance = prv_void_system.current_measurements.distance_mm[i];
-        uint16_t expected = prv_void_system.config.baseline_mm;
-        uint16_t threshold = prv_void_system.config.threshold_mm;
-        
-        // Copy sensor data to result
-        result->sensor_data.distance_mm[i] = distance;
-        
-        // Check for void detection
-        if (distance > (expected + threshold)) {
-            result->sensor_data.detected[i] = true;
-            detections++;
-            
-            // Calculate confidence based on how far beyond threshold
-            uint16_t excess = distance - (expected + threshold);
-            uint8_t confidence = void_calculate_confidence(distance, expected, threshold);
-            result->sensor_data.confidence[i] = confidence;
-            total_confidence += confidence;
-            
-            debug_send("Void: S%d detected void - %dmm > %dmm+%dmm (conf=%d)", 
-                      i, distance, expected, threshold, confidence);
-        } else {
-            result->sensor_data.detected[i] = false;
-            result->sensor_data.confidence[i] = 0;
-        }
-    }
-    
-    // Determine overall result
-    result->void_detected = (detections > 0);
-    result->confidence_percent = detections > 0 ? (total_confidence / detections) : 0;
-    
-    // Determine severity based on confidence and number of detections
-    if (result->void_detected) {
-        if (detections >= 2 && result->confidence_percent >= 80) {
-            result->severity = VOID_SEVERITY_CRITICAL;
-        } else if (detections >= 2 || result->confidence_percent >= 60) {
-            result->severity = VOID_SEVERITY_MAJOR;
-        } else {
-            result->severity = VOID_SEVERITY_MINOR;
-        }
-    }
-    
-    debug_send("Void: Threshold detection - %s (%d sensors, %d%% confidence)", 
-               result->void_detected ? "DETECTED" : "none", 
-               detections, result->confidence_percent);
-    
-    return true;
-}
-
-// Similarly update prv_circle_fit_void_detection() to use current_measurements
-static bool prv_circle_fit_void_detection(void_data_t *result)
-{
-    // Similar pattern - use prv_void_system.current_measurements instead of 
-    // accessing individual sensor data
-    
-    // ... implementation using current_measurements structure
-}
-```
-
-**Why**: Updates algorithms to work with the new centralized measurement data instead of accessing sensors individually.
-
-4. **Add new accessor functions**
-
-```c
-// ADD: Result access functions
-void_data_t* void_get_latest_result(void)
-{
-    return &prv_void_system.latest_result;
-}
-
-bool void_has_new_result(void)
-{
-    return prv_void_system.new_result_available;
-}
-
-void void_mark_result_processed(void)
-{
-    prv_void_system.new_result_available = false;
-}
-
-// UPDATE: System readiness check
-bool void_is_system_ready(void)
-{
-    if (!prv_void_system.system_initialized) {
-        return false;
-    }
-    
-    // Check if we have recent measurement data
-    uint32_t current_time = HAL_GetTick();
-    bool data_fresh = (current_time - prv_void_system.last_distance_update_ms) < VOID_SENSOR_TIMEOUT_MS;
-    
-    return data_fresh && 
-           (prv_void_system.current_measurements.valid_sensor_count >= CIRCLE_FIT_MIN_SENSORS);
-}
-```
-
-**Why**: Provides clean interface for command layer and reporting systems to access void detection results.
-
----
-
-## PHASE 4: System Integration Updates
-
-### File: `mti_system.c`
-
-#### Changes Required
-
-1. **Update `module_init()` to follow new initialization order**
-
-```c
-// UPDATE: Step radar case in module_init()
-case STEP_RADAR:
-    if (radar_init_status == RADAR_INIT_NOT_STARTED) {
-        debug_send("Starting radar initialization...");
-        radar_system_init();  // This calls can_initialize_continuous_mode()
-        radar_init_status = RADAR_INIT_IN_PROGRESS;
-        return false;
-    }
-
-    if (radar_init_status == RADAR_INIT_IN_PROGRESS) {
-        // Check if CAN layer has enough active sensors
-        uint8_t active_sensors = can_get_active_sensor_count();
-        if (active_sensors >= 2) {
-            debug_send("Radar initialization complete (%d sensors active)", active_sensors);
-            radar_init_status = RADAR_INIT_OK;
-            init_step = STEP_VOID;
-        } else if (HAL_GetTick() > 15000) {  // 15 second timeout
-            debug_send("Radar initialization timeout (only %d sensors)", active_sensors);
-            radar_init_status = RADAR_INIT_ERROR;
-            module_status = STATUS_RADAR_ERROR;
-            init_step = STEP_TEMP;  // Skip void init if radar failed
-        }
-        return false;
-    }
-    init_step = STEP_VOID;
-    
-case STEP_VOID:
-    debug_send("Initializing void detection system...");
-    void_system_init();
-    
-    // Void system doesn't need sensors to initialize - just configuration
-    if (void_is_system_ready()) {
-        debug_send("Void detection system ready with live data");
-    } else {
-        debug_send("Void detection system initialized (waiting for radar data)");
-    }
-    
-    init_step = STEP_FINISH;
-    return false;
-```
-
-**Why**: Ensures proper initialization order and allows void system to initialize even if radar data isn't immediately available.
-
-### File: `vmt_device.c`
-
-#### Changes Required
-
-1. **Update main processing loop**
-
-```c
-// UPDATE: device_process() function
-void device_process(void)
-{
-    /* Existing IMU and other processing */
-    
-    // Add radar system processing if initialized
-    if (initialised_get() && state_get() >= measure_state) {
-        // Process CAN health monitoring and timeouts
-        // This is maintenance only - data processing is event-driven
-        radar_system_process();
-        
-        // Void detection processing is triggered by radar layer
-        // No need to call void_system_process() here
-    }
-    
-    /* Continue with existing processing */
-}
-```
-
-**Why**: Removes unnecessary polling of void detection - it's now event-driven from radar layer.
-
-### File: `vmt_command.c`
-
-#### Changes Required
-
-1. **Update command handlers to use new data structures**
-
-```c
-// UPDATE: cmd_void() function to use new accessor
-static void cmd_void(h_str_pointers_t *str_p)
-{
-    // ... existing parameter parsing ...
-    
-    if (strcmp(str_p->str[1], "status") == 0) {
-        void_data_t* result = void_get_latest_result();
-        if
+````
