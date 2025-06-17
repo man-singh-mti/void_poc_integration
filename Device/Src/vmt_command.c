@@ -1215,8 +1215,8 @@ static void cmd_flash_fifo(h_str_pointers_t *str_p)
         }
         }
     }
+        uart_tx_channel_undo();
     }
-    uart_tx_channel_undo();
 }
 
 static void cmd_flash(h_str_pointers_t *str_p)
@@ -1392,16 +1392,25 @@ static void cmd_void(h_str_pointers_t *str_p)
     // Handle @vd,status? command
     if (strcmp(str_p->part[1], "status?") == 0 || strcmp(str_p->part[1], "status") == 0)
     {
-        void_status_t status;
-        void_get_latest_results(&status);
+        void_data_t results;
+        if (void_get_latest_results(&results))
+        {
+            // Get current config to access baseline
+            void_config_t current_config;
+            void_get_config(&current_config);
 
-        printf("&vd,status,%d,%d,%d,%d,%s,%d\n",
-               status.void_detected ? 1 : 0,
-               status.void_size_mm,
-               status.confidence_percent,
-               status.baseline_diameter_mm,
-               void_get_algorithm_string(status.algorithm_used),
-               status.partial_data ? 1 : 0);
+            printf("&vd,status,%d,%d,%d,%d,%s,%d\n",
+                   results.void_detected ? 1 : 0,
+                   results.void_size_mm,
+                   results.confidence_percent,
+                   current_config.baseline_diameter_mm,
+                   void_get_algorithm_string(results.algorithm_used),
+                   0); // partial_data placeholder
+        }
+        else
+        {
+            printf("&vd,status,0,0,0,150,simple,0\n"); // Default response
+        }
     }
     // Handle @vd,config commands
     else if (strcmp(str_p->part[1], "config") == 0 && str_p->part[2])
@@ -1428,17 +1437,17 @@ static void cmd_void(h_str_pointers_t *str_p)
         {
             if (strcmp(str_p->part[3], "simple") == 0)
             {
-                void_set_detection_algorithm(VOID_ALG_SIMPLE);
+                void_set_algorithm(VOID_ALGORITHM_SIMPLE);
                 printf("&vd,config,algorithm,ack,simple\n");
             }
             else if (strcmp(str_p->part[3], "circlefit") == 0)
             {
-                void_set_detection_algorithm(VOID_ALG_CIRCLEFIT);
+                void_set_algorithm(VOID_ALGORITHM_CIRCLEFIT);
                 printf("&vd,config,algorithm,ack,circlefit\n");
             }
             else if (strcmp(str_p->part[3], "bypass") == 0)
             {
-                void_set_detection_algorithm(VOID_ALG_BYPASS);
+                void_set_algorithm(VOID_ALGORITHM_BYPASS);
                 printf("&vd,config,algorithm,ack,bypass\n");
             }
             else
@@ -1471,50 +1480,52 @@ static void cmd_void(h_str_pointers_t *str_p)
             printf("!vd,error,unknown_config_param\n");
         }
     }
-    // Handle @vd,history commands
-    else if (strcmp(str_p->part[1], "history") == 0)
-    {
-        if (str_p->part[2] && strcmp(str_p->part[2], "detection") == 0)
-        {
-            uint8_t count = void_get_history_count();
-            printf("&vd,history,detection,%d\n", count);
-            for (uint8_t i = 0; i < count; i++)
-            {
-                void_status_t entry;
-                if (void_get_history_entry(i, &entry))
-                {
-                    printf("&vd,history,entry,%d,%d,%d,%d,%s\n", i, entry.void_detected ? 1 : 0, entry.void_size_mm, entry.confidence_percent, entry.status_text);
-                }
-            }
-        }
-        else
-        {
-            printf("!vd,error,unknown_history_command\n");
-        }
-    }
-    // Handle @vd,clear commands
-    else if (strcmp(str_p->part[1], "clear") == 0)
-    {
-        if (str_p->part[2] && strcmp(str_p->part[2], "history") == 0)
-        {
-            void_clear_history();
-            printf("&vd,clear,history,ack\n");
-        }
-        else
-        {
-            printf("!vd,error,unknown_clear_command\n");
-        }
-    }
     // Handle @vd,diag? command
     else if (strcmp(str_p->part[1], "diag?") == 0 || strcmp(str_p->part[1], "diag") == 0)
     {
         void_config_t config;
-        void_get_current_config(&config);
+        void_get_config(&config);
+
         printf("&vd,diag,ready,%d\n", void_is_system_ready() ? 1 : 0);
-        printf("&vd,diag,algorithm,%s\n", void_get_algorithm_string(config.active_algorithm));
+        printf("&vd,diag,algorithm,%s\n", void_get_algorithm_string(config.algorithm));
         printf("&vd,diag,baseline,%d\n", config.baseline_diameter_mm);
-        printf("&vd,diag,threshold,%d\n", config.detection_threshold_mm);
-        printf("&vd,diag,confidence,%d\n", config.confidence_threshold);
+        printf("&vd,diag,threshold,%d\n", config.threshold_mm);
+        printf("&vd,diag,confidence,%d\n", config.confidence_min_percent);
+
+        // Additional diagnostics using existing functions
+        uint32_t total_detections, algorithm_switches, uptime_ms;
+        void_get_statistics(&total_detections, &algorithm_switches, &uptime_ms);
+        printf("&vd,diag,stats,%lu,%lu,%lu\n", total_detections, algorithm_switches, uptime_ms);
+
+        // Radar system status
+        if (radar_is_system_healthy())
+        {
+            uint8_t active_sensors = radar_get_active_sensor_count();
+            printf("&vd,diag,radar,healthy,%d\n", active_sensors);
+        }
+        else
+        {
+            printf("&vd,diag,radar,error\n");
+        }
+    }
+    // Simple measurement data access
+    else if (strcmp(str_p->part[1], "data") == 0)
+    {
+        void_measurement_t measurement;
+        if (void_get_measurement_data(&measurement))
+        {
+            printf("&vd,data,%d,%d,%d,%d\n", measurement.distance_mm[0], measurement.distance_mm[1], measurement.distance_mm[2], measurement.valid_sensor_count);
+        }
+        else
+        {
+            printf("&vd,data,no_data\n");
+        }
+    }
+    // Clear detection history (simplified)
+    else if (strcmp(str_p->part[1], "clear") == 0)
+    {
+        void_clear_statistics();
+        printf("&vd,clear,ack\n");
     }
     else
     {
@@ -1540,8 +1551,8 @@ void void_send_automatic_stream(void)
     {
         // Format: &vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>
         // flags: bit 0=void detected, bits 1-3=sensor validity
-        uint8_t       flags = 0;
-        void_status_t status;
+        uint8_t     flags = 0;
+        void_data_t status;
         void_get_latest_results(&status);
 
         if (status.void_detected)
@@ -1631,30 +1642,6 @@ static void cmd_debug(h_str_pointers_t *str_p)
     {
         printf("@db,Restarting Downhole");
         HAL_NVIC_SystemReset();
-    }
-    else if (strcmp(str_p->part[1], "radar") == 0)
-    {
-        if (strcmp(str_p->part[2], "status") == 0)
-        {
-            can_send(CAN_CMD_BASE, CAN_CMD_STATUS);
-        }
-        else if (strcmp(str_p->part[2], "start") == 0)
-        {
-            can_send(CAN_CMD_BASE, CAN_CMD_START);
-        }
-        else if (strcmp(str_p->part[2], "stop") == 0)
-        {
-            can_send(CAN_CMD_BASE, CAN_CMD_STOP);
-        }
-        else if (strcmp(str_p->part[2], "power") == 0)
-        {
-            uint8_t message[2] = { CAN_CMD_POWER, atoi(str_p->part[3]) };
-            can_send_array(CAN_CMD_BASE, message, 2);
-        }
-        else if (strcmp(str_p->part[2], "cal") == 0)
-        {
-            can_send(CAN_CMD_BASE, CAN_CMD_CAL);
-        }
     }
     else if (strstr(str_p->part[1], "temp") != NULL)
     {
