@@ -1,0 +1,639 @@
+VERSION
+8
+
+COMMSETTINGS
+0
+COM18
+COM2
+115200
+2
+0
+4
+0
+0
+
+COMMDISPLAY
+0
+
+VERSATAP
+0
+
+CHANNELALIAS
+
+
+
+SEND
+0
+===== SYSTEM STARTUP MONITORING =====
+
+0
+5
+
+RECEIVE
+0
+Startup Banner
+2F 2A 2A 20 53 54 4D 20 70 72 6F 6A 65 63 74 20 2A 2A 2F
+0
+0
+
+RECEIVE
+1
+Firmware Version
+46 57 20 76 65 72 3A 20 31 2C 32 2C 34
+0
+0
+
+RECEIVE
+2
+Build Time
+42 75 69 6C 64 20 54 69 6D 65 3A
+0
+0
+
+RECEIVE
+3
+Device Init Begin
+64 65 76 69 63 65 20 69 6E 69 74 20 62 65 67 69 6E
+0
+0
+
+RECEIVE
+4
+ADC Init Success
+61 64 63 20 69 6E 69 74 3A 66 69 6E 69 73 68 2C 30
+0
+0
+
+RECEIVE
+5
+IMU Power Status
+49 4D 55 20 50 6F 77 65 72 20 28 [30-31] 29 3A 20 31
+0
+0
+
+RECEIVE
+6
+CAN Init Failed
+63 61 6E 5F 69 6E 69 74 20 46 41 49 4C 45 44
+0
+0
+
+RECEIVE
+7
+Device Init Complete
+44 65 76 69 63 65 20 69 6E 69 74 69 61 6C 69 7A 61 74 69 6F 6E 20 63 6F 6D 70 6C 65 74 65
+0
+0
+
+SEND
+1
+===== BASIC CONNECTIVITY TESTS =====
+
+0
+5
+
+SEND
+2
+System Version Query
+40 69 6E 69 74 2C 76 65 72 0A
+0
+5
+
+RECEIVE
+8
+Version Response Expected
+40 76 65 72 73 69 6F 6E 2C 31 2E 32 2E 34
+0
+1
+
+SEND
+3
+Echo Test Basic
+40 65 63 68 6F 2C 74 65 73 74 0A
+0
+5
+
+RECEIVE
+9
+Echo Response
+40 65 63 68 6F 2C 74 65 73 74
+0
+1
+
+SEND
+4
+Connect Downhole
+40 63 6F 6E 6E 65 63 74 2C 0A
+0
+5
+
+RECEIVE
+10
+Connect Status Response
+40 73 74 61 74 75 73 2C 64 6F 77 6E 2C [30-39]
+0
+1
+
+SEND
+5
+===== WORKING SYSTEMS TESTS =====
+
+0
+5
+
+SEND
+6
+IMU Status Check
+40 63 6D 64 2C 69 6D 75 2C 73 74 61 74 75 73 0A
+0
+5
+
+SEND
+7
+IMU Accelerometer Only
+40 63 6D 64 2C 69 6D 75 2C 36 0A
+0
+5
+
+RECEIVE
+11
+IMU Command Response
+40 69 6D 75 2C
+0
+1
+
+SEND
+8
+ADC Status Check
+40 63 6D 64 2C 61 64 63 0A
+0
+5
+
+RECEIVE
+12
+ADC Response
+40 61 64 63 2C
+0
+1
+
+SEND
+9
+Temperature Status
+40 74 70 2C 73 74 61 74 75 73 0A
+0
+5
+
+RECEIVE
+13
+Temperature Status Response
+40 74 70 2C [0-9\-]+ 2C [01] 2C [01] 2C [01]
+0
+1
+
+SEND
+10
+Water Sensor Check
+40 77 74 2C 0A
+0
+5
+
+RECEIVE
+14
+Water Status Response
+40 77 61 74 65 72 2C [01]
+0
+1
+
+SEND
+11
+===== FAILED SYSTEMS DIAGNOSTIC =====
+
+0
+5
+
+SEND
+12
+CAN Diagnostics
+40 63 61 6E 2C 64 69 61 67 0A
+0
+5
+
+RECEIVE
+15
+CAN Diagnostic Response
+40 64 62 2C 63 61 6E 2C
+0
+1
+
+SEND
+13
+Radar Status Query
+40 63 6D 64 2C 72 61 64 61 72 2C 73 74 61 74 75 73 0A
+0
+5
+
+RECEIVE
+16
+Radar Status Response
+40 72 61 64 61 72 2C 73 74 61 74 75 73 2C [0-3]
+0
+1
+
+SEND
+14
+CAN Sensor Test Individual
+40 63 61 6E 2C 73 65 6E 64 2C 30 2C 30 34 0A
+0
+5
+
+SEND
+15
+CAN Sensor Test Individual
+40 63 61 6E 2C 73 65 6E 64 2C 31 2C 30 34 0A
+0
+5
+
+SEND
+16
+CAN Sensor Test Individual
+40 63 61 6E 2C 73 65 6E 64 2C 32 2C 30 34 0A
+0
+5
+
+RECEIVE
+17
+CAN Error Expected
+40 65 72 72 6F 72 2C 63 61 6E
+0
+1
+
+SEND
+17
+Void System Without Radar
+40 76 64 2C 63 6F 6E 66 69 67 2C 61 6C 67 6F 72 69 74 68 6D 2C 62 79 70 61 73 73 0A
+0
+5
+
+RECEIVE
+18
+Void Bypass Mode Response
+40 76 64 2C 63 6F 6E 66 69 67 2C 61 6C 67 6F 72 69 74 68 6D 2C 62 79 70 61 73 73 2C 6F 6B
+0
+1
+
+SEND
+18
+===== MEASUREMENT TESTING =====
+
+0
+5
+
+SEND
+19
+Start Measurement
+40 73 74 2C 0A
+0
+5
+
+RECEIVE
+19
+Start Response
+40 73 74 61 72 74 2C 6F 6B
+0
+1
+
+RECEIVE
+20
+Automatic Temperature Stream
+26 74 65 6D 70 2C 73 74 61 74 75 73 2C [0-9\-]+ 2C [0-3]
+0
+0
+
+RECEIVE
+21
+Water Detection Stream
+26 77 61 74 65 72 2C [01]
+0
+0
+
+SEND
+20
+Stop Measurement
+40 66 6E 2C 0A
+0
+10
+
+RECEIVE
+22
+Stop Response
+40 73 74 6F 70 2C 6F 6B
+0
+1
+
+SEND
+21
+===== LOGGING SYSTEM TESTS =====
+
+0
+5
+
+SEND
+22
+Log Auto Enable
+40 6C 6F 67 2C 61 75 74 6F 2C 31 0A
+0
+5
+
+RECEIVE
+23
+Log Auto Enable Response
+40 6C 6F 67 2C 61 75 74 6F 2C 31 2C 6F 6B
+0
+1
+
+SEND
+23
+Flash FIFO Status
+40 66 66 2C 61 0A
+0
+5
+
+RECEIVE
+24
+Flash FIFO Available Response
+40 66 66 2C 61 76 61 69 6C 61 62 6C 65 2C [0-9]+
+0
+1
+
+SEND
+24
+===== ERROR HANDLING TESTS =====
+
+0
+5
+
+SEND
+25
+Invalid Command
+40 69 6E 76 61 6C 69 64 0A
+0
+5
+
+RECEIVE
+25
+Error Response Expected
+40 65 72 72 6F 72 2C
+0
+1
+
+SEND
+26
+Malformed Command
+40 63 6D 64 2C 0A
+0
+5
+
+RECEIVE
+26
+Malformed Error Response
+40 65 72 72 6F 72 2C
+0
+1
+
+SEND
+27
+===== RS485 OPERATIONAL TESTS =====
+
+0
+5
+
+SEND
+28
+RS485 Connect
+40 63 6F 6E 6E 65 63 74 2C 0A
+0
+5
+
+RECEIVE
+27
+RS485 Connect Response
+40 73 74 61 74 75 73 2C 64 6F 77 6E 2C [30-39]
+0
+1
+
+SEND
+29
+RS485 Start Measurement
+40 73 74 2C 0A
+0
+5
+
+RECEIVE
+28
+RS485 Start Response
+40 73 74 61 72 74 2C 6F 6B
+0
+1
+
+SEND
+30
+===== TEMPERATURE THRESHOLD TESTING =====
+
+0
+5
+
+SEND
+31
+Set High Threshold 85C
+40 74 70 2C 63 6F 6E 66 69 67 2C 68 69 67 68 2C 38 35 0A
+0
+5
+
+SEND
+32
+Set Low Threshold -10C
+40 74 70 2C 63 6F 6E 66 69 67 2C 6C 6F 77 2C 2D 31 30 0A
+0
+5
+
+SEND
+33
+Get Temperature Thresholds
+40 74 70 2C 63 6F 6E 66 69 67 2C 67 65 74 0A
+0
+5
+
+RECEIVE
+29
+Temperature Config Response
+40 74 70 2C 63 6F 6E 66 69 67 2C
+0
+1
+
+SEND
+34
+===== IMU CONFIGURATION TESTING =====
+
+0
+5
+
+SEND
+35
+IMU Set Threshold Air
+40 69 6D 75 2C 74 68 72 65 73 68 6F 6C 64 5F 61 69 72 2C 32 30 30 30 0A
+0
+5
+
+SEND
+36
+IMU Set Threshold Water
+40 69 6D 75 2C 74 68 72 65 73 68 6F 6C 64 5F 77 61 74 65 72 2C 33 30 30 30 0A
+0
+5
+
+SEND
+37
+IMU Both Accel+Gyro
+40 63 6D 64 2C 69 6D 75 2C 38 0A
+0
+5
+
+SEND
+38
+===== VOID DETECTION WITHOUT RADAR =====
+
+0
+5
+
+SEND
+39
+Void Status Query
+40 76 64 2C 73 74 61 74 75 73 3F 0A
+0
+5
+
+RECEIVE
+30
+Void Status Response
+40 76 64 2C 73 74 61 74 75 73 2C [01] 2C [0-2] 2C [0-9]+
+0
+1
+
+SEND
+40
+Void Algorithm Simple
+40 76 64 2C 63 6F 6E 66 69 67 2C 61 6C 67 6F 72 69 74 68 6D 2C 73 69 6D 70 6C 65 0A
+0
+5
+
+RECEIVE
+31
+Void Simple Algorithm Warning
+40 76 64 2C 77 61 72 6E 69 6E 67 2C 6E 6F 5F 72 61 64 61 72
+0
+1
+
+SEND
+41
+===== SYSTEM STATUS MONITORING =====
+
+0
+5
+
+SEND
+42
+System Status Check
+40 63 6D 64 2C 73 74 61 74 75 73 0A
+0
+5
+
+RECEIVE
+32
+System Status Response
+40 73 74 61 74 75 73 2C [0-9]+
+0
+1
+
+SEND
+43
+Module Status Check
+40 63 6D 64 2C 6D 6F 64 75 6C 65 73 2C 73 74 61 74 75 73 0A
+0
+5
+
+RECEIVE
+33
+Module Status Response
+40 6D 6F 64 75 6C 65 73 2C
+0
+1
+
+SEND
+44
+===== LONG TERM MONITORING =====
+
+0
+5
+
+RECEIVE
+34
+Debug Messages
+3E 20
+0
+0
+
+RECEIVE
+35
+System Errors
+21 65 72 72 6F 72 2C
+0
+0
+
+RECEIVE
+36
+CAN Activity Monitor
+43 41 4E
+0
+0
+
+RECEIVE
+37
+Temperature Alerts
+21 74 65 6D 70 2C
+0
+0
+
+SEND
+45
+===== CLEANUP AND RESET =====
+
+0
+5
+
+SEND
+46
+Debug Disable All
+40 63 6D 64 2C 64 65 62 75 67 2C 30 0A
+0
+5
+
+SEND
+47
+Log Auto Disable
+40 6C 6F 67 2C 61 75 74 6F 2C 30 0A
+0
+5
+
+SEND
+48
+Stop All Measurements
+40 66 6E 2C 0A
+0
+5
+
+RECEIVE
+38
+Final Stop Response
+40 73 74 6F 70 2C 6F 6B
+0
+1

@@ -685,6 +685,7 @@ static bool dev_init_process(void)
         STEP_COMMAND,
         STEP_FLASH,
         STEP_ICM20948,
+        STEP_CAN,
         STEP_FINISH,
     } step_t;
     static step_t step = STEP_IDLE;
@@ -789,6 +790,25 @@ static bool dev_init_process(void)
         if (h_dev_debug.b_init)
         {
             printf("> ICM20948_init_finish\r\n");
+        }
+        step = STEP_CAN;
+        break;
+    case STEP_CAN:
+        // FIXED: Call full CAN system initialization, not just setup
+        if (can_initialize_system()) // Instead of just can_setup()
+        {
+            if (h_dev_debug.b_init)
+            {
+                printf("> can_init complete\r\n");
+            }
+        }
+        else
+        {
+            if (h_dev_debug.b_init)
+            {
+                printf("> can_init FAILED\r\n");
+            }
+            // Could add retry logic here
         }
         step = STEP_FINISH;
         break;

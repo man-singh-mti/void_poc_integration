@@ -241,13 +241,40 @@ bool module_init(void)
             printf("@status,down,2\n"); // IMU error status
             module_status_set(STATUS_IMU_ERROR);
         }
-        init_step = STEP_RADAR;
+        init_step = STEP_TEMP;
         // Fall-through intended
+    case STEP_TEMP:
+        if (temp_init())
+        {
+            if (debug_get())
+            {
+                printf("@db,Temperature module initialized\n");
+
+                // Add temperature test
+                temp_raw_data_t raw_test;
+                if (temp_get_raw_data(&raw_test))
+                {
+                    printf("@db,Temperature ADC test: %d (PASS)\n", raw_test.temperature_raw);
+                }
+                else
+                {
+                    printf("@db,Temperature ADC test: FAIL\n");
+                }
+            }
+        }
+        else
+        {
+            printf("@status,down,7\n"); // Temperature error
+            module_status_set(STATUS_TEMP_ERROR);
+        }
+        init_step = STEP_RADAR;
+        break;
+
     case STEP_RADAR:
         if (radar_init_status == RADAR_INIT_NOT_STARTED)
         {
             radar_init_status_set(RADAR_INIT_IN_PROGRESS);
-            retries_radar = 0; // Reset radar specific retries here
+            retries_radar = 0;
         }
 
         if (radar_init_status == RADAR_INIT_IN_PROGRESS)
@@ -256,31 +283,39 @@ bool module_init(void)
             {
                 if (retries_radar == 0)
                 {
-                    can_setup();         // Assuming defined in mti_can.h/c
-                    radar_system_init(); // Assuming defined in mti_radar.h/c
+                    // FIXED: Initialize CAN system first
+                    if (!can_initialize_system())
+                    {
+                        printf("@db,CAN initialization failed\n");
+                        radar_init_status_set(RADAR_INIT_ERROR);
+                        break;
+                    }
+
+                    // Then initialize radar processing
+                    radar_system_init();
 
                     if (debug_get())
                     {
-                        printf("@db,Running sensor indexing diagnostics...\n");
-                    }
-                    test_sensor_indexing(); // Assuming defined in mti_radar.h/c
+                        printf("@db,Running CAN diagnostics...\n");
+                        can_run_diagnostics();
 
-                    if (debug_get())
-                    {
-                        printf("@db,Testing real sensor communication...\n");
+                        printf("@db,Testing sensor indexing...\n");
+                        test_sensor_indexing();
+
+                        printf("@db,Testing sensor communication...\n");
+                        test_sensor_responses();
                     }
-                    test_sensor_responses(); // Assuming defined in mti_radar.h/c
                 }
                 else
                 {
-                    // Subsequent retries - just ping sensors
+                    // Subsequent retries - just test communication
                     test_sensor_responses();
                 }
 
                 retries_radar++;
-                uint8_t responding_sensors = get_active_sensor_count(); // Assuming defined in mti_radar.h/c
+                uint8_t responding_sensors = get_active_sensor_count();
 
-                if (responding_sensors >= 2) // Success condition
+                if (responding_sensors >= 2) // Success
                 {
                     radar_init_status_set(RADAR_INIT_OK);
                     if (debug_get())
@@ -288,76 +323,53 @@ bool module_init(void)
                         printf("@db,Radar init SUCCESS: %d/%d sensors responding\n", responding_sensors, MAX_RADAR_SENSORS);
                     }
                 }
-                else if (retries_radar >= 5) // Failure condition after max retries
+                else if (retries_radar >= 5) // Failure
                 {
                     radar_init_status_set(RADAR_INIT_ERROR);
                     module_status_set(STATUS_RADAR_ERROR);
-                    printf("@status,down,3\n"); // Radar error status
-                    if (debug_get())
-                    {
-                        printf("@db,Radar init FAILED: Only %d/%d sensors responding after %d retries\n", responding_sensors, MAX_RADAR_SENSORS, retries_radar);
-                    }
+                    printf("@status,down,3\n"); // Radar error
                 }
-                else
-                {
-                    break; // Still in progress, stay in this step
-                }
-            }
-        }
-        // If RADAR_INIT_OK or RADAR_INIT_ERROR, proceed to next step
-        init_step = STEP_TEMP;
-        // Fall-through intended
-    case STEP_TEMP:
-        // Assuming temp_init() and temp_is_initialized() are defined in mti_temp.h/c
-        if (temp_init())
-        {
-            if (debug_get())
-            {
-                printf("@db,Temperature module initialized\n");
-            }
-        }
-        else
-        {
-            printf("@status,down,7\n"); // Temperature initialization error status
-            module_status_set(STATUS_TEMP_ERROR);
-            if (debug_get())
-            {
-                printf("@db,Temperature module initialization failed\n");
             }
         }
         init_step = STEP_VOID;
-        // Fall-through intended
+        break;
+
     case STEP_VOID:
-        // Assuming void_system_init() and void_is_system_ready() are defined in mti_void.h/c
         if (void_system_init())
         {
             if (void_is_system_ready())
             {
                 if (debug_get())
                 {
-                    printf("@db,Void detection module initialized and ready\n");
+                    printf("@db,Void detection ready\n");
+
+                    // Add void detection test
+                    void_run_diagnostics();
+
+                    // Test with simulated data if available
+                    circle_fit_result_t test_result;
+                    if (void_test_circle_fit(&test_result))
+                    {
+                        printf("@db,Void circle fit test: PASS\n");
+                    }
                 }
             }
             else
             {
-                // This case might indicate dependency on radar, which should be fine if radar is OK
                 if (debug_get())
                 {
-                    printf("@db,Void detection initialized but not ready (may be waiting for other systems like radar)\n");
+                    printf("@db,Void detection initialized but waiting for radar\n");
                 }
             }
         }
         else
         {
-            printf("@status,down,8\n"); // Void initialization error status
+            printf("@status,down,8\n"); // Void error
             module_status_set(STATUS_VOID_ERROR);
-            if (debug_get())
-            {
-                printf("@db,Void detection initialization failed\n");
-            }
         }
         init_step = STEP_FINISH;
-        // Fall-through intended
+        break;
+
     case STEP_FINISH:
         if (debug_get())
         {
