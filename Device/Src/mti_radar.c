@@ -301,7 +301,8 @@ bool radar_get_sensor_measurement(uint8_t sensor_idx, uint16_t *distance_mm, boo
 
 bool radar_is_system_healthy(void)
 {
-    return latest_measurements.system_healthy;
+    // Delegate to CAN layer
+    return can_system_is_healthy();
 }
 
 uint8_t radar_get_valid_sensor_count(void)
@@ -311,7 +312,8 @@ uint8_t radar_get_valid_sensor_count(void)
 
 uint8_t radar_get_active_sensor_count(void)
 {
-    return get_active_sensor_count();
+    // Delegate to CAN layer
+    return can_get_online_sensor_count();
 }
 
 void radar_run_diagnostics(void)

@@ -15,6 +15,7 @@
 /** @name System Configuration Constants */
 #define MAX_RADAR_SENSORS         3U
 #define MAX_RADAR_DETECTED_POINTS 20U
+#define SENSOR_TIMEOUT_MS         3000 // Sensor online timeout in milliseconds
 
 /** @name Sensor Angular Positions */
 #define SENSOR_0_ANGLE 0
@@ -53,6 +54,9 @@ typedef struct
     uint32_t frame_number;                                  // Frame counter from sensor
     uint32_t timestamp_ms;                                  // When data was received
     bool     new_data_available;                            // Flag for event processing
+    bool     new_data;                                      // Alternative flag name (for compatibility)
+    bool     new_frame;                                     // Flag indicating new frame started
+    bool     frame_complete;                                // Flag indicating frame is complete
     uint8_t  sensor_status;                                 // Hardware status from sensor
 } radar_raw_t;
 
@@ -89,5 +93,35 @@ typedef struct
     char     status_text[64];      // Human-readable status
     bool     new_result_available; // Flag for transmission
 } void_data_t;
+
+/**
+ * @brief Multi-sensor raw data system
+ *
+ * Complete system state for all radar sensors including version and status tracking
+ */
+typedef struct
+{
+    // Main sensor data arrays
+    radar_raw_t sensors[MAX_RADAR_SENSORS];  // Primary sensor data array
+    radar_raw_t raw_data[MAX_RADAR_SENSORS]; // Raw data processing array (alias)
+
+    // Communication tracking
+    uint32_t last_message_time[MAX_RADAR_SENSORS]; // Last message timestamp per sensor
+    uint32_t last_status_time[MAX_RADAR_SENSORS];  // Last status message timestamp per sensor
+    uint32_t msgs_received[MAX_RADAR_SENSORS];     // Message count per sensor
+
+    // Sensor version information
+    uint8_t sensor_version_major[MAX_RADAR_SENSORS];    // Version major per sensor
+    uint8_t sensor_version_minor[MAX_RADAR_SENSORS];    // Version minor per sensor
+    uint8_t sensor_version_patch[MAX_RADAR_SENSORS];    // Version patch per sensor
+    bool    sensor_version_received[MAX_RADAR_SENSORS]; // Version received flag per sensor
+
+    // Sensor status information
+    uint8_t sensor_status[MAX_RADAR_SENSORS]; // Current status per sensor
+
+    // System state
+    uint8_t active_sensor_count; // Number of active sensors
+    bool    system_initialized;  // System initialization flag
+} multi_radar_raw_system_t;
 
 #endif // MTI_RADAR_TYPES_H

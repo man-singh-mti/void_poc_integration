@@ -21,61 +21,52 @@
 #define CAN_DATA_STATUS_REPLY_BASE_ID  0xA3 // Base for Status reply from sensor
 #define CAN_DATA_VERSION_REPLY_BASE_ID 0xA4 // Base for Version reply from sensor
 
-// --- Sensor ID Offsets ---
-#define CAN_SENSOR0_OFFSET 0x00
-#define CAN_SENSOR1_OFFSET 0x10
-#define CAN_SENSOR2_OFFSET 0x20
-#define CAN_SENSOR3_OFFSET 0x30
+// --- Sensor Command IDs (0x60 base + 0x10 offsets) ---
+#define CAN_S0_COMMAND_ID 0x60
+#define CAN_S1_COMMAND_ID 0x70
+#define CAN_S2_COMMAND_ID 0x80
+#define CAN_S3_COMMAND_ID 0x90
 
-// --- CAN Command Payload Codes (1st byte of data in a command message) ---
-#define CAN_CMD_PAYLOAD_START           0x00
-#define CAN_CMD_PAYLOAD_STOP            0x01
-#define CAN_CMD_PAYLOAD_DC_CALIB        0x02
-#define CAN_CMD_PAYLOAD_TX_BACKOFF      0x03
-#define CAN_CMD_PAYLOAD_QUERY_STATUS    0x04
-#define CAN_CMD_PAYLOAD_DET_THRESHOLD   0x05
-#define CAN_CMD_PAYLOAD_SPREAD_SPECTRUM 0x06
-#define CAN_CMD_PAYLOAD_SELECT_PROFILE  0x07
-#define CAN_CMD_PAYLOAD_SET_FOV         0x08
+// --- Sensor Data IDs (0xA0 base + 0x10 offsets) ---
+#define CAN_S0_DATA_HEADER_ID        0xA0
+#define CAN_S0_DATA_OBJECT_ID        0xA1
+#define CAN_S0_DATA_STATUS_REPLY_ID  0xA3
+#define CAN_S0_DATA_VERSION_REPLY_ID 0xA4
 
-// --- Sensor Command IDs (0x60 base) ---
-#define CAN_S0_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR0_OFFSET) // 0x60
-#define CAN_S1_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR1_OFFSET) // 0x70
-#define CAN_S2_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR2_OFFSET) // 0x80
-#define CAN_S3_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR3_OFFSET) // 0x90
+#define CAN_S1_DATA_HEADER_ID        0xB0
+#define CAN_S1_DATA_OBJECT_ID        0xB1
+#define CAN_S1_DATA_STATUS_REPLY_ID  0xB3
+#define CAN_S1_DATA_VERSION_REPLY_ID 0xB4
 
-// --- Sensor Data IDs (0xA0 base) ---
-#define CAN_S0_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR0_OFFSET)        // 0xA0
-#define CAN_S0_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR0_OFFSET)        // 0xA1
-#define CAN_S0_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR0_OFFSET)  // 0xA3
-#define CAN_S0_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR0_OFFSET) // 0xA4
+#define CAN_S2_DATA_HEADER_ID        0xC0
+#define CAN_S2_DATA_OBJECT_ID        0xC1
+#define CAN_S2_DATA_STATUS_REPLY_ID  0xC3
+#define CAN_S2_DATA_VERSION_REPLY_ID 0xC4
 
-#define CAN_S1_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR1_OFFSET)        // 0xB0
-#define CAN_S1_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR1_OFFSET)        // 0xB1
-#define CAN_S1_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR1_OFFSET)  // 0xB3
-#define CAN_S1_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR1_OFFSET) // 0xB4
+#define CAN_S3_DATA_HEADER_ID        0xD0
+#define CAN_S3_DATA_OBJECT_ID        0xD1
+#define CAN_S3_DATA_STATUS_REPLY_ID  0xD3
+#define CAN_S3_DATA_VERSION_REPLY_ID 0xD4
 
-#define CAN_S2_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR2_OFFSET)        // 0xC0
-#define CAN_S2_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR2_OFFSET)        // 0xC1
-#define CAN_S2_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR2_OFFSET)  // 0xC3
-#define CAN_S2_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR2_OFFSET) // 0xC4
+// --- CAN Command Payloads (from working code) ---
+#define CAN_CMD           0x80       // Command ID from working code
+#define CAN_START         0x00       // Start command
+#define CAN_STOP          0x01       // Stop command
+#define CAN_CAL           0x02       // Calibration command
+#define CAN_POWER         0x03       // Power command
+#define CAN_STATUS        0x04       // Status query command
+#define CAN_THRESHOLD     0x05       // Threshold setting
+#define CAN_SPREAD        0x06       // Spread setting
+#define CAN_PROFILE       0x07       // Profile selection
+#define CAN_FOV           0x08       // Field of view setting
+#define CAN_VERSION_QUERY CAN_STATUS // Version is queried with status command (0x04)
 
-#define CAN_S3_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR3_OFFSET)        // 0xD0
-#define CAN_S3_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR3_OFFSET)        // 0xD1
-#define CAN_S3_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR3_OFFSET)  // 0xD3
-#define CAN_S3_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR3_OFFSET) // 0xD4
-
-/**
- * @brief Multi-sensor raw data system
- */
-typedef struct
-{
-    radar_raw_t sensors[MAX_RADAR_SENSORS];
-    uint32_t    last_message_time[MAX_RADAR_SENSORS];
-    uint32_t    msgs_received[MAX_RADAR_SENSORS];
-    uint8_t     active_sensor_count;
-    bool        system_initialized;
-} multi_radar_raw_system_t;
+// Aliases for compatibility with your code
+#define CAN_CMD_PAYLOAD_START          CAN_START
+#define CAN_CMD_PAYLOAD_STOP           CAN_STOP
+#define CAN_CMD_PAYLOAD_QUERY_STATUS   CAN_STATUS
+#define CAN_CMD_PAYLOAD_SELECT_PROFILE CAN_PROFILE
+#define CAN_CMD_PAYLOAD_DET_THRESHOLD  CAN_THRESHOLD
 
 /** @name CAN System Functions */
 bool can_setup(void);
@@ -102,6 +93,9 @@ void can_run_diagnostics(void);
 uint8_t get_active_sensor_count(void); // Alias for can_get_online_sensor_count()
 
 /** @name Testing Functions */
+void test_complete_can_system(void);
+void test_basic_can_communication(void);
+void test_sensor_start_stop_sequence(void);
 void test_sensor_indexing(void);
 void test_sensor_responses(void);
 
