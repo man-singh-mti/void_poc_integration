@@ -11,8 +11,9 @@
 #include "mti_system.h"
 #include <string.h>
 
-#define FILTER_ID   0 //((0x00000060 << 3) | 0x4) // Base at 0x60
-#define FILTER_MASK 0 //((0x00000020 << 3) | 0x4) // Mask to allow 0x60-0xDF range
+#define FILTER_ID_0 (0x60 << 5) // Match 0x60–0x9F
+#define FILTER_ID_1 (0xA0 << 5) // Match 0xA0–0xDF
+#define FILTER_MASK 0
 
 /*------------------------------------------------------------------------------
  * Static Variables
@@ -42,15 +43,21 @@ bool can_setup(void)
 {
     debug_send("CAN: Setting up hardware");
 
-    canfil.FilterBank           = 0;
-    canfil.FilterMode           = CAN_FILTERMODE_IDMASK;
-    canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-    canfil.FilterIdHigh         = 0x0000;
-    canfil.FilterIdLow          = 0x0000;
-    canfil.FilterMaskIdHigh     = 0x0000;
-    canfil.FilterMaskIdLow      = 0x0000;
-    canfil.FilterScale          = CAN_FILTERSCALE_32BIT;
-    canfil.FilterActivation     = ENABLE;
+
+    canfil.FilterBank       = 0;
+    canfil.FilterIdHigh     = FILTER_ID_0 >> 16;
+    canfil.FilterIdLow      = FILTER_ID_0 & 0xFFFF;
+    canfil.FilterMaskIdHigh = FILTER_MASK >> 16;
+    canfil.FilterMaskIdLow  = FILTER_MASK & 0xFFFF;
+
+    canfil.FilterBank       = 1;
+    canfil.FilterIdHigh     = FILTER_ID_1 >> 16;
+    canfil.FilterIdLow      = FILTER_ID_1 & 0xFFFF;
+    canfil.FilterMaskIdHigh = FILTER_MASK >> 16;
+    canfil.FilterMaskIdLow  = FILTER_MASK & 0xFFFF;
+
+    canfil.FilterScale      = CAN_FILTERSCALE_32BIT;
+    canfil.FilterActivation = ENABLE;
 
     // Match working code sequence exactly
     if (HAL_CAN_ConfigFilter(&hcan1, &canfil) != HAL_OK)
@@ -71,7 +78,9 @@ bool can_setup(void)
         return false;
     }
 
-    debug_send("CAN: Hardware setup complete (Filter=0x%08X, Mask=0x%08X)", FILTER_ID, FILTER_MASK);
+    debug_send("CAN: Hardware setup complete 0 (Filter=0x%08X, Mask=0x%08X)", FILTER_ID_0, FILTER_MASK);
+    debug_send("CAN: Hardware setup complete 1 (Filter=0x%08X, Mask=0x%08X)", FILTER_ID_1, FILTER_MASK);
+
     debug_send("CAN: Accepting range 0x60-0xDF (Commands: 0x60,0x70,0x80,0x90 | Data: 0xA0-0xDF)");
     return true;
 }
@@ -98,10 +107,6 @@ bool can_initialize_system(void)
     {
         debug_send("CAN: Starting sensor %d...", i);
 
-        // Calculate what the command ID should be
-        uint32_t expected_id = CAN_COMMAND_BASE_ID + (i * 0x10);
-        debug_send("CAN: Expected command ID for sensor %d = 0x%02X", i, expected_id);
-
         // Send start command (0x00)
         if (!can_send_to_sensor(i, CAN_CMD_PAYLOAD_START))
         {
@@ -113,15 +118,14 @@ bool can_initialize_system(void)
         uint32_t wait_start        = HAL_GetTick();
         uint32_t initial_msg_count = raw_radar_system.msgs_received[i];
 
-        // Reduce timeout and check more frequently
-        while ((HAL_GetTick() - wait_start) < 500) // Reduce to 500ms
+        while ((HAL_GetTick() - wait_start) < 2000) // Wait up to 2 seconds
         {
             if (raw_radar_system.msgs_received[i] > initial_msg_count)
             {
                 debug_send("CAN: Sensor %d responded after %dms", i, HAL_GetTick() - wait_start);
                 break;
             }
-            HAL_Delay(10); // Check every 10ms instead of 50ms
+            HAL_Delay(50);
         }
 
         if (raw_radar_system.msgs_received[i] == initial_msg_count)
@@ -264,15 +268,10 @@ bool can_send_to_sensor(uint8_t sensor_idx, uint8_t command)
 {
     if (sensor_idx >= MAX_RADAR_SENSORS)
     {
-        debug_send("CAN: Invalid sensor index %d", sensor_idx);
         return false;
     }
 
-    // Calculate command ID based on sensor index
     uint32_t command_id = CAN_COMMAND_BASE_ID + (sensor_idx * 0x10);
-
-    debug_send("CAN: Sending to sensor %d, ID=0x%02X, command=0x%02X", sensor_idx, command_id, command);
-
     return can_send(command_id, command);
 }
 
