@@ -1,6 +1,6 @@
 /**
  * @file mti_can.c
- * @brief Simplified CAN bus communication implementation
+ * @brief CAN bus communication implementation for radar sensors
  * @author MTi Group
  * @copyright 2025 MTi Group
  */
@@ -26,10 +26,13 @@ static uint32_t                 canMailbox;
  * Static Function Declarations
  *----------------------------------------------------------------------------*/
 
-static void process_header_message(uint8_t sensor_idx, uint8_t *data);
-static void process_object_message(uint8_t sensor_idx, uint8_t *data);
-static void process_status_message(uint8_t sensor_idx, uint8_t *data);
-static void process_version_message(uint8_t sensor_idx, uint8_t *data);
+static void        process_header_message(uint8_t sensor_idx, uint8_t *data);
+static void        process_object_message(uint8_t sensor_idx, uint8_t *data);
+static void        process_status_message(uint8_t sensor_idx, uint8_t *data);
+static void        process_version_message(uint8_t sensor_idx, uint8_t *data);
+static void        update_sensor_online_status(uint8_t sensor_idx);
+static const char *get_status_string(uint8_t status);
+static bool        validate_sensor_message(uint8_t sensor_idx, uint8_t *data, uint8_t length);
 
 /*------------------------------------------------------------------------------
  * CAN System Initialization
@@ -39,23 +42,23 @@ bool can_setup(void)
 {
     debug_send("CAN: Setting up hardware");
 
-// Use the SAME filter configuration as working code
-#define FILTER_ID   ((0x00000085 << 3) | 0x4)
-#define FILTER_MASK 0
+    // Use the same filter configuration as working code
+    const uint32_t FILTER_ID   = ((0x00000085UL << 3) | 0x4UL);
+    const uint32_t FILTER_MASK = 0UL;
 
     canfil.FilterBank           = 0;
     canfil.FilterMode           = CAN_FILTERMODE_IDMASK;
     canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-    canfil.FilterIdHigh         = FILTER_ID >> 16;
-    canfil.FilterIdLow          = FILTER_ID & 0xFFFF;
-    canfil.FilterMaskIdHigh     = FILTER_MASK >> 16;
-    canfil.FilterMaskIdLow      = FILTER_MASK & 0xFFFF;
+    canfil.FilterIdHigh         = (uint16_t)(FILTER_ID >> 16);
+    canfil.FilterIdLow          = (uint16_t)(FILTER_ID & 0xFFFFUL);
+    canfil.FilterMaskIdHigh     = (uint16_t)(FILTER_MASK >> 16);
+    canfil.FilterMaskIdLow      = (uint16_t)(FILTER_MASK & 0xFFFFUL);
     canfil.FilterScale          = CAN_FILTERSCALE_32BIT;
     canfil.FilterActivation     = ENABLE;
 
     if (HAL_CAN_ConfigFilter(&hcan1, &canfil) != HAL_OK)
     {
-        debug_send("CAN: Filter failed");
+        debug_send("CAN: Filter configuration failed");
         return false;
     }
 
@@ -347,7 +350,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 }
 
 /*------------------------------------------------------------------------------
- * Message Processing Functions
+ * Message Processing Functions (Fixed for consistency)
  *----------------------------------------------------------------------------*/
 
 static void process_header_message(uint8_t sensor_idx, uint8_t *data)
@@ -359,11 +362,11 @@ static void process_header_message(uint8_t sensor_idx, uint8_t *data)
 
     // Header message indicates start of new frame
     uint32_t frame_number = 0;
-    uint32_t total_length = 0;
 
     // Extract frame info (assuming little-endian format)
     if (data[0] != 0x1A && data[0] != 0x1B) // Check for valid header
     {
+        uint32_t total_length = 0;
         memcpy(&total_length, &data[0], 4);
         if (data[4] != 0) // Frame number might be in bytes 4-7
         {
@@ -376,13 +379,13 @@ static void process_header_message(uint8_t sensor_idx, uint8_t *data)
         frame_number = data[0]; // First byte might be frame number
     }
 
-    debug_send("CAN: S%d Header - Frame=%d", sensor_idx, frame_number);
+    debug_send("CAN: S%d Header - Frame=%lu", sensor_idx, frame_number);
 
-    // Use the sensors array consistently (not raw_data)
-    radar_raw_t *raw_data  = &raw_radar_system.sensors[sensor_idx];
-    raw_data->num_points   = 0;
-    raw_data->frame_number = frame_number;
-    raw_data->new_frame    = true;
+    // Use consistent sensor array access
+    radar_raw_t *sensor_data  = &raw_radar_system.sensors[sensor_idx];
+    sensor_data->num_points   = 0;
+    sensor_data->frame_number = frame_number;
+    sensor_data->new_frame    = true;
 }
 
 static void process_object_message(uint8_t sensor_idx, uint8_t *data)
@@ -395,26 +398,24 @@ static void process_object_message(uint8_t sensor_idx, uint8_t *data)
     // Extract distance and SNR from 8-byte object data
     // Bytes 0-3: Distance (float, little-endian)
     // Bytes 4-7: SNR (float, little-endian)
-
     float distance_m, snr;
     memcpy(&distance_m, &data[0], sizeof(float));
     memcpy(&snr, &data[4], sizeof(float));
 
     debug_send("CAN: S%d Object - Distance=%.3fm, SNR=%.1f", sensor_idx, distance_m, snr);
 
-    // Use the sensors array consistently (not raw_data)
-    radar_raw_t *raw_data = &raw_radar_system.sensors[sensor_idx];
+    // Use consistent sensor array access
+    radar_raw_t *sensor_data = &raw_radar_system.sensors[sensor_idx];
 
-    if (raw_data->num_points < MAX_RADAR_DETECTED_POINTS)
+    if (sensor_data->num_points < MAX_RADAR_DETECTED_POINTS)
     {
-        raw_data->detected_points[raw_data->num_points][0] = distance_m;
-        raw_data->detected_points[raw_data->num_points][1] = snr;
-        raw_data->num_points++;
+        sensor_data->detected_points[sensor_data->num_points][0] = distance_m;
+        sensor_data->detected_points[sensor_data->num_points][1] = snr;
+        sensor_data->num_points++;
 
-        // Update raw data timestamp
-        raw_data->timestamp_ms       = HAL_GetTick();
-        raw_data->new_data           = true;
-        raw_data->new_data_available = true; // Set both flags for compatibility
+        // Update metadata
+        sensor_data->timestamp_ms       = HAL_GetTick();
+        sensor_data->new_data_available = true;
     }
 }
 
@@ -429,19 +430,17 @@ static void process_status_message(uint8_t sensor_idx, uint8_t *data)
 
     // Store the status
     raw_radar_system.sensor_status[sensor_idx]    = status;
-    raw_radar_system.last_status_time[sensor_idx] = HAL_GetTick();
-
-    // Status meanings based on your enum:
-    const char *status_str = "UNKNOWN";
+    raw_radar_system.last_status_time[sensor_idx] = HAL_GetTick(); // Status meanings based on constants:
+    const char *status_str                        = "UNKNOWN";
     switch (status)
     {
-    case 0x01:
+    case CAN_STATUS_BOOT:
         status_str = "BOOT";
         break;
-    case 0x02:
+    case CAN_STATUS_CHIRP:
         status_str = "CHIRP";
         break;
-    case 0x03:
+    case CAN_STATUS_STOPPED:
         status_str = "STOPPED";
         break;
     default:
@@ -452,7 +451,7 @@ static void process_status_message(uint8_t sensor_idx, uint8_t *data)
     debug_send("CAN: S%d status: %s (0x%02X)", sensor_idx, status_str, status);
 
     // If sensor is chirping, it's considered online and healthy
-    if (status == 0x02) // CHIRP
+    if (status == CAN_STATUS_CHIRP) // CHIRP
     {
         raw_radar_system.last_message_time[sensor_idx] = HAL_GetTick();
     }
@@ -507,15 +506,15 @@ void process_complete_radar_frame(uint8_t sensor_idx)
         return;
     }
 
-    // Use the sensors array consistently
-    radar_raw_t *raw_data = &raw_radar_system.sensors[sensor_idx];
+    // Use consistent sensor array access
+    radar_raw_t *sensor_data = &raw_radar_system.sensors[sensor_idx];
 
-    if (raw_data->num_points > 0)
+    if (sensor_data->num_points > 0)
     {
-        debug_send("CAN: S%d Frame complete - %d points detected", sensor_idx, raw_data->num_points);
+        debug_send("CAN: S%d Frame complete - %d points detected", sensor_idx, sensor_data->num_points);
 
         // Mark frame as complete for radar processing layer
-        raw_data->frame_complete = true;
+        sensor_data->frame_complete = true;
 
         // Notify radar layer that new data is available
         radar_notify_new_raw_data(sensor_idx);
@@ -523,7 +522,7 @@ void process_complete_radar_frame(uint8_t sensor_idx)
 }
 
 /*------------------------------------------------------------------------------
- * Data Access Functions
+ * Data Access Functions (Cleaned up)
  *----------------------------------------------------------------------------*/
 
 radar_raw_t *can_get_raw_data(uint8_t sensor_idx)
@@ -560,7 +559,7 @@ uint8_t can_get_online_sensor_count(void)
 
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        if ((current_time - raw_radar_system.last_message_time[i]) < 3000)
+        if ((current_time - raw_radar_system.last_message_time[i]) < CAN_SENSOR_OFFLINE_TIMEOUT_MS)
         {
             count++;
         }
@@ -575,17 +574,15 @@ bool can_is_sensor_online(uint8_t sensor_idx)
     if (sensor_idx >= MAX_RADAR_SENSORS)
     {
         return false;
-    }
-
-    // A sensor is online if:
+    } // A sensor is online if:
     // 1. We've received messages from it
     // 2. Recent activity (within timeout)
-    // 3. Status is CHIRP (0x02) - actively working
+    // 3. Status is CHIRP - actively working
 
     uint32_t current_time    = HAL_GetTick();
     bool     has_messages    = (raw_radar_system.msgs_received[sensor_idx] > 0);
     bool     recent_activity = (current_time - raw_radar_system.last_message_time[sensor_idx] < SENSOR_TIMEOUT_MS);
-    bool     is_chirping     = (raw_radar_system.sensor_status[sensor_idx] == 0x02);
+    bool     is_chirping     = (raw_radar_system.sensor_status[sensor_idx] == CAN_STATUS_CHIRP);
 
     return has_messages && recent_activity && is_chirping;
 }
@@ -743,31 +740,6 @@ void test_sensor_indexing(void)
     }
 }
 
-void test_sensor_responses(void)
-{
-    debug_send("=== Testing Sensor Responses ===");
-
-    // Send status query to all sensors
-    debug_send("Sending status queries to all sensors...");
-    can_send_command_to_all_sensors(CAN_CMD_PAYLOAD_QUERY_STATUS);
-
-    HAL_Delay(200); // Wait for responses
-
-    // Check results
-    uint8_t responding = 0;
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        bool online = can_is_sensor_online(i);
-        debug_send("Sensor %d (Header ID 0x%02X): %s", i, CAN_DATA_HEADER_BASE_ID + (i * 0x10), online ? "RESPONDING" : "NO RESPONSE");
-        if (online)
-        {
-            responding++;
-        }
-    }
-
-    debug_send("Response Test: %d/%d sensors responding", responding, MAX_RADAR_SENSORS);
-}
-
 void test_basic_can_communication(void)
 {
     debug_send("=== Testing Basic CAN Communication ===");
@@ -908,37 +880,8 @@ void test_sensor_start_stop_sequence(void)
     debug_send("=======================================");
 }
 
-void test_status_command_only(void)
-{
-    debug_send("=== Testing STATUS Command Only ===");
-
-    // Clear counters
-    memset(&raw_radar_system, 0, sizeof(raw_radar_system));
-
-    // Send STATUS to each sensor (no START first)
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        uint32_t sensor_cmd_id = CAN_COMMAND_BASE_ID + (i * 0x10);
-        debug_send("Direct STATUS to S%d (0x%02X)...", i, sensor_cmd_id);
-
-        can_send(sensor_cmd_id, CAN_STATUS);
-        HAL_Delay(200); // Wait for response
-
-        if (raw_radar_system.msgs_received[i] > 0)
-        {
-            debug_send("  S%d responded to direct STATUS", i);
-        }
-        else
-        {
-            debug_send("  S%d NO response to direct STATUS", i);
-        }
-    }
-
-    debug_send("======================================");
-}
-
 /*------------------------------------------------------------------------------
- * Compatibility Functions (for existing code)
+ * Compatibility Functions
  *----------------------------------------------------------------------------*/
 
 uint8_t get_active_sensor_count(void)
@@ -961,65 +904,50 @@ void test_complete_can_system(void)
 
     // Test 3: Final system check
     can_run_diagnostics();
-
     debug_send("============= TEST COMPLETE =============");
 }
 
-void test_sensor_versions(void)
+/*------------------------------------------------------------------------------
+ * Helper Functions
+ *----------------------------------------------------------------------------*/
+
+static void update_sensor_online_status(uint8_t sensor_idx)
 {
-    debug_send("=== Testing Sensor Version Query ===");
-
-    // Clear version data
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    if (sensor_idx >= MAX_RADAR_SENSORS)
     {
-        raw_radar_system.sensor_version_major[i]    = 0;
-        raw_radar_system.sensor_version_minor[i]    = 0;
-        raw_radar_system.sensor_version_patch[i]    = 0;
-        raw_radar_system.sensor_version_received[i] = false;
+        return;
     }
 
-    // Send version queries to all sensors
-    debug_send("Sending version queries to all sensors...");
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        uint32_t sensor_cmd_id = CAN_COMMAND_BASE_ID + (i * 0x10);
-        debug_send("  Querying S%d version (0x%02X)...", i, sensor_cmd_id);
+    raw_radar_system.last_message_time[sensor_idx] = HAL_GetTick();
+    raw_radar_system.msgs_received[sensor_idx]++;
+}
 
-        can_send(sensor_cmd_id, CAN_VERSION_QUERY);
-        HAL_Delay(100); // Wait for response
+static const char *get_status_string(uint8_t status)
+{
+    switch (status)
+    {
+    case CAN_STATUS_BOOT:
+        return "BOOT";
+    case CAN_STATUS_CHIRP:
+        return "CHIRP";
+    case CAN_STATUS_STOPPED:
+        return "STOPPED";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static bool validate_sensor_message(uint8_t sensor_idx, uint8_t *data, uint8_t length)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS)
+    {
+        return false;
     }
 
-    HAL_Delay(500); // Additional wait for all responses
-
-    // Report results
-    debug_send("Version Query Results:");
-    bool all_versions_received = true;
-
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    if (!data || length == 0 || length > 8)
     {
-        if (raw_radar_system.sensor_version_received[i])
-        {
-            debug_send("  S%d: v%02d.%02d.%02d",
-                       i,
-                       raw_radar_system.sensor_version_major[i],
-                       raw_radar_system.sensor_version_minor[i],
-                       raw_radar_system.sensor_version_patch[i]);
-        }
-        else
-        {
-            debug_send("  S%d: NO VERSION RESPONSE", i);
-            all_versions_received = false;
-        }
+        return false;
     }
 
-    if (all_versions_received)
-    {
-        debug_send("SUCCESS: All sensors reported versions");
-    }
-    else
-    {
-        debug_send("WARNING: Some sensors did not report versions");
-    }
-
-    debug_send("=====================================");
+    return true;
 }

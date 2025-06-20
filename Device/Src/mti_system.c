@@ -303,13 +303,13 @@ bool module_init(void)
                         test_sensor_indexing();
 
                         printf("@db,Testing sensor communication...\n");
-                        test_sensor_responses();
+                        test_basic_can_communication();
                     }
                 }
                 else
                 {
                     // Subsequent retries - just test communication
-                    test_sensor_responses();
+                    test_basic_can_communication();
                 }
 
                 retries_radar++;

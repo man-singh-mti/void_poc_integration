@@ -189,6 +189,13 @@ void void_get_config(void_config_t *config);
 const char *void_get_algorithm_string(void_algorithm_t algorithm);
 
 /**
+ * @brief Get algorithm string representation
+ * @param algorithm Algorithm enum value
+ * @return String representation of algorithm
+ */
+const char* void_get_algorithm_string(void_algorithm_t algorithm);
+
+/**
  * @brief Set baseline diameter
  *
  * @param baseline_mm Baseline diameter in millimeters
