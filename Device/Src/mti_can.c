@@ -79,6 +79,10 @@ bool can_initialize_system(void)
 {
     debug_send("CAN: Starting system initialization");
 
+    // CRITICAL: Wait for CAN sensors to power up and initialize
+    debug_send("CAN: Waiting 5 seconds for sensor power-up...");
+    HAL_Delay(5000); // 5 second delay for sensor initialization
+
     // Step 1: Setup CAN hardware
     if (!can_setup())
     {
@@ -90,10 +94,10 @@ bool can_initialize_system(void)
     memset(&raw_radar_system, 0, sizeof(raw_radar_system));
     debug_send("CAN: System state cleared");
 
-    // Step 3: Sequential sensor initialization (instead of simultaneous)
+    // Step 3: Sequential sensor initialization (only sensors 0, 1, 2)
     debug_send("CAN: Starting sensors sequentially with command 0x00");
 
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    for (uint8_t i = 0; i < 3; i++) // Changed from MAX_RADAR_SENSORS to 3
     {
         debug_send("CAN: Starting sensor %d...", i);
 
@@ -104,18 +108,18 @@ bool can_initialize_system(void)
             continue;
         }
 
-        // Wait for initial response (status message)
+        // Wait for initial response (increased timeout)
         uint32_t wait_start        = HAL_GetTick();
         uint32_t initial_msg_count = raw_radar_system.msgs_received[i];
 
-        while ((HAL_GetTick() - wait_start) < 2000) // Wait up to 2 seconds
+        while ((HAL_GetTick() - wait_start) < 5000) // 5 seconds
         {
             if (raw_radar_system.msgs_received[i] > initial_msg_count)
             {
                 debug_send("CAN: Sensor %d responded after %dms", i, HAL_GetTick() - wait_start);
                 break;
             }
-            HAL_Delay(50);
+            HAL_Delay(100);
         }
 
         if (raw_radar_system.msgs_received[i] == initial_msg_count)
@@ -123,20 +127,20 @@ bool can_initialize_system(void)
             debug_send("CAN: Sensor %d no response to start command", i);
         }
 
-        // Small delay between sensors
-        HAL_Delay(100);
+        // Delay between sensors to prevent bus flooding
+        HAL_Delay(500);
     }
 
-    // Step 4: Query status from all responding sensors
+    // Step 4: Query status from responding sensors
     debug_send("CAN: Querying status from all sensors with command 0x04");
 
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    for (uint8_t i = 0; i < 3; i++) // Changed from MAX_RADAR_SENSORS to 3
     {
         if (raw_radar_system.msgs_received[i] > 0)
         {
             debug_send("CAN: Querying status from sensor %d", i);
             can_send_to_sensor(i, CAN_CMD_PAYLOAD_QUERY_STATUS);
-            HAL_Delay(100); // Small delay between queries
+            HAL_Delay(100);
         }
     }
 
@@ -207,11 +211,23 @@ bool can_initialize_system(void)
 
 bool can_send(uint32_t ID, uint8_t message)
 {
+    // Wait for available mailbox with timeout
+    uint32_t timeout_start = HAL_GetTick();
+    while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0)
+    {
+        if ((HAL_GetTick() - timeout_start) > 100) // 100ms timeout
+        {
+            debug_send("CAN: Send timeout - no free mailboxes");
+            return false;
+        }
+        HAL_Delay(1);
+    }
+
     txHeader.DLC                = 1;
-    txHeader.IDE                = CAN_ID_EXT; // Use Extended ID
+    txHeader.IDE                = CAN_ID_EXT;
     txHeader.RTR                = CAN_RTR_DATA;
-    txHeader.StdId              = 0;  // Clear standard ID
-    txHeader.ExtId              = ID; // Use extended ID field
+    txHeader.StdId              = 0;
+    txHeader.ExtId              = ID;
     txHeader.TransmitGlobalTime = DISABLE;
 
     uint8_t           data[1] = { message };
@@ -224,6 +240,10 @@ bool can_send(uint32_t ID, uint8_t message)
     }
 
     debug_send("CAN TX (0x%08X) 0x%02X", ID, message);
+
+    // Small delay to prevent bus flooding
+    HAL_Delay(10);
+
     return true;
 }
 
@@ -254,26 +274,27 @@ bool can_send_array(uint32_t ID, uint8_t *message, size_t length)
     return (status == HAL_OK);
 }
 
+// Update the sensor validation function
+
 bool can_send_to_sensor(uint8_t sensor_idx, uint8_t command)
 {
-    if (sensor_idx >= MAX_RADAR_SENSORS)
+    if (sensor_idx >= 3) // Changed from MAX_RADAR_SENSORS to 3
     {
+        debug_send("CAN: Invalid sensor index %d (only 0-2 supported)", sensor_idx);
         return false;
     }
 
     uint32_t command_id = CAN_COMMAND_BASE_ID + (sensor_idx * CAN_SENSOR_ID_OFFSET);
-
-    // Convert to extended ID format
-    uint32_t extended_id = command_id; // Already in correct format from header
-
-    return can_send(extended_id, command);
+    return can_send(command_id, command);
 }
+
+// Update the all sensors command function
 
 bool can_send_command_to_all_sensors(uint8_t command)
 {
     bool all_success = true;
 
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    for (uint8_t i = 0; i < 3; i++) // Changed from MAX_RADAR_SENSORS to 3
     {
         if (!can_send_to_sensor(i, command))
         {
@@ -292,6 +313,18 @@ bool can_send_command_to_all_sensors(uint8_t command)
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
+    // Check if FIFO is about to overflow
+    uint32_t fill_level = HAL_CAN_GetRxFifoFillLevel(hcan, CAN_RX_FIFO0);
+    if (fill_level > 2) // If more than 2 messages pending
+    {
+        debug_send("CAN: RX FIFO overload (%d msgs)", fill_level);
+        // Clear excess messages to prevent overflow
+        while (HAL_CAN_GetRxFifoFillLevel(hcan, CAN_RX_FIFO0) > 1)
+        {
+            HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
+        }
+    }
+
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX) != HAL_OK)
     {
         debug_send("CAN RX ERROR");
@@ -301,14 +334,8 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     // Use ExtId for extended ID messages
     uint32_t can_id = rxHeader.ExtId;
 
-    // Debug output with extended ID format
-    char data_hex[25];
-    memset(data_hex, 0, 25);
-    for (int i = 0; i < rxHeader.DLC; i++)
-    {
-        sprintf(data_hex, "%s%02X", data_hex, canRX[i]);
-    }
-    debug_send("CAN RX: (0x%08X) 0x%s", can_id, data_hex);
+    // Simplified debug output - just show the CAN ID
+    debug_send("RX:%02X", (can_id & 0xFF));
 
     // Process messages based on extended IDs
     // Sensor 0 (0x000000A0-0x000000A4)
@@ -388,7 +415,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     }
     else
     {
-        debug_send("CAN: Unknown ExtID 0x%08X", can_id);
+        debug_send("UNK:%08X", can_id);
     }
 }
 
@@ -405,21 +432,35 @@ static void process_header_message(uint8_t sensor_idx, uint8_t *data)
 
     radar_raw_t *sensor = &raw_radar_system.sensors[sensor_idx];
 
-    // Extract header data - First byte indicates data type, next 4 bytes are frame number
-    uint8_t data_type = data[0]; // 0x1A for sensor 0, 0x1B for sensor 1, etc.
+    // Extract header data - First byte indicates data type
+    uint8_t data_type = data[0]; // 0x1A, 0x1B, 0x1C etc.
 
     // Frame number is in bytes 4-7 (little endian)
     memcpy(&sensor->frame_number, data + 4, 4);
 
-    // Calculate number of detection points based on pattern observed
-    // The exact calculation may need adjustment based on your data format
-    sensor->num_points = data_type - 10; // Rough estimate, adjust as needed
+    // Calculate number of detection points
+    if (data_type == 0x1A)
+    {
+        sensor->num_points = 16; // Sensor 0
+    }
+    else if (data_type == 0x1B)
+    {
+        sensor->num_points = 17; // Sensor 1
+    }
+    else if (data_type == 0x1C)
+    {
+        sensor->num_points = 18; // Sensor 2
+    }
+    else
+    {
+        sensor->num_points = data_type - 10; // Fallback
+    }
 
     // Reset for new frame
     memset(sensor->detected_points, 0, sizeof(sensor->detected_points));
 
-    debug_send("#frame,%d,%d", sensor->frame_number, sensor->num_points);
-    debug_send("CAN: S%d header - frame %d, %d points (type 0x%02X)", sensor_idx, sensor->frame_number, sensor->num_points, data_type);
+    // Minimal debug output
+    debug_send("F%d:%d", sensor->frame_number, sensor->num_points);
 }
 
 static void process_object_message(uint8_t sensor_idx, uint8_t *data)
@@ -431,27 +472,27 @@ static void process_object_message(uint8_t sensor_idx, uint8_t *data)
 
     radar_raw_t *sensor = &raw_radar_system.sensors[sensor_idx];
 
-    // Object data processing - copy 8 bytes directly to detected point
-    static uint8_t point_index[MAX_RADAR_SENSORS] = { 0 };
+    static uint8_t frame_point_count[MAX_RADAR_SENSORS] = { 0 };
 
-    if (point_index[sensor_idx] < MAX_RADAR_DETECTED_POINTS)
+    // Process first detection point (bytes 0-3)
+    if (frame_point_count[sensor_idx] < MAX_RADAR_DETECTED_POINTS)
     {
-        memcpy(&sensor->detected_points[point_index[sensor_idx]], data, 8);
+        memcpy(&sensor->detected_points[frame_point_count[sensor_idx]], data, 4);
+        frame_point_count[sensor_idx]++;
+    }
 
-        // Extract range and velocity from the data (adjust format as needed)
-        float range    = sensor->detected_points[point_index[sensor_idx]][0];
-        float velocity = sensor->detected_points[point_index[sensor_idx]][1];
+    // Process second detection point (bytes 4-7)
+    if (frame_point_count[sensor_idx] < MAX_RADAR_DETECTED_POINTS)
+    {
+        memcpy(&sensor->detected_points[frame_point_count[sensor_idx]], data + 4, 4);
+        frame_point_count[sensor_idx]++;
+    }
 
-        debug_send("S%d Point %d: Range=%.2f, Vel=%.2f", sensor_idx, point_index[sensor_idx], range, velocity);
-
-        point_index[sensor_idx]++;
-
-        // Check if frame is complete
-        if (point_index[sensor_idx] >= sensor->num_points)
-        {
-            point_index[sensor_idx] = 0; // Reset for next frame
-            process_complete_radar_frame(sensor_idx);
-        }
+    // Check if frame is complete
+    if (frame_point_count[sensor_idx] >= sensor->num_points)
+    {
+        frame_point_count[sensor_idx] = 0; // Reset for next frame
+        process_complete_radar_frame(sensor_idx);
     }
 }
 

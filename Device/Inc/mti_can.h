@@ -28,7 +28,6 @@
 #define CAN_S0_CMD_ID 0x00000060 // 96 decimal  - Sensor 0 command
 #define CAN_S1_CMD_ID 0x00000070 // 112 decimal - Sensor 1 command
 #define CAN_S2_CMD_ID 0x00000080 // 128 decimal - Sensor 2 command
-#define CAN_S3_CMD_ID 0x00000090 // 144 decimal - Sensor 3 command (future use)
 
 // --- Sensor Data Extended 29-bit IDs (what we receive) ---
 // Sensor 0 Data IDs (160-164 decimal range)
@@ -52,12 +51,8 @@
 #define CAN_S2_DATA_STATUS_REPLY_ID  0x000000C3 // 195 - Status reply
 #define CAN_S2_DATA_VERSION_REPLY_ID 0x000000C4 // 196 - Version reply
 
-// Sensor 3 Data IDs (208-212 decimal range) - future use
-#define CAN_S3_DATA_HEADER_ID        0x000000D0 // 208 - Header data
-#define CAN_S3_DATA_OBJECT_ID        0x000000D1 // 209 - Object/Detection data
-#define CAN_S3_DATA_PROFILE_ID       0x000000D2 // 210 - Range Profile data
-#define CAN_S3_DATA_STATUS_REPLY_ID  0x000000D3 // 211 - Status reply
-#define CAN_S3_DATA_VERSION_REPLY_ID 0x000000D4 // 212 - Version reply
+// --- System Configuration ---
+#define MAX_RADAR_SENSORS_ACTIVE 3 // Only using sensors 0, 1, 2
 
 // --- Base ID Definitions for Pattern Recognition (Extended IDs) ---
 #define CAN_COMMAND_BASE_ID            0x00000060 // Base for outgoing commands
@@ -69,10 +64,9 @@
 
 // --- Sensor ID Offset Pattern ---
 #define CAN_SENSOR_ID_OFFSET 0x10 // 16 decimal offset between sensors
-#define CAN_SENSOR0_OFFSET   0x00 // S0: +0
-#define CAN_SENSOR1_OFFSET   0x10 // S1: +16
-#define CAN_SENSOR2_OFFSET   0x20 // S2: +32
-#define CAN_SENSOR3_OFFSET   0x30 // S3: +48
+#define CAN_SENSOR0_OFFSET   0x00 // S0: +0  (A0-A4)
+#define CAN_SENSOR1_OFFSET   0x10 // S1: +16 (B0-B4)
+#define CAN_SENSOR2_OFFSET   0x20 // S2: +32 (C0-C4)
 
 /**
  * @brief Multi-sensor raw data system
