@@ -1,6 +1,6 @@
 /**
  * @file mti_can.h
- * @brief Simplified CAN bus communication for radar sensors
+ * @brief CAN bus communication for radar sensors using Extended 29-bit IDs
  * @author MTi Group
  * @copyright 2025 MTi Group
  */
@@ -13,57 +13,66 @@
 #include "vmt_uart.h"
 #include "mti_radar_types.h"
 
-// --- Base CAN ID Definitions ---
-#define CAN_COMMAND_BASE_ID            0x60 // Base for outgoing commands to sensors
-#define CAN_DATA_HEADER_BASE_ID        0xA0 // Base for Header data from sensors
-#define CAN_DATA_OBJECT_BASE_ID        0xA1 // Base for Object/Detected Points data
-#define CAN_DATA_PROFILE_BASE_ID       0xA2 // Base for Range Profile data
-#define CAN_DATA_STATUS_REPLY_BASE_ID  0xA3 // Base for Status reply from sensor
-#define CAN_DATA_VERSION_REPLY_BASE_ID 0xA4 // Base for Version reply from sensor
-
-// --- Sensor ID Offsets ---
-#define CAN_SENSOR0_OFFSET 0x00
-#define CAN_SENSOR1_OFFSET 0x10
-#define CAN_SENSOR2_OFFSET 0x20
-#define CAN_SENSOR3_OFFSET 0x30
-
 // --- CAN Command Payload Codes (1st byte of data in a command message) ---
-#define CAN_CMD_PAYLOAD_START           0x00
-#define CAN_CMD_PAYLOAD_STOP            0x01
-#define CAN_CMD_PAYLOAD_DC_CALIB        0x02
-#define CAN_CMD_PAYLOAD_TX_BACKOFF      0x03
-#define CAN_CMD_PAYLOAD_QUERY_STATUS    0x04
-#define CAN_CMD_PAYLOAD_DET_THRESHOLD   0x05
-#define CAN_CMD_PAYLOAD_SPREAD_SPECTRUM 0x06
-#define CAN_CMD_PAYLOAD_SELECT_PROFILE  0x07
-#define CAN_CMD_PAYLOAD_SET_FOV         0x08
+#define CAN_CMD_PAYLOAD_START           0x00 // Start sensor
+#define CAN_CMD_PAYLOAD_STOP            0x01 // Stop sensor
+#define CAN_CMD_PAYLOAD_DC_CALIB        0x02 // DC Calibration
+#define CAN_CMD_PAYLOAD_TX_BACKOFF      0x03 // TX Backoff
+#define CAN_CMD_PAYLOAD_QUERY_STATUS    0x04 // Query Status
+#define CAN_CMD_PAYLOAD_DET_THRESHOLD   0x05 // Detection Threshold
+#define CAN_CMD_PAYLOAD_SPREAD_SPECTRUM 0x06 // Spread Spectrum
+#define CAN_CMD_PAYLOAD_SELECT_PROFILE  0x07 // Select Profile
+#define CAN_CMD_PAYLOAD_SET_FOV         0x08 // Set Field of View
 
-// --- Sensor Command IDs (0x60 base) ---
-#define CAN_S0_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR0_OFFSET) // 0x60
-#define CAN_S1_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR1_OFFSET) // 0x70
-#define CAN_S2_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR2_OFFSET) // 0x80
-#define CAN_S3_CMD_ID (CAN_COMMAND_BASE_ID + CAN_SENSOR3_OFFSET) // 0x90
+// --- Sensor Command Extended 29-bit IDs (what we transmit) ---
+#define CAN_S0_CMD_ID 0x00000060 // 96 decimal  - Sensor 0 command
+#define CAN_S1_CMD_ID 0x00000070 // 112 decimal - Sensor 1 command
+#define CAN_S2_CMD_ID 0x00000080 // 128 decimal - Sensor 2 command
+#define CAN_S3_CMD_ID 0x00000090 // 144 decimal - Sensor 3 command (future use)
 
-// --- Sensor Data IDs (0xA0 base) ---
-#define CAN_S0_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR0_OFFSET)        // 0xA0
-#define CAN_S0_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR0_OFFSET)        // 0xA1
-#define CAN_S0_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR0_OFFSET)  // 0xA3
-#define CAN_S0_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR0_OFFSET) // 0xA4
+// --- Sensor Data Extended 29-bit IDs (what we receive) ---
+// Sensor 0 Data IDs (160-164 decimal range)
+#define CAN_S0_DATA_HEADER_ID        0x000000A0 // 160 - Header data
+#define CAN_S0_DATA_OBJECT_ID        0x000000A1 // 161 - Object/Detection data
+#define CAN_S0_DATA_PROFILE_ID       0x000000A2 // 162 - Range Profile data
+#define CAN_S0_DATA_STATUS_REPLY_ID  0x000000A3 // 163 - Status reply
+#define CAN_S0_DATA_VERSION_REPLY_ID 0x000000A4 // 164 - Version reply
 
-#define CAN_S1_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR1_OFFSET)        // 0xB0
-#define CAN_S1_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR1_OFFSET)        // 0xB1
-#define CAN_S1_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR1_OFFSET)  // 0xB3
-#define CAN_S1_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR1_OFFSET) // 0xB4
+// Sensor 1 Data IDs (176-180 decimal range)
+#define CAN_S1_DATA_HEADER_ID        0x000000B0 // 176 - Header data
+#define CAN_S1_DATA_OBJECT_ID        0x000000B1 // 177 - Object/Detection data
+#define CAN_S1_DATA_PROFILE_ID       0x000000B2 // 178 - Range Profile data
+#define CAN_S1_DATA_STATUS_REPLY_ID  0x000000B3 // 179 - Status reply
+#define CAN_S1_DATA_VERSION_REPLY_ID 0x000000B4 // 180 - Version reply
 
-#define CAN_S2_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR2_OFFSET)        // 0xC0
-#define CAN_S2_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR2_OFFSET)        // 0xC1
-#define CAN_S2_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR2_OFFSET)  // 0xC3
-#define CAN_S2_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR2_OFFSET) // 0xC4
+// Sensor 2 Data IDs (192-196 decimal range)
+#define CAN_S2_DATA_HEADER_ID        0x000000C0 // 192 - Header data
+#define CAN_S2_DATA_OBJECT_ID        0x000000C1 // 193 - Object/Detection data
+#define CAN_S2_DATA_PROFILE_ID       0x000000C2 // 194 - Range Profile data
+#define CAN_S2_DATA_STATUS_REPLY_ID  0x000000C3 // 195 - Status reply
+#define CAN_S2_DATA_VERSION_REPLY_ID 0x000000C4 // 196 - Version reply
 
-#define CAN_S3_DATA_HEADER_ID        (CAN_DATA_HEADER_BASE_ID + CAN_SENSOR3_OFFSET)        // 0xD0
-#define CAN_S3_DATA_OBJECT_ID        (CAN_DATA_OBJECT_BASE_ID + CAN_SENSOR3_OFFSET)        // 0xD1
-#define CAN_S3_DATA_STATUS_REPLY_ID  (CAN_DATA_STATUS_REPLY_BASE_ID + CAN_SENSOR3_OFFSET)  // 0xD3
-#define CAN_S3_DATA_VERSION_REPLY_ID (CAN_DATA_VERSION_REPLY_BASE_ID + CAN_SENSOR3_OFFSET) // 0xD4
+// Sensor 3 Data IDs (208-212 decimal range) - future use
+#define CAN_S3_DATA_HEADER_ID        0x000000D0 // 208 - Header data
+#define CAN_S3_DATA_OBJECT_ID        0x000000D1 // 209 - Object/Detection data
+#define CAN_S3_DATA_PROFILE_ID       0x000000D2 // 210 - Range Profile data
+#define CAN_S3_DATA_STATUS_REPLY_ID  0x000000D3 // 211 - Status reply
+#define CAN_S3_DATA_VERSION_REPLY_ID 0x000000D4 // 212 - Version reply
+
+// --- Base ID Definitions for Pattern Recognition (Extended IDs) ---
+#define CAN_COMMAND_BASE_ID            0x00000060 // Base for outgoing commands
+#define CAN_DATA_HEADER_BASE_ID        0x000000A0 // Base for Header data
+#define CAN_DATA_OBJECT_BASE_ID        0x000000A1 // Base for Object data
+#define CAN_DATA_PROFILE_BASE_ID       0x000000A2 // Base for Profile data
+#define CAN_DATA_STATUS_REPLY_BASE_ID  0x000000A3 // Base for Status replies
+#define CAN_DATA_VERSION_REPLY_BASE_ID 0x000000A4 // Base for Version replies
+
+// --- Sensor ID Offset Pattern ---
+#define CAN_SENSOR_ID_OFFSET 0x10 // 16 decimal offset between sensors
+#define CAN_SENSOR0_OFFSET   0x00 // S0: +0
+#define CAN_SENSOR1_OFFSET   0x10 // S1: +16
+#define CAN_SENSOR2_OFFSET   0x20 // S2: +32
+#define CAN_SENSOR3_OFFSET   0x30 // S3: +48
 
 /**
  * @brief Multi-sensor raw data system
@@ -109,10 +118,10 @@ void test_sensor_responses(void);
 uint8_t get_sensor_index_from_can_id(uint32_t can_id);
 void    process_complete_radar_frame(uint8_t sensor_idx);
 
-// Internal message processing functions
-static void process_header_message(uint8_t sensor_idx, uint8_t *data);
-static void process_object_message(uint8_t sensor_idx, uint8_t *data);
-static void process_status_message(uint8_t sensor_idx, uint8_t *data);
-static void process_version_message(uint8_t sensor_idx, uint8_t *data);
+// Note: These functions are now implemented in the .c file, not static
+void process_header_message(uint8_t sensor_idx, uint8_t *data);
+void process_object_message(uint8_t sensor_idx, uint8_t *data);
+void process_status_message(uint8_t sensor_idx, uint8_t *data);
+void process_version_message(uint8_t sensor_idx, uint8_t *data);
 
 #endif // MTI_CAN_H

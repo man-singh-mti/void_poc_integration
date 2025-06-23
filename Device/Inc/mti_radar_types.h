@@ -53,7 +53,10 @@ typedef struct
     uint32_t frame_number;                                  // Frame counter from sensor
     uint32_t timestamp_ms;                                  // When data was received
     bool     new_data_available;                            // Flag for event processing
-    uint8_t  sensor_status;                                 // Hardware status from sensor
+    uint8_t  system_status;                                 // Hardware status from sensor
+    uint8_t  fw_version_major;                              // Firmware version major
+    uint8_t  fw_version_minor;                              // Firmware version minor
+    uint8_t  fw_version_patch;                              // Firmware version patch
 } radar_raw_t;
 
 /**
