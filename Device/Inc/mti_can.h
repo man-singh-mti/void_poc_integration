@@ -1,6 +1,6 @@
 /**
  * @file mti_can.h
- * @brief CAN bus communication for radar sensors using Extended 29-bit IDs
+ * @brief Clean CAN middleware for radar sensors - Event-driven data collection
  * @author MTi Group
  * @copyright 2025 MTi Group
  */
@@ -10,118 +10,110 @@
 
 #include "stm32f7xx.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include "vmt_uart.h"
-#include "mti_radar_types.h"
 
-// --- CAN Command Payload Codes (1st byte of data in a command message) ---
-#define CAN_CMD_PAYLOAD_START           0x00 // Start sensor
-#define CAN_CMD_PAYLOAD_STOP            0x01 // Stop sensor
-#define CAN_CMD_PAYLOAD_DC_CALIB        0x02 // DC Calibration
-#define CAN_CMD_PAYLOAD_TX_BACKOFF      0x03 // TX Backoff
-#define CAN_CMD_PAYLOAD_QUERY_STATUS    0x04 // Query Status
-#define CAN_CMD_PAYLOAD_DET_THRESHOLD   0x05 // Detection Threshold
-#define CAN_CMD_PAYLOAD_SPREAD_SPECTRUM 0x06 // Spread Spectrum
-#define CAN_CMD_PAYLOAD_SELECT_PROFILE  0x07 // Select Profile
-#define CAN_CMD_PAYLOAD_SET_FOV         0x08 // Set Field of View
+/** @name Command Payload Codes */
+#define CAN_CMD_START           0x00 // Start sensor
+#define CAN_CMD_STOP            0x01 // Stop sensor
+#define CAN_CMD_DC_CALIB        0x02 // DC Calibration
+#define CAN_CMD_TX_BACKOFF      0x03 // TX Backoff
+#define CAN_CMD_QUERY_STATUS    0x04 // Query Status
+#define CAN_CMD_DET_THRESHOLD   0x05 // Detection Threshold
+#define CAN_CMD_SPREAD_SPECTRUM 0x06 // Spread Spectrum
+#define CAN_CMD_SELECT_PROFILE  0x07 // Select Profile
+#define CAN_CMD_SET_FOV         0x08 // Set Field of View
 
-// --- Sensor Command Extended 29-bit IDs (what we transmit) ---
-#define CAN_S0_CMD_ID 0x00000060 // 96 decimal  - Sensor 0 command
-#define CAN_S1_CMD_ID 0x00000070 // 112 decimal - Sensor 1 command
-#define CAN_S2_CMD_ID 0x00000080 // 128 decimal - Sensor 2 command
+/** @name Command IDs (what we transmit) */
+#define CAN_S0_CMD_ID 0x00000060 // Sensor 0 command
+#define CAN_S1_CMD_ID 0x00000070 // Sensor 1 command
+#define CAN_S2_CMD_ID 0x00000080 // Sensor 2 command
 
-// --- Sensor Data Extended 29-bit IDs (what we receive) ---
-// Sensor 0 Data IDs (160-164 decimal range)
-#define CAN_S0_DATA_HEADER_ID        0x000000A0 // 160 - Header data
-#define CAN_S0_DATA_OBJECT_ID        0x000000A1 // 161 - Object/Detection data
-#define CAN_S0_DATA_PROFILE_ID       0x000000A2 // 162 - Range Profile data
-#define CAN_S0_DATA_STATUS_REPLY_ID  0x000000A3 // 163 - Status reply
-#define CAN_S0_DATA_VERSION_REPLY_ID 0x000000A4 // 164 - Version reply
+/** @name Data IDs (what we receive) */
+// Sensor 0
+#define CAN_S0_HEADER_ID  0x000000A0 // Header data
+#define CAN_S0_OBJECT_ID  0x000000A1 // Object/Detection data
+#define CAN_S0_PROFILE_ID 0x000000A2 // Range Profile data
+#define CAN_S0_STATUS_ID  0x000000A3 // Status reply
+#define CAN_S0_VERSION_ID 0x000000A4 // Version reply
 
-// Sensor 1 Data IDs (176-180 decimal range)
-#define CAN_S1_DATA_HEADER_ID        0x000000B0 // 176 - Header data
-#define CAN_S1_DATA_OBJECT_ID        0x000000B1 // 177 - Object/Detection data
-#define CAN_S1_DATA_PROFILE_ID       0x000000B2 // 178 - Range Profile data
-#define CAN_S1_DATA_STATUS_REPLY_ID  0x000000B3 // 179 - Status reply
-#define CAN_S1_DATA_VERSION_REPLY_ID 0x000000B4 // 180 - Version reply
+// Sensor 1
+#define CAN_S1_HEADER_ID  0x000000B0 // Header data
+#define CAN_S1_OBJECT_ID  0x000000B1 // Object/Detection data
+#define CAN_S1_PROFILE_ID 0x000000B2 // Range Profile data
+#define CAN_S1_STATUS_ID  0x000000B3 // Status reply
+#define CAN_S1_VERSION_ID 0x000000B4 // Version reply
 
-// Sensor 2 Data IDs (192-196 decimal range)
-#define CAN_S2_DATA_HEADER_ID        0x000000C0 // 192 - Header data
-#define CAN_S2_DATA_OBJECT_ID        0x000000C1 // 193 - Object/Detection data
-#define CAN_S2_DATA_PROFILE_ID       0x000000C2 // 194 - Range Profile data
-#define CAN_S2_DATA_STATUS_REPLY_ID  0x000000C3 // 195 - Status reply
-#define CAN_S2_DATA_VERSION_REPLY_ID 0x000000C4 // 196 - Version reply
+// Sensor 2
+#define CAN_S2_HEADER_ID  0x000000C0 // Header data
+#define CAN_S2_OBJECT_ID  0x000000C1 // Object/Detection data
+#define CAN_S2_PROFILE_ID 0x000000C2 // Range Profile data
+#define CAN_S2_STATUS_ID  0x000000C3 // Status reply
+#define CAN_S2_VERSION_ID 0x000000C4 // Version reply
 
-// --- System Configuration ---
-#define MAX_RADAR_SENSORS_ACTIVE 3 // Only using sensors 0, 1, 2
+/** @name System Status */
+typedef enum
+{
+    RADAR_INITIALISING,
+    RADAR_READY,
+    RADAR_CHIRPING,
+    RADAR_STOPPED,
+} can_status_t;
 
-// --- Base ID Definitions for Pattern Recognition (Extended IDs) ---
-#define CAN_COMMAND_BASE_ID            0x00000060 // Base for outgoing commands
-#define CAN_DATA_HEADER_BASE_ID        0x000000A0 // Base for Header data
-#define CAN_DATA_OBJECT_BASE_ID        0x000000A1 // Base for Object data
-#define CAN_DATA_PROFILE_BASE_ID       0x000000A2 // Base for Profile data
-#define CAN_DATA_STATUS_REPLY_BASE_ID  0x000000A3 // Base for Status replies
-#define CAN_DATA_VERSION_REPLY_BASE_ID 0x000000A4 // Base for Version replies
-
-// --- Sensor ID Offset Pattern ---
-#define CAN_SENSOR_ID_OFFSET 0x10 // 16 decimal offset between sensors
-#define CAN_SENSOR0_OFFSET   0x00 // S0: +0  (A0-A4)
-#define CAN_SENSOR1_OFFSET   0x10 // S1: +16 (B0-B4)
-#define CAN_SENSOR2_OFFSET   0x20 // S2: +32 (C0-C4)
-
-/**
- * @brief Multi-sensor raw data system
- */
+/** @name Sensor Data Structure - Event Driven */
 typedef struct
 {
-    radar_raw_t sensors[MAX_RADAR_SENSORS];
-    uint32_t    last_message_time[MAX_RADAR_SENSORS];
-    uint32_t    msgs_received[MAX_RADAR_SENSORS];
-    uint8_t     active_sensor_count;
-    bool        system_initialized;
-} multi_radar_raw_system_t;
+    // Live data (auto-updated by CAN interrupt)
+    uint32_t frame_number;            // From header message
+    uint8_t  num_points;              // Number of detection points
+    float    detection_points[20][2]; // [distance_m, SNR] from object messages
+    uint8_t  status_code;             // From status reply
+    uint8_t  fw_version[3];           // [major, minor, patch] from version reply
 
-/** @name CAN System Functions */
-bool can_setup(void);
-bool can_initialize_system(void);
+    // Status tracking (auto-updated)
+    uint32_t     last_msg_time; // Timestamp of last message
+    uint32_t     msg_count;     // Total messages received
+    bool         online;        // Sensor responding
+    can_status_t status;        // Current sensor status
+} can_sensor_t;
 
-/** @name CAN Communication Functions */
-bool can_send(uint32_t ID, uint8_t message);
-bool can_send_array(uint32_t ID, uint8_t *message, size_t length);
-bool can_send_to_sensor(uint8_t sensor_idx, uint8_t command);
-bool can_send_command_to_all_sensors(uint8_t command);
+/** @name System Data Structure */
+typedef struct
+{
+    can_sensor_t sensors[3];         // All sensor data
+    bool         system_initialized; // System ready flag
+    uint8_t      online_count;       // Number of online sensors
+    can_status_t system_status;      // Overall system status
+    uint32_t     init_start_time;    // For timing measurements
+} can_system_t;
 
-/** @name CAN Data Access Functions */
-radar_raw_t *can_get_raw_data(uint8_t sensor_idx);
-bool         can_has_new_raw_data(uint8_t sensor_idx);
-void         can_mark_raw_data_processed(uint8_t sensor_idx);
-uint8_t      can_get_online_sensor_count(void);
-bool         can_is_sensor_online(uint8_t sensor_idx);
+/*------------------------------------------------------------------------------
+ * Core API - Simple and Clean
+ *----------------------------------------------------------------------------*/
 
-/** @name CAN System Health */
-bool can_system_is_healthy(void);
-void can_run_diagnostics(void);
+/** @name Initialization */
+bool can_init(void); // Complete initialization sequence
 
-/** @name Compatibility Functions (for existing code) */
-uint8_t get_active_sensor_count(void); // Alias for can_get_online_sensor_count()
+/** @name Commands */
+bool can_send_command(uint8_t sensor_id, uint8_t command);                                  // Single command
+bool can_send_command_data(uint8_t sensor_id, uint8_t command, uint8_t *data, uint8_t len); // Command + parameters
+bool can_send_to_all_sensors(uint8_t command);                                              // Broadcast command
 
-/** @name Testing Functions */
-void test_sensor_indexing(void);
-void test_sensor_responses(void);
+/** @name Data Access - Direct */
+can_sensor_t *can_get_sensor(uint8_t sensor_id); // Direct access to live data
+can_system_t *can_get_system(void);              // Complete system data
+uint8_t       can_get_online_count(void);        // Online sensor count
 
-void test_can_message_processing(void);
+/** @name Status */
+bool         can_is_system_healthy(void); // System health check
+can_status_t can_get_system_status(void); // Current system status
 
-void can_periodic_sensor_status_debug(void);
-void can_periodic_version_request(void);
-bool can_init_debug_timers(void);
+/** @name Processing */
+void can_process_timeouts(void); // Timeout management (main loop)
 
-/** @name Message Processing (Internal) */
-uint8_t get_sensor_index_from_can_id(uint32_t can_id);
-void    process_complete_radar_frame(uint8_t sensor_idx);
-
-// Note: These functions are now implemented in the .c file, not static
-void process_header_message(uint8_t sensor_idx, uint8_t *data);
-void process_object_message(uint8_t sensor_idx, uint8_t *data);
-void process_status_message(uint8_t sensor_idx, uint8_t *data);
-void process_version_message(uint8_t sensor_idx, uint8_t *data);
+/** @name Test & Debug Functions */
+void can_test_periodic(void);         // Periodic test (every 10s)
+void can_debug_system_status(void);   // Print complete status
+void can_debug_sensor_indexing(void); // Test CAN ID mapping
 
 #endif // MTI_CAN_H

@@ -644,12 +644,12 @@ void device_process(void)
     module_init();
     cmd_process();
 
-    radar_system_process(); // Processes radar data
-    temp_system_process();  // Handles temp data + streaming internally
-    void_system_process();  // Should handle void data + streaming internally
+    // radar_system_process(); // Processes radar data
+    temp_system_process(); // Handles temp data + streaming internally
+                           // void_system_process();  // Should handle void data + streaming internally
 
-    can_periodic_sensor_status_debug(); // Every 5 seconds
-    can_periodic_version_request();     // Every 10 seconds
+    can_process_timeouts(); // Timeout management (main loop)
+    can_test_periodic();    // Periodic test (every 10s) - includes status debug
 
     icm20948_process(&h_icm20948[0]);
     icm20948_process(&h_icm20948[1]);
@@ -797,8 +797,8 @@ static bool dev_init_process(void)
         step = STEP_CAN;
         break;
     case STEP_CAN:
-        // FIXED: Call full CAN system initialization, not just setup
-        if (can_initialize_system()) // Instead of just can_setup()
+        // Use new clean CAN initialization
+        if (can_init()) // Replace can_initialize_system() with can_init()
         {
             if (h_dev_debug.b_init)
             {

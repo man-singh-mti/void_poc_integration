@@ -267,108 +267,108 @@ bool module_init(void)
             printf("@status,down,7\n"); // Temperature error
             module_status_set(STATUS_TEMP_ERROR);
         }
-        init_step = STEP_RADAR;
+        init_step = STEP_FINISH;
         break;
 
-    case STEP_RADAR:
-        if (radar_init_status == RADAR_INIT_NOT_STARTED)
-        {
-            radar_init_status_set(RADAR_INIT_IN_PROGRESS);
-            retries_radar = 0;
-        }
-
-        if (radar_init_status == RADAR_INIT_IN_PROGRESS)
-        {
-            if (retries_radar < 5)
-            {
-                if (retries_radar == 0)
+        /*     case STEP_RADAR:
+                if (radar_init_status == RADAR_INIT_NOT_STARTED)
                 {
-                    // FIXED: Initialize CAN system first
-                    if (!can_initialize_system())
+                    radar_init_status_set(RADAR_INIT_IN_PROGRESS);
+                    retries_radar = 0;
+                }
+
+                if (radar_init_status == RADAR_INIT_IN_PROGRESS)
+                {
+                    if (retries_radar < 5)
                     {
-                        printf("@db,CAN initialization failed\n");
-                        radar_init_status_set(RADAR_INIT_ERROR);
-                        break;
+                        if (retries_radar == 0)
+                        {
+                            // FIXED: Initialize CAN system first
+                            if (!can_initialize_system())
+                            {
+                                printf("@db,CAN initialization failed\n");
+                                radar_init_status_set(RADAR_INIT_ERROR);
+                                break;
+                            }
+
+                            // Then initialize radar processing
+                            radar_system_init();
+
+                            if (debug_get())
+                            {
+                                printf("@db,Running CAN diagnostics...\n");
+                                can_run_diagnostics();
+
+                                printf("@db,Testing sensor indexing...\n");
+                                test_sensor_indexing();
+
+                                printf("@db,Testing sensor communication...\n");
+                                test_sensor_responses();
+                            }
+                        }
+                        else
+                        {
+                            // Subsequent retries - just test communication
+                            test_sensor_responses();
+                        }
+
+                        retries_radar++;
+                        uint8_t responding_sensors = get_active_sensor_count();
+
+                        if (responding_sensors >= 2) // Success
+                        {
+                            radar_init_status_set(RADAR_INIT_OK);
+                            if (debug_get())
+                            {
+                                printf("@db,Radar init SUCCESS: %d/%d sensors responding\n", responding_sensors, MAX_RADAR_SENSORS);
+                            }
+                        }
+                        else if (retries_radar >= 5) // Failure
+                        {
+                            radar_init_status_set(RADAR_INIT_ERROR);
+                            module_status_set(STATUS_RADAR_ERROR);
+                            printf("@status,down,3\n"); // Radar error
+                        }
                     }
+                }
+                init_step = STEP_VOID;
+                break;
 
-                    // Then initialize radar processing
-                    radar_system_init();
-
-                    if (debug_get())
+            case STEP_VOID:
+                if (void_system_init())
+                {
+                    if (void_is_system_ready())
                     {
-                        printf("@db,Running CAN diagnostics...\n");
-                        can_run_diagnostics();
+                        if (debug_get())
+                        {
+                            printf("@db,Void detection ready\n");
 
-                        printf("@db,Testing sensor indexing...\n");
-                        test_sensor_indexing();
+                            // Add void detection test
+                            void_run_diagnostics();
 
-                        printf("@db,Testing sensor communication...\n");
-                        test_sensor_responses();
+                            // Test with simulated data if available
+                            circle_fit_result_t test_result;
+                            if (void_test_circle_fit(&test_result))
+                            {
+                                printf("@db,Void circle fit test: PASS\n");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (debug_get())
+                        {
+                            printf("@db,Void detection initialized but waiting for radar\n");
+                        }
                     }
                 }
                 else
                 {
-                    // Subsequent retries - just test communication
-                    test_sensor_responses();
+                    printf("@status,down,8\n"); // Void error
+                    module_status_set(STATUS_VOID_ERROR);
                 }
-
-                retries_radar++;
-                uint8_t responding_sensors = get_active_sensor_count();
-
-                if (responding_sensors >= 2) // Success
-                {
-                    radar_init_status_set(RADAR_INIT_OK);
-                    if (debug_get())
-                    {
-                        printf("@db,Radar init SUCCESS: %d/%d sensors responding\n", responding_sensors, MAX_RADAR_SENSORS);
-                    }
-                }
-                else if (retries_radar >= 5) // Failure
-                {
-                    radar_init_status_set(RADAR_INIT_ERROR);
-                    module_status_set(STATUS_RADAR_ERROR);
-                    printf("@status,down,3\n"); // Radar error
-                }
-            }
-        }
-        init_step = STEP_VOID;
-        break;
-
-    case STEP_VOID:
-        if (void_system_init())
-        {
-            if (void_is_system_ready())
-            {
-                if (debug_get())
-                {
-                    printf("@db,Void detection ready\n");
-
-                    // Add void detection test
-                    void_run_diagnostics();
-
-                    // Test with simulated data if available
-                    circle_fit_result_t test_result;
-                    if (void_test_circle_fit(&test_result))
-                    {
-                        printf("@db,Void circle fit test: PASS\n");
-                    }
-                }
-            }
-            else
-            {
-                if (debug_get())
-                {
-                    printf("@db,Void detection initialized but waiting for radar\n");
-                }
-            }
-        }
-        else
-        {
-            printf("@status,down,8\n"); // Void error
-            module_status_set(STATUS_VOID_ERROR);
-        }
-        init_step = STEP_FINISH;
-        break;
+                init_step = STEP_FINISH;
+                break; */
 
     case STEP_FINISH:
         if (debug_get())
