@@ -644,12 +644,12 @@ void device_process(void)
     module_init();
     cmd_process();
 
-    // radar_system_process(); // Processes radar data
-    temp_system_process(); // Handles temp data + streaming internally
-                           // void_system_process();  // Should handle void data + streaming internally
+    radar_system_process(); // Processes radar data
+    temp_system_process();  // Handles temp data + streaming internally
+                            // void_system_process();  // Should handle void data + streaming internally
     radar_debug_measurements_periodic();
 
-    // can_process_timeouts(); // Timeout management (main loop)
+    can_process_timeouts(); // Timeout management (main loop)
     // can_test_periodic();    // Periodic test (every 10s) - includes status debug
 
     icm20948_process(&h_icm20948[0]);
@@ -1208,26 +1208,37 @@ static void dev_debug_process(void)
     // Add radar debug - every 2 seconds
     if (h_dev_debug.b_radar_sample)
     {
-        static uint32_t time_log = 0;
-        uint32_t        time_now = HAL_GetTick();
-        if (time_now - time_log >= 2000)
-        { // Every 2 seconds
-            time_log = time_now;
+        static uint32_t last_radar_debug = 0;
+        uint32_t        now              = HAL_GetTick();
 
-            printf("> radar:status"); // Remove sensor count
+        if ((now - last_radar_debug) >= 2000) // Every 2 seconds
+        {
+            last_radar_debug = now;
 
-            for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+            radar_distance_t measurements;
+            bool             has_data = radar_get_latest_measurements(&measurements);
+
+            printf("@radar_debug");
+            if (has_data)
             {
-                if (radar_has_valid_data(i))
+                printf(",valid_count=%d", measurements.valid_sensor_count);
+                for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
                 {
-                    printf(",S%d:%umm", i, radar_get_distance_mm(i));
-                }
-                else
-                {
-                    printf(",S%d:no_data", i);
+                    if (measurements.data_valid[i])
+                    {
+                        printf(",S%d:%umm", i, measurements.distance_mm[i]);
+                    }
+                    else
+                    {
+                        printf(",S%d:INVALID", i);
+                    }
                 }
             }
-            printf("\r\n");
+            else
+            {
+                printf(",no_data");
+            }
+            printf("\n");
         }
     }
 

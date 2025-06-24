@@ -17,19 +17,19 @@
 #include "mti_void.h"
 
 // Global variable definitions
-bool              debug        = true;
-bool              initialised  = false; // Initialize to false by default
-bool              water_synced = false; // Initialize to false by default
-radar_hw_status_t radar_status;
-status_t          module_status   = STATUS_SYNC; // Initialize to STATUS_SYNC
-bool              version_sent    = false;       // Initialize to false by default
-init_step_t       init_step       = STEP_START;
-uint8_t           retries_ver     = 0;
-uint8_t           retries_water   = 0;
-uint8_t           retries_imu     = 0;
-uint8_t           retries_radar   = 0;
-uint8_t           state           = initialising_state; // Initialize to initialising_state
-uint32_t          keepalive_timer = 0;
+bool         debug        = true;
+bool         initialised  = false; // Initialize to false by default
+bool         water_synced = false; // Initialize to false by default
+can_status_t radar_status;
+status_t     module_status   = STATUS_SYNC; // Initialize to STATUS_SYNC
+bool         version_sent    = false;       // Initialize to false by default
+init_step_t  init_step       = STEP_START;
+uint8_t      retries_ver     = 0;
+uint8_t      retries_water   = 0;
+uint8_t      retries_imu     = 0;
+uint8_t      retries_radar   = 0;
+uint8_t      state           = initialising_state; // Initialize to initialising_state
+uint32_t     keepalive_timer = 0;
 
 /**
  * @brief String representations for radar hardware statuses.
@@ -78,9 +78,9 @@ bool water_synced_get(void)
 
 /**
  * @brief Sets the radar hardware status and prints it if debug is enabled.
- * @param status The radar_hw_status_t value to set.
+ * @param status The can_status_t value to set.
  */
-void radar_status_set(radar_hw_status_t status)
+void radar_status_set(can_status_t status)
 {
     radar_status = status;
     if (debug_get())
@@ -270,62 +270,31 @@ bool module_init(void)
         break;
 
     case STEP_RADAR:
-        if (radar_init_status == RADAR_INIT_NOT_STARTED)
+        if (radar_system_init())
         {
-            radar_init_status_set(RADAR_INIT_IN_PROGRESS);
-            retries_radar = 0;
-        }
-
-        if (radar_init_status == RADAR_INIT_IN_PROGRESS)
-        {
-            if (retries_radar < 5)
+            if (debug_get())
             {
-                if (retries_radar == 0)
-                {
-                    // Initialize radar processing system
-                    if (!radar_system_init())
-                    {
-                        printf("@db,Radar system initialization failed\n");
-                        radar_init_status_set(RADAR_INIT_ERROR);
-                        break;
-                    }
+                printf("@db,Radar system initialized\n");
 
-                    if (debug_get())
-                    {
-                        printf("@db,Radar processing initialized\n");
-                    }
-                }
-
-                retries_radar++;
+                // Add radar test
                 uint8_t responding_sensors = can_get_online_count();
-
-                if (responding_sensors >= 2) // Success - at least 2 sensors responding
+                printf("@db,Radar sensor test: %d/%d sensors (", responding_sensors, MAX_RADAR_SENSORS);
+                if (responding_sensors >= 2)
                 {
-                    radar_init_status_set(RADAR_INIT_OK);
-                    if (debug_get())
-                    {
-                        printf("@db,Radar init SUCCESS: %d/%d sensors responding\n", responding_sensors, MAX_RADAR_SENSORS);
-                    }
-                }
-                else if (retries_radar >= 5) // Failure after 5 retries
-                {
-                    radar_init_status_set(RADAR_INIT_ERROR);
-                    module_status_set(STATUS_RADAR_ERROR);
-                    printf("@status,down,3\n"); // Radar error
-                    if (debug_get())
-                    {
-                        printf("@db,Radar init FAILED: Only %d/%d sensors responding after %d retries\n", responding_sensors, MAX_RADAR_SENSORS, retries_radar);
-                    }
+                    printf("PASS)\n");
                 }
                 else
                 {
-                    // Still retrying
-                    if (debug_get())
-                    {
-                        printf("@db,Radar init retry %d: %d/%d sensors responding\n", retries_radar, responding_sensors, MAX_RADAR_SENSORS);
-                    }
+                    printf("FAIL)\n");
                 }
             }
+            radar_init_status_set(RADAR_INIT_OK);
+        }
+        else
+        {
+            printf("@status,down,3\n"); // Radar error
+            module_status_set(STATUS_RADAR_ERROR);
+            radar_init_status_set(RADAR_INIT_ERROR);
         }
         init_step = STEP_FINISH;
         break;

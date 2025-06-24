@@ -29,6 +29,22 @@
 #define RADAR_PROFILE_CALIBRATION 0 // Calibration profile
 #define RADAR_PROFILE_MEASUREMENT 1 // Standard measurement profile
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/**
+ * @brief Defines the radar initialization status.
+ */
+typedef enum
+{
+    RADAR_INIT_NOT_STARTED, ///< Radar initialization has not started.
+    RADAR_INIT_IN_PROGRESS, ///< Radar initialization is in progress.
+    RADAR_INIT_OK,          ///< Radar initialization completed successfully.
+    RADAR_INIT_ERROR        ///< Radar initialization failed.
+} radar_init_status_t;
+
+
 /** @name Processed Measurement Data */
 typedef struct
 {

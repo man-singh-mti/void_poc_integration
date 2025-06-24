@@ -14,7 +14,7 @@
 #include "main.h"
 #include "vmt_device.h"
 #include "mti_can.h"
-#include "mti_radar_types.h" // For radar_hw_status_t, radar_init_status_t
+#include "mti_radar.h" // For can_status_t, radar_init_status_t
 
 #define HW_VER 3
 #if HW_VER >= 3
@@ -109,9 +109,9 @@ status_t module_status_get(void);
 
 /**
  * @brief Sets the radar hardware status.
- * @param status The radar_hw_status_t value to set.
+ * @param status The can_status_t value to set.
  */
-void radar_status_set(radar_hw_status_t status);
+void radar_status_set(can_status_t status);
 
 /**
  * @brief Sets the overall module status.
@@ -174,7 +174,7 @@ extern bool initialised;
 /// @brief Global flag indicating if water sensor synchronization is complete.
 extern bool water_synced;
 /// @brief Current hardware status of the radar.
-extern radar_hw_status_t radar_status;
+extern can_status_t radar_status;
 /// @brief Overall status of the system modules.
 extern status_t module_status;
 /// @brief Flag indicating if the version information has been sent.
