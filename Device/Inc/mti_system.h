@@ -162,7 +162,6 @@ bool system_is_operational_mode(void);
 
 // Forward declarations for static diagnostic functions (implementation in .c file)
 static void debug_init_status(void);
-static void debug_can_diagnostics(void);
 static void debug_radar_diagnostics(void);
 static void debug_void_diagnostics(void);
 

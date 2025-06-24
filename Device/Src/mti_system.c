@@ -39,7 +39,6 @@ static const char *str_radar_status[4] = { "Not Initialised", "Ready", "Chirping
 
 // Forward declarations for static functions
 static void debug_init_status(void);
-static void debug_can_diagnostics(void);
 static void debug_radar_diagnostics(void);
 static void debug_void_diagnostics(void);
 
@@ -374,7 +373,6 @@ bool module_init(void)
         if (debug_get())
         {
             debug_init_status();       // Full initialization summary
-            debug_can_diagnostics();   // Detailed CAN/sensor info
             debug_radar_diagnostics(); // Radar processing info
             debug_void_diagnostics();  // Void detection info
         }
@@ -553,7 +551,7 @@ static void debug_init_status(void)
         // CAN and sensor details (if radar has attempted init)
         if (radar_init_status_get() != RADAR_INIT_NOT_STARTED)
         {
-            printf("@db,    Active Sensors: %d/%d\n", get_active_sensor_count(), MAX_RADAR_SENSORS);
+            printf("@db,    Active Sensors: %d/%d\n", can_get_online_count(), MAX_RADAR_SENSORS);
         }
 
         // Temperature system
@@ -592,28 +590,6 @@ static void debug_init_status(void)
     }
 }
 
-/**
- * @brief Runs and prints CAN bus diagnostics if debug mode is enabled.
- */
-static void debug_can_diagnostics(void)
-{
-    if (debug_get())
-    { // Assuming MAX_RADAR_SENSORS is defined
-        printf("@db,--- CAN DIAGNOSTICS ---\n");
-        can_run_diagnostics(); // Assuming this function prints its own details
-        // Example: Show sensor communication statistics if available from CAN module
-        // for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++) {
-        //     printf("@db,  Sensor %d: TX_OK=%u, TX_ERR=%u, RX_OK=%u, RX_ERR=%u\n", i,
-        //            can_get_sensor_tx_ok(i), can_get_sensor_tx_err(i),
-        //            can_get_sensor_rx_ok(i), can_get_sensor_rx_err(i));
-        // }
-        printf("@db,--- END CAN DIAGNOSTICS ---\n");
-    }
-}
-
-/**
- * @brief Runs and prints Radar system diagnostics if debug mode is enabled.
- */
 static void debug_radar_diagnostics(void)
 {
     if (debug_get())

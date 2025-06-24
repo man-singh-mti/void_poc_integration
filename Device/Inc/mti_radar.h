@@ -9,6 +9,7 @@
 #define MTI_RADAR_H
 
 #include "mti_radar_types.h"
+#include "mti_can.h" // Add this include for can_sensor_t
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -94,6 +95,13 @@ bool radar_is_system_healthy(void);
 uint8_t radar_get_valid_sensor_count(void);
 
 /**
+ * @brief Get number of active/online sensors from CAN layer
+ *
+ * @return Number of active sensors
+ */
+uint8_t radar_get_active_sensor_count(void);
+
+/**
  * @brief Run radar system diagnostics
  */
 void radar_run_diagnostics(void);
@@ -128,17 +136,6 @@ void radar_set_processing_rate(uint8_t rate_hz);
  * @return Current processing rate in Hz
  */
 uint8_t radar_get_processing_rate(void);
-
-/** @name Internal Functions (used by CAN layer) */
-
-/**
- * @brief Notification from CAN layer that new raw data is available
- *
- * Called by process_complete_radar_frame() in mti_can.c
- *
- * @param sensor_idx Sensor index with new data
- */
-void radar_notify_new_raw_data(uint8_t sensor_idx);
 
 /** @name Sensor Control Functions */
 
@@ -176,6 +173,17 @@ bool radar_configure_sensors(uint8_t profile, uint8_t threshold);
  */
 bool radar_sensors_are_running(void);
 
+/** @name Internal Functions (used by CAN layer) */
+
+/**
+ * @brief Notification from CAN layer that new raw data is available
+ *
+ * Called by process_complete_radar_frame() in mti_can.c
+ *
+ * @param sensor_idx Sensor index with new data
+ */
+void radar_notify_new_raw_data(uint8_t sensor_idx);
+
 /** @name Compatibility Functions (for existing integration) */
 
 /**
@@ -193,12 +201,5 @@ bool radar_has_valid_data(uint8_t sensor_idx);
  * @return Distance in millimeters, or 0 if invalid
  */
 uint16_t radar_get_distance_mm(uint8_t sensor_idx);
-
-/**
- * @brief Get number of active sensors
- *
- * @return Number of active sensors
- */
-uint8_t radar_get_active_sensor_count(void);
 
 #endif // MTI_RADAR_H
