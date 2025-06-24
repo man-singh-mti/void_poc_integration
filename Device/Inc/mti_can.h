@@ -13,6 +13,16 @@
 #include <stdint.h>
 #include "vmt_uart.h"
 
+
+/** @name System Configuration Constants */
+#define MAX_RADAR_SENSORS         3U
+#define MAX_RADAR_DETECTED_POINTS 20U
+
+/** @name Sensor Angular Positions */
+#define SENSOR_0_ANGLE 0
+#define SENSOR_1_ANGLE 120
+#define SENSOR_2_ANGLE 240
+
 /** @name Command Payload Codes */
 #define CAN_CMD_START           0x00 // Start sensor
 #define CAN_CMD_STOP            0x01 // Stop sensor
@@ -64,11 +74,11 @@ typedef enum
 typedef struct
 {
     // Live data (auto-updated by CAN interrupt)
-    uint32_t frame_number;            // From header message
-    uint8_t  num_points;              // Number of detection points
-    float    detection_points[20][2]; // [distance_m, SNR] from object messages
-    uint8_t  status_code;             // From status reply
-    uint8_t  fw_version[3];           // [major, minor, patch] from version reply
+    uint32_t frame_number;                                   // From header message
+    uint8_t  num_points;                                     // Number of detection points
+    float    detection_points[MAX_RADAR_DETECTED_POINTS][2]; // [distance_m, SNR] from object messages
+    uint8_t  status_code;                                    // From status reply
+    uint8_t  fw_version[3];                                  // [major, minor, patch] from version reply
 
     // Status tracking (auto-updated)
     uint32_t     last_msg_time; // Timestamp of last message

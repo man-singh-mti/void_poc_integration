@@ -8,7 +8,7 @@
 #ifndef MTI_VOID_H
 #define MTI_VOID_H
 
-#include "mti_radar_types.h"
+#include "mti_radar.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -35,6 +35,22 @@ typedef enum
     VOID_STATE_POSSIBLE     = 1,
     VOID_STATE_CONFIRMED    = 2
 } void_detection_state_t;
+
+/**
+ * @brief Void detection results (Stage 3)
+ */
+typedef struct
+{
+    bool     void_detected;        // true if void found
+    uint8_t  algorithm_used;       // 0=bypass,1=simple,2=circlefit
+    uint8_t  confidence_percent;   // 0–100%
+    uint16_t void_size_mm;         // estimated size
+    uint8_t  sensor_count_used;    // sensors used
+    uint32_t detection_time_ms;    // when done
+    char     status_text[64];      // human-readable
+    bool     new_result_available; // flagged for TX
+} void_data_t;
+
 
 /** @name Measurement Data Structure */
 typedef struct

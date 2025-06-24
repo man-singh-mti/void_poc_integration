@@ -1,6 +1,6 @@
 /**
  * @file mti_radar.c
- * @brief Radar data processing layer implementation
+ * @brief Radar system implementation - Data processing and sensor management
  * @author MTi Group
  * @copyright 2025 MTi Group
  */
@@ -8,6 +8,7 @@
 #include "mti_radar.h"
 #include "mti_can.h"
 #include "vmt_uart.h"
+#include "mti_system.h"
 #include <string.h>
 #include <math.h>
 
@@ -18,7 +19,7 @@
 /** @brief Latest processed measurements */
 static radar_distance_t latest_measurements = { 0 };
 
-/** @brief Processing configuration */
+/** @brief System configuration */
 static struct
 {
     float    snr_threshold;       // Minimum SNR for valid reading
@@ -26,21 +27,19 @@ static struct
     uint16_t max_distance_mm;     // Maximum valid distance
     uint32_t last_process_time;   // Last processing timestamp
     bool     new_data_available;  // Flag for void detection layer
-    uint16_t process_interval_ms; // Processing interval (configurable)
+    uint16_t process_interval_ms; // Processing interval
     uint8_t  process_rate_hz;     // Processing rate in Hz
-    bool     sensors_started;     // Track if sensors are running
-    uint8_t  sensor_profile;      // Current sensor profile
-} radar_config = {
-    .snr_threshold       = RADAR_MIN_SNR_THRESHOLD,
-    .min_distance_mm     = RADAR_MIN_VALID_DISTANCE_MM,
-    .max_distance_mm     = RADAR_MAX_VALID_DISTANCE_MM,
-    .last_process_time   = 0,
-    .new_data_available  = false,
-    .process_interval_ms = RADAR_PROCESSING_INTERVAL_MS,
-    .process_rate_hz     = 10, // Default 10Hz
-    .sensors_started     = false,
-    .sensor_profile      = 1 // Default to 50m single profile
-};
+    bool     system_initialized;  // Initialization complete flag
+    bool     firmware_verified;   // Firmware verification status
+} radar_config = { .snr_threshold       = RADAR_MIN_SNR_THRESHOLD,
+                   .min_distance_mm     = RADAR_MIN_VALID_DISTANCE_MM,
+                   .max_distance_mm     = RADAR_MAX_VALID_DISTANCE_MM,
+                   .last_process_time   = 0,
+                   .new_data_available  = false,
+                   .process_interval_ms = RADAR_PROCESSING_INTERVAL_MS,
+                   .process_rate_hz     = 10,
+                   .system_initialized  = false,
+                   .firmware_verified   = false };
 
 /** @brief Sensor angle lookup table */
 static const uint16_t sensor_angles[MAX_RADAR_SENSORS] = {
@@ -57,6 +56,7 @@ static bool     process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *s
 static bool     validate_sensor_measurement(float distance_m, float snr);
 static uint16_t convert_to_millimeters(float distance_m);
 static void     update_system_health(void);
+static bool     verify_sensor_firmware(uint8_t sensor_idx);
 
 /*------------------------------------------------------------------------------
  * System Initialization
@@ -64,7 +64,7 @@ static void     update_system_health(void);
 
 bool radar_system_init(void)
 {
-    debug_send("RADAR: Initializing processing system");
+    debug_send("=== RADAR SYSTEM INITIALIZATION START ===");
 
     // Initialize data structures
     memset(&latest_measurements, 0, sizeof(latest_measurements));
@@ -80,7 +80,55 @@ bool radar_system_init(void)
     radar_config.last_process_time  = HAL_GetTick();
     radar_config.new_data_available = false;
 
-    debug_send("RADAR: System initialized");
+    debug_send("RADAR: Data structures initialized");
+
+    // Wait for CAN system to be ready
+    if (!can_is_system_healthy())
+    {
+        debug_send("RADAR: Waiting for CAN system...");
+        uint32_t wait_start = HAL_GetTick();
+        while (!can_is_system_healthy() && (HAL_GetTick() - wait_start) < 5000)
+        {
+            HAL_Delay(100);
+        }
+
+        if (!can_is_system_healthy())
+        {
+            debug_send("RADAR: ERROR - CAN system not ready after 5 seconds");
+            return false;
+        }
+    }
+
+    debug_send("RADAR: CAN system ready, %d sensors online", can_get_online_count());
+
+    // Verify firmware versions
+    debug_send("RADAR: Verifying sensor firmware versions...");
+    radar_config.firmware_verified = radar_verify_firmware_versions();
+
+    if (!radar_config.firmware_verified)
+    {
+        debug_send("RADAR: WARNING - Firmware verification failed, continuing anyway");
+    }
+
+    // Set sensors to calibration mode initially
+    debug_send("RADAR: Setting sensors to calibration mode");
+    if (!radar_set_calibration_mode())
+    {
+        debug_send("RADAR: WARNING - Failed to set calibration mode");
+    }
+
+    HAL_Delay(500); // Allow sensors to configure
+
+    // Mark system as initialized
+    radar_config.system_initialized = true;
+
+    // Report configuration to debug and uphole
+    radar_report_configuration(UART_DEBUG);
+    radar_report_configuration(UART_UPHOLE);
+
+    debug_send("RADAR: System initialization complete");
+    debug_send("=== RADAR SYSTEM INITIALIZATION END ===");
+
     return true;
 }
 
@@ -90,9 +138,14 @@ bool radar_system_init(void)
 
 void radar_system_process(void)
 {
+    if (!radar_config.system_initialized)
+    {
+        return;
+    }
+
     uint32_t current_time = HAL_GetTick();
 
-    // Rate limiting - use configurable interval
+    // Rate limiting
     if ((current_time - radar_config.last_process_time) < radar_config.process_interval_ms)
     {
         return;
@@ -102,7 +155,7 @@ void radar_system_process(void)
 
     bool new_data_processed = false;
 
-    // Process each sensor using direct CAN data access
+    // Process each sensor using CAN data
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
         can_sensor_t *sensor = can_get_sensor(i);
@@ -112,6 +165,13 @@ void radar_system_process(void)
             {
                 new_data_processed = true;
             }
+        }
+        else
+        {
+            // Mark offline sensors as invalid
+            latest_measurements.data_valid[i]    = false;
+            latest_measurements.confidence[i]    = 0.0f;
+            latest_measurements.quality_score[i] = 0;
         }
     }
 
@@ -153,14 +213,14 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
     float best_snr          = 0.0f;
     bool  valid_point_found = false;
 
-    for (uint8_t point_idx = 0; point_idx < sensor->num_points && point_idx < 20; point_idx++)
+    for (uint8_t point_idx = 0; point_idx < sensor->num_points && point_idx < MAX_RADAR_DETECTED_POINTS; point_idx++)
     {
         float distance_m = sensor->detection_points[point_idx][0];
         float snr        = sensor->detection_points[point_idx][1];
 
         if (validate_sensor_measurement(distance_m, snr))
         {
-            // Prefer closer points, but with good SNR
+            // Prefer closer points with good SNR
             if (!valid_point_found || (distance_m < best_distance && snr > (best_snr * 0.8f)) || (snr > best_snr * 1.2f))
             {
                 best_distance     = distance_m;
@@ -177,16 +237,14 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         latest_measurements.data_valid[sensor_idx]  = true;
 
         // Calculate confidence and quality based on SNR
-        float confidence                              = fminf(best_snr / 100.0f, 1.0f); // Normalize SNR to 0-1
+        float confidence                              = fminf(best_snr / 100.0f, 1.0f);
         latest_measurements.confidence[sensor_idx]    = confidence;
         latest_measurements.quality_score[sensor_idx] = (uint8_t)(confidence * 100.0f);
 
-        debug_send("RADAR: S%d valid - %dmm, SNR=%.1f, conf=%.2f", sensor_idx, latest_measurements.distance_mm[sensor_idx], best_snr, confidence);
         return true;
     }
     else
     {
-        // No valid points found
         latest_measurements.data_valid[sensor_idx]    = false;
         latest_measurements.confidence[sensor_idx]    = 0.0f;
         latest_measurements.quality_score[sensor_idx] = 0;
@@ -216,21 +274,14 @@ static bool validate_sensor_measurement(float distance_m, float snr)
 
 static uint16_t convert_to_millimeters(float distance_m)
 {
-    // Convert meters to millimeters with bounds checking
     float distance_mm_f = distance_m * 1000.0f;
 
     if (distance_mm_f < 0.0f)
-    {
         return 0;
-    }
     else if (distance_mm_f > UINT16_MAX)
-    {
         return UINT16_MAX;
-    }
     else
-    {
         return (uint16_t)distance_mm_f;
-    }
 }
 
 static void update_system_health(void)
@@ -252,6 +303,234 @@ static void update_system_health(void)
 }
 
 /*------------------------------------------------------------------------------
+ * Sensor Management Functions
+ *----------------------------------------------------------------------------*/
+
+bool radar_set_calibration_mode(void)
+{
+    debug_send("RADAR: Setting calibration mode (profile %d)", RADAR_PROFILE_CALIBRATION);
+
+    bool success = true;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        uint8_t profile_data[1] = { RADAR_PROFILE_CALIBRATION };
+        if (!can_send_command_data(i, CAN_CMD_SELECT_PROFILE, profile_data, 1))
+        {
+            debug_send("RADAR: Failed to set calibration mode for sensor %d", i);
+            success = false;
+        }
+        HAL_Delay(50);
+    }
+
+    return success;
+}
+
+bool radar_set_measurement_mode(void)
+{
+    debug_send("RADAR: Setting measurement mode (profile %d)", RADAR_PROFILE_MEASUREMENT);
+
+    bool success = true;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        uint8_t profile_data[1] = { RADAR_PROFILE_MEASUREMENT };
+        if (!can_send_command_data(i, CAN_CMD_SELECT_PROFILE, profile_data, 1))
+        {
+            debug_send("RADAR: Failed to set measurement mode for sensor %d", i);
+            success = false;
+        }
+        HAL_Delay(50);
+    }
+
+    return success;
+}
+
+bool radar_start_sensors(void)
+{
+    debug_send("RADAR: Starting sensors");
+    return can_send_to_all_sensors(CAN_CMD_START);
+}
+
+bool radar_stop_sensors(void)
+{
+    debug_send("RADAR: Stopping sensors");
+    return can_send_to_all_sensors(CAN_CMD_STOP);
+}
+
+/*------------------------------------------------------------------------------
+ * Firmware Verification
+ *----------------------------------------------------------------------------*/
+
+bool radar_verify_firmware_versions(void)
+{
+    debug_send("RADAR: Verifying firmware versions (expected: v%d.%d.%d)", RADAR_EXPECTED_FW_MAJOR, RADAR_EXPECTED_FW_MINOR, RADAR_EXPECTED_FW_PATCH);
+
+    bool    all_verified = true;
+    uint8_t online_count = can_get_online_count();
+
+    if (online_count == 0)
+    {
+        debug_send("RADAR: No sensors online for firmware verification");
+        return false;
+    }
+
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        can_sensor_t *sensor = can_get_sensor(i);
+        if (sensor && sensor->online)
+        {
+            if (!verify_sensor_firmware(i))
+            {
+                all_verified = false;
+            }
+        }
+    }
+
+    if (all_verified)
+    {
+        debug_send("RADAR: All online sensors have correct firmware");
+    }
+    else
+    {
+        debug_send("RADAR: WARNING - Some sensors have incorrect firmware");
+    }
+
+    return all_verified;
+}
+
+static bool verify_sensor_firmware(uint8_t sensor_idx)
+{
+    can_sensor_t *sensor = can_get_sensor(sensor_idx);
+    if (!sensor || !sensor->online)
+    {
+        return false;
+    }
+
+    uint8_t major = sensor->fw_version[0];
+    uint8_t minor = sensor->fw_version[1];
+    uint8_t patch = sensor->fw_version[2];
+
+    bool version_correct = (major == RADAR_EXPECTED_FW_MAJOR) && (minor == RADAR_EXPECTED_FW_MINOR) && (patch == RADAR_EXPECTED_FW_PATCH);
+
+    if (version_correct)
+    {
+        debug_send("RADAR: Sensor %d firmware OK: v%d.%d.%d", sensor_idx, major, minor, patch);
+    }
+    else
+    {
+        debug_send("RADAR: Sensor %d firmware MISMATCH: v%d.%d.%d (expected v%d.%d.%d)",
+                   sensor_idx,
+                   major,
+                   minor,
+                   patch,
+                   RADAR_EXPECTED_FW_MAJOR,
+                   RADAR_EXPECTED_FW_MINOR,
+                   RADAR_EXPECTED_FW_PATCH);
+    }
+
+    return version_correct;
+}
+
+bool radar_get_sensor_firmware(uint8_t sensor_idx, uint8_t *major, uint8_t *minor, uint8_t *patch)
+{
+    if (sensor_idx >= MAX_RADAR_SENSORS || !major || !minor || !patch)
+    {
+        return false;
+    }
+
+    can_sensor_t *sensor = can_get_sensor(sensor_idx);
+    if (!sensor || !sensor->online)
+    {
+        return false;
+    }
+
+    *major = sensor->fw_version[0];
+    *minor = sensor->fw_version[1];
+    *patch = sensor->fw_version[2];
+
+    return true;
+}
+
+/*------------------------------------------------------------------------------
+ * Configuration and Status Reporting
+ *----------------------------------------------------------------------------*/
+
+void radar_report_configuration(uart_select_t channel)
+{
+    uart_tx_channel_set(channel);
+
+    printf("@radar,config,initialized,%s\n", radar_config.system_initialized ? "1" : "0");
+    printf("@radar,config,firmware_verified,%s\n", radar_config.firmware_verified ? "1" : "0");
+    printf("@radar,config,online_sensors,%d\n", can_get_online_count());
+    printf("@radar,config,valid_sensors,%d\n", latest_measurements.valid_sensor_count);
+    printf("@radar,config,system_healthy,%s\n", latest_measurements.system_healthy ? "1" : "0");
+    printf("@radar,config,snr_threshold,%.1f\n", radar_config.snr_threshold);
+    printf("@radar,config,distance_range,%d,%d\n", radar_config.min_distance_mm, radar_config.max_distance_mm);
+    printf("@radar,config,process_rate,%d\n", radar_config.process_rate_hz);
+
+    // Report individual sensor firmware
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        can_sensor_t *sensor = can_get_sensor(i);
+        if (sensor && sensor->online)
+        {
+            printf("@radar,sensor,%d,firmware,%d,%d,%d\n", i, sensor->fw_version[0], sensor->fw_version[1], sensor->fw_version[2]);
+        }
+        else
+        {
+            printf("@radar,sensor,%d,offline\n", i);
+        }
+    }
+
+    uart_tx_channel_undo();
+}
+
+void radar_run_diagnostics(void)
+{
+    debug_send("=== RADAR SYSTEM DIAGNOSTICS ===");
+    debug_send("System initialized: %s", radar_config.system_initialized ? "YES" : "NO");
+    debug_send("Firmware verified: %s", radar_config.firmware_verified ? "YES" : "NO");
+    debug_send("System healthy: %s", latest_measurements.system_healthy ? "YES" : "NO");
+    debug_send("Valid sensors: %d/%d", latest_measurements.valid_sensor_count, MAX_RADAR_SENSORS);
+    debug_send("Online sensors: %d/%d", can_get_online_count(), MAX_RADAR_SENSORS);
+    debug_send("SNR threshold: %.1f", radar_config.snr_threshold);
+    debug_send("Distance range: %d-%dmm", radar_config.min_distance_mm, radar_config.max_distance_mm);
+    debug_send("Process rate: %dHz", radar_config.process_rate_hz);
+    debug_send("");
+
+    // Individual sensor diagnostics
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        can_sensor_t *sensor = can_get_sensor(i);
+        debug_send("Sensor %d (%d°):", i, latest_measurements.angle_deg[i]);
+
+        if (sensor && sensor->online)
+        {
+            debug_send("  Status: ONLINE");
+            debug_send("  Firmware: v%d.%d.%d", sensor->fw_version[0], sensor->fw_version[1], sensor->fw_version[2]);
+            debug_send("  Messages: %lu", sensor->msg_count);
+
+            if (latest_measurements.data_valid[i])
+            {
+                debug_send("  Distance: %dmm", latest_measurements.distance_mm[i]);
+                debug_send("  Confidence: %.2f", latest_measurements.confidence[i]);
+                debug_send("  Quality: %d%%", latest_measurements.quality_score[i]);
+            }
+            else
+            {
+                debug_send("  Data: INVALID");
+            }
+        }
+        else
+        {
+            debug_send("  Status: OFFLINE");
+        }
+        debug_send("");
+    }
+
+    debug_send("===============================");
+}
+
+/*------------------------------------------------------------------------------
  * Data Access Functions
  *----------------------------------------------------------------------------*/
 
@@ -262,9 +541,7 @@ bool radar_get_latest_measurements(radar_distance_t *measurements)
         return false;
     }
 
-    // Copy latest measurements
     memcpy(measurements, &latest_measurements, sizeof(radar_distance_t));
-
     return radar_config.new_data_available;
 }
 
@@ -278,26 +555,13 @@ void radar_mark_data_processed(void)
     radar_config.new_data_available = false;
 }
 
-bool radar_get_sensor_measurement(uint8_t sensor_idx, uint16_t *distance_mm, bool *valid)
-{
-    if (sensor_idx >= MAX_RADAR_SENSORS || !distance_mm || !valid)
-    {
-        return false;
-    }
-
-    *distance_mm = latest_measurements.distance_mm[sensor_idx];
-    *valid       = latest_measurements.data_valid[sensor_idx];
-
-    return true;
-}
-
 /*------------------------------------------------------------------------------
  * System Status Functions
  *----------------------------------------------------------------------------*/
 
 bool radar_is_system_healthy(void)
 {
-    return latest_measurements.system_healthy;
+    return radar_config.system_initialized && latest_measurements.system_healthy;
 }
 
 uint8_t radar_get_valid_sensor_count(void)
@@ -308,31 +572,6 @@ uint8_t radar_get_valid_sensor_count(void)
 uint8_t radar_get_active_sensor_count(void)
 {
     return can_get_online_count();
-}
-
-void radar_run_diagnostics(void)
-{
-    debug_send("=== RADAR System Diagnostics ===");
-    debug_send("System healthy: %s", latest_measurements.system_healthy ? "YES" : "NO");
-    debug_send("Valid sensors: %d/%d", latest_measurements.valid_sensor_count, MAX_RADAR_SENSORS);
-    debug_send("SNR threshold: %.1f", radar_config.snr_threshold);
-    debug_send("Distance range: %d-%dmm", radar_config.min_distance_mm, radar_config.max_distance_mm);
-    debug_send("");
-
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        debug_send("Sensor %d (%d°): %s", i, latest_measurements.angle_deg[i], latest_measurements.data_valid[i] ? "VALID" : "INVALID");
-
-        if (latest_measurements.data_valid[i])
-        {
-            debug_send("  Distance: %dmm, Confidence: %.2f, Quality: %d%%",
-                       latest_measurements.distance_mm[i],
-                       latest_measurements.confidence[i],
-                       latest_measurements.quality_score[i]);
-        }
-    }
-
-    debug_send("===============================");
 }
 
 /*------------------------------------------------------------------------------
@@ -365,141 +604,13 @@ void radar_set_processing_rate(uint8_t rate_hz)
     }
 }
 
-uint8_t radar_get_processing_rate(void)
-{
-    return radar_config.process_rate_hz;
-}
-
 /*------------------------------------------------------------------------------
- * Sensor Control Functions
+ * System Lifecycle
  *----------------------------------------------------------------------------*/
-
-bool radar_start_sensors(void)
-{
-    debug_send("RADAR: Starting sensors...");
-
-    // Send start command to all sensors
-    if (!can_send_to_all_sensors(CAN_CMD_START))
-    {
-        debug_send("RADAR: Failed to send start commands");
-        return false;
-    }
-
-    HAL_Delay(200); // Wait for sensors to respond
-
-    // Configure sensors with default profile
-    debug_send("RADAR: Configuring sensors (profile %d)...", radar_config.sensor_profile);
-
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        uint8_t config_data[1] = { radar_config.sensor_profile };
-        if (!can_send_command_data(i, CAN_CMD_SELECT_PROFILE, config_data, 1))
-        {
-            debug_send("RADAR: Failed to configure sensor %d", i);
-        }
-        HAL_Delay(50);
-    }
-
-    HAL_Delay(500); // Wait for configuration
-
-    // Check if sensors are responding
-    uint8_t online_sensors = can_get_online_count();
-
-    if (online_sensors >= 2)
-    {
-        radar_config.sensors_started = true;
-        debug_send("RADAR: Sensors started successfully (%d online)", online_sensors);
-        return true;
-    }
-    else
-    {
-        debug_send("RADAR: Insufficient sensors online (%d/3)", online_sensors);
-        return false;
-    }
-}
-
-bool radar_stop_sensors(void)
-{
-    debug_send("RADAR: Stopping sensors...");
-
-    // Send stop command to all sensors
-    if (can_send_to_all_sensors(CAN_CMD_STOP))
-    {
-        radar_config.sensors_started = false;
-        debug_send("RADAR: Sensors stopped");
-        return true;
-    }
-    else
-    {
-        debug_send("RADAR: Failed to stop sensors");
-        return false;
-    }
-}
-
-bool radar_configure_sensors(uint8_t profile, uint8_t threshold)
-{
-    if (!radar_config.sensors_started)
-    {
-        debug_send("RADAR: Cannot configure - sensors not started");
-        return false;
-    }
-
-    debug_send("RADAR: Configuring sensors (profile=%d, threshold=%d)", profile, threshold);
-
-    bool success = true;
-
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        // Send profile command
-        uint8_t profile_data[1] = { profile };
-        if (!can_send_command_data(i, CAN_CMD_SELECT_PROFILE, profile_data, 1))
-        {
-            debug_send("RADAR: Failed to set profile for sensor %d", i);
-            success = false;
-        }
-        HAL_Delay(50);
-
-        // Send threshold command
-        uint8_t threshold_data[1] = { threshold };
-        if (!can_send_command_data(i, CAN_CMD_DET_THRESHOLD, threshold_data, 1))
-        {
-            debug_send("RADAR: Failed to set threshold for sensor %d", i);
-            success = false;
-        }
-        HAL_Delay(50);
-    }
-
-    if (success)
-    {
-        radar_config.sensor_profile = profile;
-        debug_send("RADAR: Configuration complete");
-    }
-
-    return success;
-}
-
-bool radar_sensors_are_running(void)
-{
-    return radar_config.sensors_started && can_is_system_healthy();
-}
-
-/*------------------------------------------------------------------------------
- * Interface Functions (called by CAN layer)
- *----------------------------------------------------------------------------*/
-
-void radar_notify_new_raw_data(uint8_t sensor_idx)
-{
-    // This function is called by process_complete_radar_frame() in mti_can.c
-    // The actual processing happens in radar_system_process() to maintain
-    // rate limiting and proper layer separation
-
-    // We could add immediate processing here if needed, but for now
-    // we rely on the main loop calling radar_system_process()
-}
 
 void radar_system_shutdown(void)
 {
-    debug_send("RADAR: Shutting down system...");
+    debug_send("RADAR: Shutting down system");
 
     // Stop sensors
     radar_stop_sensors();
@@ -507,35 +618,127 @@ void radar_system_shutdown(void)
     // Reset state
     memset(&latest_measurements, 0, sizeof(latest_measurements));
     radar_config.new_data_available = false;
-    radar_config.sensors_started    = false;
+    radar_config.system_initialized = false;
+    radar_config.firmware_verified  = false;
 
     debug_send("RADAR: Shutdown complete");
 }
 
 /*------------------------------------------------------------------------------
- * Compatibility Functions (for existing integration)
+ * Test & Debug Functions
  *----------------------------------------------------------------------------*/
 
-bool radar_has_valid_data(uint8_t sensor_idx)
+void radar_debug_measurements_periodic(void)
 {
-    if (sensor_idx >= MAX_RADAR_SENSORS)
-    {
-        return false;
-    }
-    return latest_measurements.data_valid[sensor_idx];
-}
+    static uint32_t last_debug_time = 0;
+    static bool     sensors_started = false;
+    static uint32_t debug_counter   = 0;
 
-uint16_t radar_get_distance_mm(uint8_t sensor_idx)
-{
-    if (sensor_idx >= MAX_RADAR_SENSORS)
-    {
-        return 0;
-    }
+    uint32_t now = HAL_GetTick();
 
-    if (latest_measurements.data_valid[sensor_idx])
+    // Run every 2 seconds
+    if ((now - last_debug_time) >= 2000)
     {
-        return latest_measurements.distance_mm[sensor_idx];
-    }
+        last_debug_time = now;
+        debug_counter++;
 
-    return 0;
+        debug_send("=== RADAR MEASUREMENTS DEBUG #%lu ===", debug_counter);
+
+        // First time: start sensors and leave them on
+        if (!sensors_started)
+        {
+            debug_send("FIRST RUN: Starting sensors and switching to measurement mode");
+
+            // Start sensors
+            if (radar_start_sensors())
+            {
+                debug_send("Sensors started successfully");
+                HAL_Delay(200);
+
+                // Switch to measurement mode
+                if (radar_set_measurement_mode())
+                {
+                    debug_send("Switched to measurement mode");
+                    sensors_started = true;
+                }
+                else
+                {
+                    debug_send("ERROR: Failed to set measurement mode");
+                }
+            }
+            else
+            {
+                debug_send("ERROR: Failed to start sensors");
+            }
+
+            debug_send("Waiting 1 second for sensors to stabilize...");
+            HAL_Delay(1000);
+        }
+
+        // Get latest processed measurements
+        radar_distance_t measurements;
+        bool             new_data = radar_get_latest_measurements(&measurements);
+
+        debug_send("Data available: %s | System healthy: %s | Valid sensors: %d/%d",
+                   new_data ? "YES" : "NO",
+                   measurements.system_healthy ? "YES" : "NO",
+                   measurements.valid_sensor_count,
+                   MAX_RADAR_SENSORS);
+
+        // Report individual sensor measurements
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            debug_send("Sensor %d (%d°):", i, measurements.angle_deg[i]);
+
+            if (measurements.data_valid[i])
+            {
+                debug_send("  Distance: %dmm", measurements.distance_mm[i]);
+                debug_send("  Confidence: %.2f", measurements.confidence[i]);
+                debug_send("  Quality: %d%%", measurements.quality_score[i]);
+                debug_send("  Status: VALID");
+            }
+            else
+            {
+                debug_send("  Status: INVALID - No valid detection points");
+                debug_send("  Distance: N/A");
+                debug_send("  Confidence: %.2f", measurements.confidence[i]);
+                debug_send("  Quality: %d%%", measurements.quality_score[i]);
+            }
+
+            // Also show raw CAN sensor data for comparison
+            can_sensor_t *can_sensor = can_get_sensor(i);
+            if (can_sensor && can_sensor->online)
+            {
+                debug_send("  CAN Status: ONLINE - Points: %d - Frame: %lu", can_sensor->num_points, can_sensor->frame_number);
+
+                // Show first detection point if available
+                if (can_sensor->num_points > 0)
+                {
+                    float distance_m = can_sensor->detection_points[0][0];
+                    float snr        = can_sensor->detection_points[0][1];
+                    debug_send("  Raw Point 0: %.3fm (%.1f SNR)", distance_m, snr);
+                }
+            }
+            else
+            {
+                debug_send("  CAN Status: OFFLINE");
+            }
+        }
+
+        // Summary line for easy parsing
+        debug_send("SUMMARY: [%d,%d,%d] valid=[%s,%s,%s] distances=[%d,%d,%d]mm",
+                   measurements.distance_mm[0],
+                   measurements.distance_mm[1],
+                   measurements.distance_mm[2],
+                   measurements.data_valid[0] ? "Y" : "N",
+                   measurements.data_valid[1] ? "Y" : "N",
+                   measurements.data_valid[2] ? "Y" : "N",
+                   measurements.data_valid[0] ? measurements.distance_mm[0] : 0,
+                   measurements.data_valid[1] ? measurements.distance_mm[1] : 0,
+                   measurements.data_valid[2] ? measurements.distance_mm[2] : 0);
+
+        debug_send("Timestamp: %lums | Processing healthy: %s", measurements.timestamp_ms, (HAL_GetTick() - measurements.timestamp_ms) < 1000 ? "YES" : "STALE");
+
+        debug_send("=== END MEASUREMENTS DEBUG ===");
+    }
 }
