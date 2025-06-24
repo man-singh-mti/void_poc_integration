@@ -22,6 +22,10 @@ static uint8_t                  canRX[8] = { 0 };
 static CAN_FilterTypeDef        canfil;
 static uint32_t                 canMailbox;
 
+static uint32_t last_debug_print_time     = 0;
+static uint32_t last_version_request_time = 0;
+static bool     debug_timers_initialized  = false;
+
 /*------------------------------------------------------------------------------
  * Static Function Declarations
  *----------------------------------------------------------------------------*/
@@ -239,7 +243,7 @@ bool can_send(uint32_t ID, uint8_t message)
         return false;
     }
 
-    debug_send("CAN TX (0x%08X) 0x%02X", ID, message);
+    // debug_send("CAN TX (0x%08X) 0x%02X", ID, message);
 
     // Small delay to prevent bus flooding
     HAL_Delay(10);
@@ -335,7 +339,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     uint32_t can_id = rxHeader.ExtId;
 
     // Simplified debug output - just show the CAN ID
-    debug_send("RX:%02X", (can_id & 0xFF));
+    // debug_send("RX:%02X", (can_id & 0xFF));
 
     // Process messages based on extended IDs
     // Sensor 0 (0x000000A0-0x000000A4)
@@ -460,7 +464,7 @@ static void process_header_message(uint8_t sensor_idx, uint8_t *data)
     memset(sensor->detected_points, 0, sizeof(sensor->detected_points));
 
     // Minimal debug output
-    debug_send("F%d:%d", sensor->frame_number, sensor->num_points);
+    // debug_send("F%d:%d", sensor->frame_number, sensor->num_points);
 }
 
 static void process_object_message(uint8_t sensor_idx, uint8_t *data)
@@ -544,7 +548,7 @@ void process_complete_radar_frame(uint8_t sensor_idx)
     sensor->timestamp_ms       = HAL_GetTick();
     sensor->new_data_available = true;
 
-    debug_send("CAN: S%d frame complete - %d points", sensor_idx, sensor->num_points);
+    // debug_send("CAN: S%d frame complete - %d points", sensor_idx, sensor->num_points);
 
 // Notify radar layer when it exists
 #ifdef MTI_RADAR_H
@@ -779,4 +783,89 @@ uint8_t get_active_sensor_count(void)
 {
     // Alias for existing function name used in mti_system.c
     return can_get_online_sensor_count();
+}
+
+/**
+ * @brief Initialize debug timing system
+ */
+bool can_init_debug_timers(void)
+{
+    last_debug_print_time     = HAL_GetTick();
+    last_version_request_time = HAL_GetTick();
+    debug_timers_initialized  = true;
+    return true;
+}
+
+/**
+ * @brief Print sensor status every 5 seconds (non-blocking)
+ * Call this in your main loop
+ */
+void can_periodic_sensor_status_debug(void)
+{
+    static uint32_t status_counter = 0; // Counter for status messages
+
+    if (!debug_timers_initialized)
+    {
+        can_init_debug_timers();
+    }
+
+    uint32_t current_time = HAL_GetTick();
+
+    // Print status every 10 seconds (10000ms)
+    if ((current_time - last_debug_print_time) >= 10000) // 10 seconds
+    {
+        last_debug_print_time = current_time;
+        status_counter++; // Increment counter each time message is sent
+
+        uint8_t online_count = 0;
+
+        // Count online sensors
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS_ACTIVE; i++)
+        {
+            if (can_is_sensor_online(i))
+            {
+                online_count++;
+            }
+        }
+
+        // Single debug print - minimal data using debug_send with counter
+        debug_send("CAN Status [%d]: S0:%s S1:%s S2:%s Total:%d/3",
+                   status_counter,
+                   can_is_sensor_online(0) ? "ON" : "OFF",
+                   can_is_sensor_online(1) ? "ON" : "OFF",
+                   can_is_sensor_online(2) ? "ON" : "OFF",
+                   online_count);
+    }
+}
+
+/**
+ * @brief Send version request to all sensors every 10 seconds
+ * Call this in your main loop for stress testing
+ */
+void can_periodic_version_request(void)
+{
+    if (!debug_timers_initialized)
+    {
+        can_init_debug_timers();
+    }
+
+    uint32_t current_time = HAL_GetTick();
+
+    // Send version request every 10 seconds (10000ms)
+    if ((current_time - last_version_request_time) >= 10000)
+    {
+        last_version_request_time = current_time;
+
+        // Send version query command to all sensors
+        bool success = can_send_command_to_all_sensors(CAN_CMD_PAYLOAD_QUERY_STATUS);
+
+        if (success)
+        {
+            debug_send("Version request sent to all sensors");
+        }
+        else
+        {
+            debug_send("ERROR: Version request failed");
+        }
+    }
 }

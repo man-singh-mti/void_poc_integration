@@ -648,6 +648,9 @@ void device_process(void)
     temp_system_process();  // Handles temp data + streaming internally
     void_system_process();  // Should handle void data + streaming internally
 
+    can_periodic_sensor_status_debug(); // Every 5 seconds
+    can_periodic_version_request();     // Every 10 seconds
+
     icm20948_process(&h_icm20948[0]);
     icm20948_process(&h_icm20948[1]);
 

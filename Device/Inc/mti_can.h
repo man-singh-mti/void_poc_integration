@@ -108,6 +108,12 @@ uint8_t get_active_sensor_count(void); // Alias for can_get_online_sensor_count(
 void test_sensor_indexing(void);
 void test_sensor_responses(void);
 
+void test_can_message_processing(void);
+
+void can_periodic_sensor_status_debug(void);
+void can_periodic_version_request(void);
+bool can_init_debug_timers(void);
+
 /** @name Message Processing (Internal) */
 uint8_t get_sensor_index_from_can_id(uint32_t can_id);
 void    process_complete_radar_frame(uint8_t sensor_idx);

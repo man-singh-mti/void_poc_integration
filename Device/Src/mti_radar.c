@@ -193,7 +193,7 @@ static bool process_raw_sensor_data(uint8_t sensor_idx)
         latest_measurements.confidence[sensor_idx]    = 0.0f;
         latest_measurements.quality_score[sensor_idx] = 0;
 
-        debug_send("RADAR: S%d invalid - no valid points", sensor_idx);
+        // debug_send("RADAR: S%d invalid - no valid points", sensor_idx);
         return false;
     }
 }
