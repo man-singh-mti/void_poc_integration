@@ -75,7 +75,8 @@ typedef struct
 {
     // Live data (auto-updated by CAN interrupt)
     uint32_t frame_number;                                   // From header message
-    uint8_t  num_points;                                     // Number of detection points
+    uint8_t  num_points;                                     // Number of detection points (from header)
+    uint8_t  current_point_count;                            // Current points received this frame
     float    detection_points[MAX_RADAR_DETECTED_POINTS][2]; // [distance_m, SNR] from object messages
     uint8_t  status_code;                                    // From status reply
     uint8_t  fw_version[3];                                  // [major, minor, patch] from version reply

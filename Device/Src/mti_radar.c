@@ -43,9 +43,9 @@ static struct
 
 /** @brief Sensor angle lookup table */
 static const uint16_t sensor_angles[MAX_RADAR_SENSORS] = {
-    SENSOR_0_ANGLE, // 0 degrees
-    SENSOR_1_ANGLE, // 120 degrees
-    SENSOR_2_ANGLE  // 240 degrees
+    0,   // Sensor 0: 0 degrees
+    120, // Sensor 1: 120 degrees
+    240  // Sensor 2: 240 degrees
 };
 
 /*------------------------------------------------------------------------------
@@ -53,7 +53,7 @@ static const uint16_t sensor_angles[MAX_RADAR_SENSORS] = {
  *----------------------------------------------------------------------------*/
 
 static bool     process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *sensor);
-static bool     validate_sensor_measurement(float distance_m, float snr);
+static bool     validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr);
 static uint16_t convert_to_millimeters(float distance_m);
 static void     update_system_health(void);
 static bool     verify_sensor_firmware(uint8_t sensor_idx);
@@ -72,8 +72,10 @@ bool radar_system_init(void)
     // Set sensor angles
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        latest_measurements.angle_deg[i]  = sensor_angles[i];
+        latest_measurements.angle_deg[i]  = sensor_angles[i]; // Should be 0, 120, 240
         latest_measurements.data_valid[i] = false;
+
+        debug_send("RADAR: Sensor %d assigned angle %d deg", i, sensor_angles[i]);
     }
 
     // Reset processing state
@@ -201,8 +203,8 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         return false;
     }
 
-    // Check if sensor has detection points
-    if (sensor->num_points == 0)
+    // Check if sensor has detection points - use current_point_count instead of num_points
+    if (sensor->current_point_count == 0)
     {
         latest_measurements.data_valid[sensor_idx] = false;
         return false;
@@ -213,12 +215,13 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
     float best_snr          = 0.0f;
     bool  valid_point_found = false;
 
-    for (uint8_t point_idx = 0; point_idx < sensor->num_points && point_idx < MAX_RADAR_DETECTED_POINTS; point_idx++)
+    // Use current_point_count - this is the actual number of points received
+    for (uint8_t point_idx = 0; point_idx < sensor->current_point_count && point_idx < MAX_RADAR_DETECTED_POINTS; point_idx++)
     {
         float distance_m = sensor->detection_points[point_idx][0];
         float snr        = sensor->detection_points[point_idx][1];
 
-        if (validate_sensor_measurement(distance_m, snr))
+        if (validate_sensor_measurement(sensor_idx, distance_m, snr)) // Add sensor_idx parameter
         {
             // Prefer closer points with good SNR
             if (!valid_point_found || (distance_m < best_distance && snr > (best_snr * 0.8f)) || (snr > best_snr * 1.2f))
@@ -252,11 +255,14 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
     }
 }
 
-static bool validate_sensor_measurement(float distance_m, float snr)
+static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr)
 {
+    debug_send("RADAR: Validating S%d: dist=%.3fm, snr=%.1f, thresh=%.1f", sensor_idx, distance_m, snr, radar_config.snr_threshold);
+
     // Check SNR threshold
     if (snr < radar_config.snr_threshold)
     {
+        debug_send("RADAR: S%d REJECTED - SNR %.1f < %.1f", sensor_idx, snr, radar_config.snr_threshold);
         return false;
     }
 
@@ -266,9 +272,11 @@ static bool validate_sensor_measurement(float distance_m, float snr)
     // Check distance range
     if (distance_mm < radar_config.min_distance_mm || distance_mm > radar_config.max_distance_mm)
     {
+        debug_send("RADAR: S%d REJECTED - distance %dmm out of range [%d-%dmm]", sensor_idx, distance_mm, radar_config.min_distance_mm, radar_config.max_distance_mm);
         return false;
     }
 
+    debug_send("RADAR: S%d VALID - %.3fm, %.1f SNR", sensor_idx, distance_m, snr);
     return true;
 }
 
@@ -501,7 +509,7 @@ void radar_run_diagnostics(void)
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
         can_sensor_t *sensor = can_get_sensor(i);
-        debug_send("Sensor %d (%d°):", i, latest_measurements.angle_deg[i]);
+        debug_send("Sensor %d (%d d):", i, latest_measurements.angle_deg[i]);
 
         if (sensor && sensor->online)
         {
@@ -688,7 +696,7 @@ void radar_debug_measurements_periodic(void)
         // Report individual sensor measurements
         for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            debug_send("Sensor %d (%d°):", i, measurements.angle_deg[i]);
+            debug_send("Sensor %d (%d d):", i, measurements.angle_deg[i]);
 
             if (measurements.data_valid[i])
             {
@@ -709,14 +717,14 @@ void radar_debug_measurements_periodic(void)
             can_sensor_t *can_sensor = can_get_sensor(i);
             if (can_sensor && can_sensor->online)
             {
-                debug_send("  CAN Status: ONLINE - Points: %d - Frame: %lu", can_sensor->num_points, can_sensor->frame_number);
+                debug_send("  CAN Status: ONLINE - Points: %d - Frame: %lu",
+                           can_sensor->current_point_count, // Use current_point_count
+                           can_sensor->frame_number);
 
-                // Show first detection point if available
-                if (can_sensor->num_points > 0)
+                // Show first few raw points
+                for (uint8_t p = 0; p < can_sensor->current_point_count && p < 3; p++)
                 {
-                    float distance_m = can_sensor->detection_points[0][0];
-                    float snr        = can_sensor->detection_points[0][1];
-                    debug_send("  Raw Point 0: %.3fm (%.1f SNR)", distance_m, snr);
+                    debug_send("  Raw Point %d: %.3fm (%.1f SNR)", p, can_sensor->detection_points[p][0], can_sensor->detection_points[p][1]);
                 }
             }
             else

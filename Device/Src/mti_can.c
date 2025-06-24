@@ -116,17 +116,30 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     // Sensor 0 messages
     case CAN_S0_HEADER_ID:
         memcpy(&can_system.sensors[0].frame_number, &rx_data[4], 4);
-        can_system.sensors[0].num_points    = rx_data[0] - 0x1A + 1; // Simple conversion
-        can_system.sensors[0].last_msg_time = timestamp;
+        can_system.sensors[0].num_points          = rx_data[0] - 0x1A + 1; // Convert from header format
+        can_system.sensors[0].current_point_count = 0;                     // Reset point counter for new frame
+        can_system.sensors[0].last_msg_time       = timestamp;
         can_system.sensors[0].msg_count++;
         can_system.sensors[0].online = true;
         can_system.sensors[0].status = RADAR_CHIRPING;
         break;
 
     case CAN_S0_OBJECT_ID:
-        // Copy detection points directly
-        memcpy(&can_system.sensors[0].detection_points[0], &rx_data[0], 4);
-        memcpy(&can_system.sensors[0].detection_points[1], &rx_data[4], 4);
+        // Each CAN message contains ONE detection point with range and SNR
+        if (can_system.sensors[0].num_points < MAX_RADAR_DETECTED_POINTS)
+        {
+            uint8_t point_idx = can_system.sensors[0].current_point_count;
+
+            // Extract range (bytes 0-3) and SNR (bytes 4-7) as floats
+            float range, snr;
+            memcpy(&range, &rx_data[0], 4);
+            memcpy(&snr, &rx_data[4], 4);
+
+            can_system.sensors[0].detection_points[point_idx][0] = range;
+            can_system.sensors[0].detection_points[point_idx][1] = snr;
+
+            can_system.sensors[0].current_point_count++;
+        }
         can_system.sensors[0].last_msg_time = timestamp;
         can_system.sensors[0].msg_count++;
         break;
@@ -146,16 +159,28 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     // Sensor 1 messages
     case CAN_S1_HEADER_ID:
         memcpy(&can_system.sensors[1].frame_number, &rx_data[4], 4);
-        can_system.sensors[1].num_points    = rx_data[0] - 0x1A + 1;
-        can_system.sensors[1].last_msg_time = timestamp;
+        can_system.sensors[1].num_points          = rx_data[0] - 0x1A + 1;
+        can_system.sensors[1].current_point_count = 0; // Add this line
+        can_system.sensors[1].last_msg_time       = timestamp;
         can_system.sensors[1].msg_count++;
         can_system.sensors[1].online = true;
         can_system.sensors[1].status = RADAR_CHIRPING;
         break;
 
     case CAN_S1_OBJECT_ID:
-        memcpy(&can_system.sensors[1].detection_points[0], &rx_data[0], 4);
-        memcpy(&can_system.sensors[1].detection_points[1], &rx_data[4], 4);
+        if (can_system.sensors[1].num_points < MAX_RADAR_DETECTED_POINTS)
+        {
+            uint8_t point_idx = can_system.sensors[1].current_point_count;
+
+            float range, snr;
+            memcpy(&range, &rx_data[0], 4);
+            memcpy(&snr, &rx_data[4], 4);
+
+            can_system.sensors[1].detection_points[point_idx][0] = range;
+            can_system.sensors[1].detection_points[point_idx][1] = snr;
+
+            can_system.sensors[1].current_point_count++;
+        }
         can_system.sensors[1].last_msg_time = timestamp;
         can_system.sensors[1].msg_count++;
         break;
@@ -175,16 +200,28 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     // Sensor 2 messages
     case CAN_S2_HEADER_ID:
         memcpy(&can_system.sensors[2].frame_number, &rx_data[4], 4);
-        can_system.sensors[2].num_points    = rx_data[0] - 0x1A + 1;
-        can_system.sensors[2].last_msg_time = timestamp;
+        can_system.sensors[2].num_points          = rx_data[0] - 0x1A + 1;
+        can_system.sensors[2].current_point_count = 0; // Add this line
+        can_system.sensors[2].last_msg_time       = timestamp;
         can_system.sensors[2].msg_count++;
         can_system.sensors[2].online = true;
         can_system.sensors[2].status = RADAR_CHIRPING;
         break;
 
     case CAN_S2_OBJECT_ID:
-        memcpy(&can_system.sensors[2].detection_points[0], &rx_data[0], 4);
-        memcpy(&can_system.sensors[2].detection_points[1], &rx_data[4], 4);
+        if (can_system.sensors[2].num_points < MAX_RADAR_DETECTED_POINTS)
+        {
+            uint8_t point_idx = can_system.sensors[2].current_point_count;
+
+            float range, snr;
+            memcpy(&range, &rx_data[0], 4);
+            memcpy(&snr, &rx_data[4], 4);
+
+            can_system.sensors[2].detection_points[point_idx][0] = range;
+            can_system.sensors[2].detection_points[point_idx][1] = snr;
+
+            can_system.sensors[2].current_point_count++;
+        }
         can_system.sensors[2].last_msg_time = timestamp;
         can_system.sensors[2].msg_count++;
         break;

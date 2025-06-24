@@ -805,6 +805,22 @@ static bool dev_init_process(void)
             {
                 printf("> can_init complete\r\n");
             }
+
+            // Initialize radar system after CAN is ready
+            if (radar_system_init())
+            {
+                if (h_dev_debug.b_init)
+                {
+                    printf("> radar_system_init complete\r\n");
+                }
+            }
+            else
+            {
+                if (h_dev_debug.b_init)
+                {
+                    printf("> radar_system_init FAILED\r\n");
+                }
+            }
         }
         else
         {
@@ -812,7 +828,6 @@ static bool dev_init_process(void)
             {
                 printf("> can_init FAILED\r\n");
             }
-            // Could add retry logic here
         }
         step = STEP_FINISH;
         break;
