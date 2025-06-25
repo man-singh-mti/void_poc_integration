@@ -127,4 +127,45 @@ void can_test_periodic(void);         // Periodic test (every 10s)
 void can_debug_system_status(void);   // Print complete status
 void can_debug_sensor_indexing(void); // Test CAN ID mapping
 
+/** @name Event-Driven Processing Flags */
+extern volatile bool can_radar_data_ready; // New radar data available
+extern volatile bool can_new_object_data;  // New object/detection data received
+
+/**
+ * @brief Check if new radar data is available for processing
+ * @return true if new data ready
+ */
+bool can_has_new_radar_data(void);
+
+/**
+ * @brief Clear the new radar data flag
+ */
+void can_clear_radar_data_flag(void);
+
+/**
+ * @brief Get frame completion count for debugging
+ * @return Number of complete frames received since last clear
+ */
+uint32_t can_get_frame_completion_count(void);
+
+/**
+ * @brief Check if specific sensor has new data
+ * @param sensor_id Sensor index (0-2)
+ * @return true if sensor has new data
+ */
+bool can_sensor_has_new_data(uint8_t sensor_id);
+
+/**
+ * @brief Clear specific sensor data flag
+ * @param sensor_id Sensor index (0-2)
+ */
+void can_clear_sensor_data_flag(uint8_t sensor_id);
+
+/**
+ * @brief Get frame completion count for specific sensor
+ * @param sensor_id Sensor index (0-2)
+ * @return Number of frames completed by this sensor
+ */
+uint32_t can_get_sensor_frame_count(uint8_t sensor_id);
+
 #endif // MTI_CAN_H

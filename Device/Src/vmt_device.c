@@ -646,10 +646,10 @@ void device_process(void)
 
     radar_system_process(); // Processes radar data
     temp_system_process();  // Handles temp data + streaming internally
-                            // void_system_process();  // Should handle void data + streaming internally
-    radar_debug_measurements_periodic();
+    void_system_process();  // Should handle void data + streaming internally
 
-    can_process_timeouts(); // Timeout management (main loop)
+    debug_void_system_test_wrapper(); // NEW: Complete pipeline test every 5 seconds
+    can_process_timeouts();           // Timeout management (main loop)
     // can_test_periodic();    // Periodic test (every 10s) - includes status debug
 
     icm20948_process(&h_icm20948[0]);

@@ -257,4 +257,31 @@ void void_run_diagnostics(void);
  */
 void void_get_statistics(uint32_t *total_detections, uint32_t *algorithm_switches, uint32_t *uptime_ms);
 
+/** @name Event-Driven Processing */
+
+/**
+ * @brief Get event processing statistics
+ * @param processing_count Pointer to store number of processing events
+ * @param stream_count Pointer to store number of streams sent
+ */
+void void_get_event_stats(uint32_t *processing_count, uint32_t *stream_count);
+
+/**
+ * @brief Enable/disable automatic streaming mode
+ * @param enabled true to enable automatic streaming to uphole
+ */
+void void_set_auto_streaming(bool enabled);
+
+/**
+ * @brief Check if automatic streaming is enabled
+ * @return true if auto streaming is enabled
+ */
+bool void_is_auto_streaming_enabled(void);
+
+/**
+ * @brief Comprehensive void system test function (runs automatically)
+ * @param test_interval_ms Test interval in milliseconds (e.g., 5000 for 5 seconds)
+ */
+void void_run_system_test(uint32_t test_interval_ms);
+
 #endif // MTI_VOID_H

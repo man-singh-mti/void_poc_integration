@@ -239,4 +239,19 @@ bool radar_get_sensor_firmware(uint8_t sensor_idx, uint8_t *major, uint8_t *mino
  */
 void radar_debug_measurements_periodic(void);
 
+/** @name Event-Driven Processing */
+
+/**
+ * @brief Check if radar has new processed data ready for void layer
+ * @return true if new processed data is available
+ */
+bool radar_has_new_processed_data(void);
+
+/**
+ * @brief Get event processing statistics
+ * @param event_count Pointer to store number of events processed
+ * @param last_event_time Pointer to store timestamp of last event
+ */
+void radar_get_event_stats(uint32_t *event_count, uint32_t *last_event_time);
+
 #endif // MTI_RADAR_H

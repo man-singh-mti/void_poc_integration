@@ -19,6 +19,13 @@ static CAN_TxHeaderTypeDef tx_header;
 static uint8_t             rx_data[8];
 static uint32_t            tx_mailbox;
 
+/** @brief Event flags for immediate processing */
+volatile bool     can_radar_data_ready                      = false;
+volatile bool     can_sensor_data_ready[MAX_RADAR_SENSORS]  = { false, false, false };
+volatile bool     can_new_object_data                       = false;
+volatile uint32_t can_sensor_frame_count[MAX_RADAR_SENSORS] = { 0, 0, 0 };
+static uint32_t   frame_completion_count                    = 0;
+
 /*------------------------------------------------------------------------------
  * Private Functions
  *----------------------------------------------------------------------------*/
@@ -110,14 +117,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     uint32_t timestamp = HAL_GetTick();
     uint32_t can_id    = rx_header.ExtId;
 
-    // Copy incoming data to structs - no complex processing
     switch (can_id)
     {
     // Sensor 0 messages
     case CAN_S0_HEADER_ID:
         memcpy(&can_system.sensors[0].frame_number, &rx_data[4], 4);
-        can_system.sensors[0].num_points          = rx_data[0] - 0x1A + 1; // Convert from header format
-        can_system.sensors[0].current_point_count = 0;                     // Reset point counter for new frame
+        can_system.sensors[0].num_points          = rx_data[0] - 0x1A + 1;
+        can_system.sensors[0].current_point_count = 0;
         can_system.sensors[0].last_msg_time       = timestamp;
         can_system.sensors[0].msg_count++;
         can_system.sensors[0].online = true;
@@ -125,12 +131,10 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         break;
 
     case CAN_S0_OBJECT_ID:
-        // Each CAN message contains ONE detection point with range and SNR
-        if (can_system.sensors[0].num_points < MAX_RADAR_DETECTED_POINTS)
+        if (can_system.sensors[0].current_point_count < MAX_RADAR_DETECTED_POINTS)
         {
             uint8_t point_idx = can_system.sensors[0].current_point_count;
 
-            // Extract range (bytes 0-3) and SNR (bytes 4-7) as floats
             float range, snr;
             memcpy(&range, &rx_data[0], 4);
             memcpy(&snr, &rx_data[4], 4);
@@ -139,6 +143,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             can_system.sensors[0].detection_points[point_idx][1] = snr;
 
             can_system.sensors[0].current_point_count++;
+
+            // NEW: Set per-sensor flags
+            can_sensor_data_ready[0] = true;
+            can_radar_data_ready     = true;
+            can_new_object_data      = true;
+            can_sensor_frame_count[0]++;
+            frame_completion_count++;
         }
         can_system.sensors[0].last_msg_time = timestamp;
         can_system.sensors[0].msg_count++;
@@ -168,7 +179,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         break;
 
     case CAN_S1_OBJECT_ID:
-        if (can_system.sensors[1].num_points < MAX_RADAR_DETECTED_POINTS)
+        if (can_system.sensors[1].current_point_count < MAX_RADAR_DETECTED_POINTS)
         {
             uint8_t point_idx = can_system.sensors[1].current_point_count;
 
@@ -180,6 +191,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             can_system.sensors[1].detection_points[point_idx][1] = snr;
 
             can_system.sensors[1].current_point_count++;
+
+            // NEW: Set per-sensor flags
+            can_sensor_data_ready[1] = true;
+            can_radar_data_ready     = true;
+            can_new_object_data      = true;
+            can_sensor_frame_count[1]++;
+            frame_completion_count++;
         }
         can_system.sensors[1].last_msg_time = timestamp;
         can_system.sensors[1].msg_count++;
@@ -209,7 +227,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
         break;
 
     case CAN_S2_OBJECT_ID:
-        if (can_system.sensors[2].num_points < MAX_RADAR_DETECTED_POINTS)
+        if (can_system.sensors[2].current_point_count < MAX_RADAR_DETECTED_POINTS)
         {
             uint8_t point_idx = can_system.sensors[2].current_point_count;
 
@@ -221,6 +239,13 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
             can_system.sensors[2].detection_points[point_idx][1] = snr;
 
             can_system.sensors[2].current_point_count++;
+
+            // NEW: Set per-sensor flags
+            can_sensor_data_ready[2] = true;
+            can_radar_data_ready     = true;
+            can_new_object_data      = true;
+            can_sensor_frame_count[2]++;
+            frame_completion_count++;
         }
         can_system.sensors[2].last_msg_time = timestamp;
         can_system.sensors[2].msg_count++;
@@ -587,4 +612,67 @@ void can_debug_sensor_indexing(void)
     debug_send("  S1: 0x%08X-0x%08X", CAN_S1_HEADER_ID, CAN_S1_VERSION_ID);
     debug_send("  S2: 0x%08X-0x%08X", CAN_S2_HEADER_ID, CAN_S2_VERSION_ID);
     debug_send("=================================");
+}
+
+// Add flag management functions
+bool can_has_new_radar_data(void)
+{
+    return can_radar_data_ready;
+}
+
+void can_clear_radar_data_flag(void)
+{
+    can_radar_data_ready = false;
+    can_new_object_data  = false;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        can_sensor_data_ready[i] = false;
+    }
+}
+
+uint32_t can_get_frame_completion_count(void)
+{
+    return frame_completion_count;
+}
+
+bool can_sensor_has_new_data(uint8_t sensor_id)
+{
+    if (sensor_id >= MAX_RADAR_SENSORS)
+    {
+        return false;
+    }
+    return can_sensor_data_ready[sensor_id];
+}
+
+void can_clear_sensor_data_flag(uint8_t sensor_id)
+{
+    if (sensor_id < MAX_RADAR_SENSORS)
+    {
+        can_sensor_data_ready[sensor_id] = false;
+    }
+
+    // Check if any sensors still have new data
+    can_radar_data_ready = false;
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (can_sensor_data_ready[i])
+        {
+            can_radar_data_ready = true;
+            break;
+        }
+    }
+
+    if (!can_radar_data_ready)
+    {
+        can_new_object_data = false;
+    }
+}
+
+uint32_t can_get_sensor_frame_count(uint8_t sensor_id)
+{
+    if (sensor_id >= MAX_RADAR_SENSORS)
+    {
+        return 0;
+    }
+    return can_sensor_frame_count[sensor_id];
 }

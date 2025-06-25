@@ -44,7 +44,23 @@ static struct
     void_detection_state_t detection_state;
     uint32_t               total_detections;
     uint32_t               algorithm_switches;
-} void_state = { 0 };
+    // Event-driven fields
+    bool     auto_streaming_enabled;
+    uint32_t immediate_processing_count;
+    uint32_t automatic_stream_count;
+    // System test fields
+    uint32_t last_test_time;
+    uint32_t test_counter;
+    uint32_t startup_phase;
+    bool     test_sensors_started;
+} void_state = { .system_initialized         = false,
+                 .auto_streaming_enabled     = false,
+                 .immediate_processing_count = 0,
+                 .automatic_stream_count     = 0,
+                 .last_test_time             = 0,
+                 .test_counter               = 0,
+                 .startup_phase              = 0,
+                 .test_sensors_started       = false };
 
 /** @brief Median filter buffers */
 static uint16_t median_buffer[MAX_RADAR_SENSORS][3] = { 0 };
@@ -64,6 +80,7 @@ static void     update_measurement_data(const radar_distance_t *radar_data);
 static void     generate_void_event(bool detected, uint8_t confidence, const char *algorithm_name);
 static bool     validate_radar_data(const radar_distance_t *radar_data);
 static void     void_send_automatic_stream_internal(void);
+static void     void_send_immediate_stream(void);
 
 
 /*------------------------------------------------------------------------------
@@ -124,36 +141,35 @@ bool void_is_system_ready(void)
 
 void void_system_process(void)
 {
-    // Update system state
     if (!void_is_system_ready())
     {
         return;
     }
 
-    uint32_t current_time = HAL_GetTick();
-
-    // Rate limiting - process at 10Hz
-    if ((current_time - void_state.last_process_time) < VOID_PROCESSING_INTERVAL_MS)
+    // NEW: Process immediately when radar has new data (no rate limiting)
+    if (!radar_has_new_data())
     {
-        return;
+        return; // Exit immediately if no new radar data
     }
 
-    void_state.last_process_time = current_time;
+    uint32_t current_time = HAL_GetTick();
 
-    // Process new radar data if available
-    if (radar_has_new_data())
+    debug_send("VOID: Processing triggered by radar data");
+
+    // Process new radar data immediately
+    if (process_radar_data())
     {
-        if (process_radar_data())
+        radar_mark_data_processed();
+        void_state.immediate_processing_count++;
+
+        // Send automatic stream if enabled and in operational mode
+        if (void_state.auto_streaming_enabled && system_is_operational_mode())
         {
-            radar_mark_data_processed();
+            void_send_immediate_stream();
         }
     }
 
-    // Handle automatic data streaming
-    if (system_is_operational_mode())
-    {
-        void_send_automatic_stream_internal(); // This call is now properly declared
-    }
+    void_state.last_process_time = current_time;
 }
 
 static bool process_radar_data(void)
@@ -772,6 +788,12 @@ void void_run_diagnostics(void)
     debug_send("  Status: %s", latest_results.status_text);
     debug_send("");
 
+    debug_send("Event-Driven Stats:");
+    debug_send("  Auto streaming: %s", void_state.auto_streaming_enabled ? "enabled" : "disabled");
+    debug_send("  Immediate processing count: %lu", void_state.immediate_processing_count);
+    debug_send("  Automatic stream count: %lu", void_state.automatic_stream_count);
+    debug_send("");
+
     debug_send("Statistics:");
     debug_send("  Total detections: %d", void_state.total_detections);
     debug_send("  Algorithm switches: %d", void_state.algorithm_switches);
@@ -841,6 +863,64 @@ static void void_send_automatic_stream_internal(void)
     void_mark_results_processed();
 }
 
+static void void_send_immediate_stream(void)
+{
+    if (!latest_results.new_result_available)
+    {
+        return;
+    }
+
+    uart_tx_channel_set(UART_UPHOLE);
+
+    // Send void detection event immediately
+    printf("!vd,%lu,%s,%d,%d,%s\r\n",
+           HAL_GetTick(),
+           latest_results.void_detected ? "detected" : "clear",
+           latest_results.void_size_mm,
+           latest_results.confidence_percent,
+           void_get_algorithm_string(latest_results.algorithm_used));
+
+    uart_tx_channel_undo();
+
+    // Mark as sent and update statistics
+    latest_results.new_result_available = false;
+    void_state.automatic_stream_count++;
+
+    debug_send("VOID: Event stream #%lu sent - %s (conf: %d%%)",
+               void_state.automatic_stream_count,
+               latest_results.void_detected ? "VOID DETECTED" : "clear",
+               latest_results.confidence_percent);
+}
+
+// Add streaming control functions
+void void_set_auto_streaming(bool enabled)
+{
+    void_state.auto_streaming_enabled = enabled;
+    debug_send("VOID: Auto streaming %s", enabled ? "enabled" : "disabled");
+}
+
+bool void_is_auto_streaming_enabled(void)
+{
+    return void_state.auto_streaming_enabled;
+}
+
+// Add event statistics function
+void void_get_event_stats(uint32_t *processing_count, uint32_t *stream_count)
+{
+    if (processing_count)
+    {
+        *processing_count = void_state.immediate_processing_count;
+    }
+    if (stream_count)
+    {
+        *stream_count = void_state.automatic_stream_count;
+    }
+}
+
+/*------------------------------------------------------------------------------
+ * Algorithm-Specific Functions
+ *----------------------------------------------------------------------------*/
+
 const char *void_get_algorithm_string(void_algorithm_t algorithm)
 {
     switch (algorithm)
@@ -880,4 +960,173 @@ void void_clear_statistics(void)
     void_state.algorithm_switches = 0;
     void_state.init_time_ms       = HAL_GetTick();
     debug_send("VOID: Statistics cleared");
+}
+
+// Add the comprehensive system test function
+void void_run_system_test(uint32_t test_interval_ms)
+{
+    uint32_t now = HAL_GetTick();
+
+    // Run at specified interval - always run, no enable/disable
+    if ((now - void_state.last_test_time) >= test_interval_ms)
+    {
+        void_state.last_test_time = now;
+        void_state.test_counter++;
+
+        debug_send("=== VOID SYSTEM TEST #%lu ===", void_state.test_counter);
+
+        // Startup phase: Initialize the complete pipeline
+        if (!void_state.test_sensors_started)
+        {
+            void_state.startup_phase++;
+            debug_send("STARTUP PHASE %lu: Initializing void detection pipeline", void_state.startup_phase);
+
+            switch (void_state.startup_phase)
+            {
+            case 1:
+                debug_send("Step 1: Starting radar sensors");
+                if (radar_start_sensors())
+                {
+                    debug_send("  Radar sensors started successfully");
+                }
+                else
+                {
+                    debug_send("  ERROR: Failed to start radar sensors");
+                    void_state.startup_phase = 0; // Retry next cycle
+                    return;
+                }
+                break;
+
+            case 2:
+                debug_send("Step 2: Setting measurement mode");
+                if (radar_set_measurement_mode())
+                {
+                    debug_send("  Measurement mode activated");
+                }
+                else
+                {
+                    debug_send("  ERROR: Failed to set measurement mode");
+                    void_state.startup_phase = 1; // Retry from sensor start
+                    return;
+                }
+                break;
+
+            case 3:
+                debug_send("Step 3: Enabling event-driven processing");
+                void_set_auto_streaming(true);
+                debug_send("  Auto streaming enabled");
+                debug_send("  Waiting for system stabilization...");
+                break;
+
+            case 4:
+                debug_send("STARTUP COMPLETE: Void detection pipeline active");
+                void_state.test_sensors_started = true;
+                break;
+            }
+
+            if (!void_state.test_sensors_started)
+            {
+                debug_send("=== STARTUP PHASE %lu COMPLETE ===", void_state.startup_phase);
+                return;
+            }
+        }
+
+        // Main test phase: Monitor the complete pipeline
+        debug_send("PIPELINE TEST: Monitoring data flow");
+
+        // 1. CAN Layer Status
+        debug_send("--- CAN LAYER STATUS ---");
+        debug_send("Global flags: radar_ready=%s, new_object=%s", can_has_new_radar_data() ? "TRUE" : "false", can_new_object_data ? "TRUE" : "false");
+
+        uint32_t total_can_frames = 0;
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            can_sensor_t *sensor      = can_get_sensor(i);
+            uint32_t      frame_count = can_get_sensor_frame_count(i);
+            total_can_frames += frame_count;
+
+            debug_send("S%d: online=%s, ready=%s, frames=%lu, points=%d, msgs=%lu",
+                       i,
+                       (sensor && sensor->online) ? "YES" : "NO",
+                       can_sensor_has_new_data(i) ? "TRUE" : "false",
+                       frame_count,
+                       sensor ? sensor->current_point_count : 0,
+                       sensor ? sensor->msg_count : 0);
+
+            // Show latest detection points for active sensors
+            if (sensor && sensor->online && sensor->current_point_count > 0)
+            {
+                for (uint8_t p = 0; p < sensor->current_point_count && p < 3; p++)
+                {
+                    debug_send("  Point %d: %.3fm (%.1f SNR)", p, sensor->detection_points[p][0], sensor->detection_points[p][1]);
+                }
+            }
+        }
+
+        // 2. Radar Processing Status
+        debug_send("--- RADAR PROCESSING STATUS ---");
+        uint32_t radar_events, last_radar_time;
+        radar_get_event_stats(&radar_events, &last_radar_time);
+
+        radar_distance_t measurements;
+        bool             radar_data_available = radar_get_latest_measurements(&measurements);
+
+        debug_send("Processing events: %lu, last_event: %lums ago", radar_events, now - last_radar_time);
+
+        debug_send("Data available: %s, system_healthy: %s, valid_sensors: %d/%d",
+                   radar_data_available ? "YES" : "NO",
+                   measurements.system_healthy ? "YES" : "NO",
+                   measurements.valid_sensor_count,
+                   MAX_RADAR_SENSORS);
+
+        // Show processed radar measurements
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            debug_send("S%d processed: valid=%s, distance=%dmm, confidence=%.2f, quality=%d%%",
+                       i,
+                       measurements.data_valid[i] ? "YES" : "NO",
+                       measurements.distance_mm[i],
+                       measurements.confidence[i],
+                       measurements.quality_score[i]);
+        }
+
+        // 3. Void Detection Status
+        debug_send("--- VOID DETECTION STATUS ---");
+        uint32_t void_processing, void_streams;
+        void_get_event_stats(&void_processing, &void_streams);
+
+        void_data_t void_result;
+        bool        void_data_available = void_get_latest_results(&void_result);
+
+        debug_send("Processing events: %lu, streams sent: %lu", void_processing, void_streams);
+
+        debug_send("Auto streaming: %s, system ready: %s", void_is_auto_streaming_enabled() ? "ENABLED" : "disabled", void_is_system_ready() ? "YES" : "NO");
+
+        if (void_data_available)
+        {
+            // Fix the enum casting issues by using the enum name explicitly
+            debug_send("Detection: %s, size: %dmm, confidence: %d%%, algorithm: %s",
+                       void_result.void_detected ? "VOID DETECTED" : "clear",
+                       void_result.void_size_mm,
+                       void_result.confidence_percent,
+                       void_get_algorithm_string((void_algorithm_t)void_result.algorithm_used));
+
+            debug_send("Detection time: %lums ago", now - void_result.detection_time_ms);
+        }
+        else
+        {
+            debug_send("No void detection data available");
+        }
+
+        // 4. Summary for easy parsing
+        debug_send("SUMMARY: sensors=%d/%d, valid_data=%d, void=%s, conf=%d%%, health=%s",
+                   can_get_online_count(),
+                   MAX_RADAR_SENSORS,
+                   measurements.valid_sensor_count,
+                   void_data_available && void_result.void_detected ? "DETECTED" : "clear",
+                   void_data_available ? void_result.confidence_percent : 0,
+                   "OK");
+
+        debug_send("=== END VOID SYSTEM TEST #%lu ===", void_state.test_counter);
+    }
 }

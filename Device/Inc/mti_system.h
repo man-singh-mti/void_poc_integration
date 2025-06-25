@@ -160,6 +160,11 @@ void radar_init_status_set(radar_init_status_t status);
  */
 bool system_is_operational_mode(void);
 
+/**
+ * @brief Wrapper for void system test (called from device_process)
+ */
+void debug_void_system_test_wrapper(void);
+
 // Forward declarations for static diagnostic functions (implementation in .c file)
 static void debug_init_status(void);
 static void debug_radar_diagnostics(void);

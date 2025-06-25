@@ -48,6 +48,14 @@ static const uint16_t sensor_angles[MAX_RADAR_SENSORS] = {
     240  // Sensor 2: 240 degrees
 };
 
+/** @brief Event-driven processing statistics */
+static struct
+{
+    uint32_t events_processed;
+    uint32_t last_event_time;
+    bool     event_driven_mode;
+} event_stats = { 0, 0, true };
+
 /*------------------------------------------------------------------------------
  * Forward Declarations
  *----------------------------------------------------------------------------*/
@@ -138,6 +146,7 @@ bool radar_system_init(void)
  * Main Processing Function
  *----------------------------------------------------------------------------*/
 
+// Enhanced radar_system_process to handle per-sensor flags
 void radar_system_process(void)
 {
     if (!radar_config.system_initialized)
@@ -145,35 +154,45 @@ void radar_system_process(void)
         return;
     }
 
-    uint32_t current_time = HAL_GetTick();
-
-    // Rate limiting
-    if ((current_time - radar_config.last_process_time) < radar_config.process_interval_ms)
+    // Check if any CAN sensor has new data
+    if (!can_has_new_radar_data())
     {
-        return;
+        return; // Exit immediately if no new data
     }
 
-    radar_config.last_process_time = current_time;
+    uint32_t current_time       = HAL_GetTick();
+    bool     new_data_processed = false;
 
-    bool new_data_processed = false;
+    // debug_send("RADAR: Processing triggered by CAN data");
 
-    // Process each sensor using CAN data
+    // Process each sensor that has new data
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        can_sensor_t *sensor = can_get_sensor(i);
-        if (sensor && sensor->online)
+        if (can_sensor_has_new_data(i))
         {
-            if (process_sensor_data_from_can(i, sensor))
+            can_sensor_t *sensor = can_get_sensor(i);
+            if (sensor && sensor->online)
             {
-                new_data_processed = true;
+                if (process_sensor_data_from_can(i, sensor))
+                {
+                    new_data_processed = true;
+                    // debug_send("RADAR: Processed sensor %d (frame #%lu)", i, can_get_sensor_frame_count(i));
+                }
             }
+
+            // Clear this sensor's flag
+            can_clear_sensor_data_flag(i);
         }
         else
         {
-            // Mark offline sensors as invalid
-            latest_measurements.data_valid[i]    = false;
-            latest_measurements.confidence[i]    = 0.0f;
-            latest_measurements.quality_score[i] = 0;
+            // Mark sensors without new data as potentially invalid
+            can_sensor_t *sensor = can_get_sensor(i);
+            if (!sensor || !sensor->online)
+            {
+                latest_measurements.data_valid[i]    = false;
+                latest_measurements.confidence[i]    = 0.0f;
+                latest_measurements.quality_score[i] = 0;
+            }
         }
     }
 
@@ -181,15 +200,18 @@ void radar_system_process(void)
     {
         // Update system health and sensor count
         update_system_health();
-
-        // Update timestamp
         latest_measurements.timestamp_ms = current_time;
+        radar_config.new_data_available  = true;
 
-        // Mark new data available for void detection layer
-        radar_config.new_data_available = true;
+        // Update event statistics
+        event_stats.events_processed++;
+        event_stats.last_event_time = current_time;
 
-        debug_send("RADAR: Processed data - %d valid sensors", latest_measurements.valid_sensor_count);
+        // debug_send("RADAR: Event #%lu processed - %d valid sensors", event_stats.events_processed, latest_measurements.valid_sensor_count);
     }
+
+    // Update last process time
+    radar_config.last_process_time = current_time;
 }
 
 /*------------------------------------------------------------------------------
@@ -257,12 +279,12 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
 
 static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr)
 {
-    debug_send("RADAR: Validating S%d: dist=%.3fm, snr=%.1f, thresh=%.1f", sensor_idx, distance_m, snr, radar_config.snr_threshold);
+    // debug_send("RADAR: Validating S%d: dist=%.3fm, snr=%.1f, thresh=%.1f", sensor_idx, distance_m, snr, radar_config.snr_threshold);
 
     // Check SNR threshold
     if (snr < radar_config.snr_threshold)
     {
-        debug_send("RADAR: S%d REJECTED - SNR %.1f < %.1f", sensor_idx, snr, radar_config.snr_threshold);
+        //  debug_send("RADAR: S%d REJECTED - SNR %.1f < %.1f", sensor_idx, snr, radar_config.snr_threshold);
         return false;
     }
 
@@ -272,11 +294,12 @@ static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, fl
     // Check distance range
     if (distance_mm < radar_config.min_distance_mm || distance_mm > radar_config.max_distance_mm)
     {
-        debug_send("RADAR: S%d REJECTED - distance %dmm out of range [%d-%dmm]", sensor_idx, distance_mm, radar_config.min_distance_mm, radar_config.max_distance_mm);
+        //  debug_send("RADAR: S%d REJECTED - distance %dmm out of range [%d-%dmm]", sensor_idx, distance_mm, radar_config.min_distance_mm,
+        //  radar_config.max_distance_mm);
         return false;
     }
 
-    debug_send("RADAR: S%d VALID - %.3fm, %.1f SNR", sensor_idx, distance_m, snr);
+    //  debug_send("RADAR: S%d VALID - %.3fm, %.1f SNR", sensor_idx, distance_m, snr);
     return true;
 }
 
@@ -644,7 +667,6 @@ void radar_debug_measurements_periodic(void)
 
     uint32_t now = HAL_GetTick();
 
-    // Run every 2 seconds
     if ((now - last_debug_time) >= 2000)
     {
         last_debug_time = now;
@@ -652,18 +674,16 @@ void radar_debug_measurements_periodic(void)
 
         debug_send("=== RADAR MEASUREMENTS DEBUG #%lu ===", debug_counter);
 
-        // First time: start sensors and leave them on
+        // First time: start sensors and enable event-driven mode
         if (!sensors_started)
         {
-            debug_send("FIRST RUN: Starting sensors and switching to measurement mode");
+            debug_send("FIRST RUN: Starting sensors for event-driven processing");
 
-            // Start sensors
             if (radar_start_sensors())
             {
                 debug_send("Sensors started successfully");
                 HAL_Delay(200);
 
-                // Switch to measurement mode
                 if (radar_set_measurement_mode())
                 {
                     debug_send("Switched to measurement mode");
@@ -682,6 +702,12 @@ void radar_debug_measurements_periodic(void)
             debug_send("Waiting 1 second for sensors to stabilize...");
             HAL_Delay(1000);
         }
+
+        // Show event-driven processing stats
+        debug_send("Event Processing: CAN events=%s, Radar events=%lu, Void data=%s",
+                   can_has_new_radar_data() ? "READY" : "idle",
+                   event_stats.events_processed,
+                   radar_has_new_data() ? "READY" : "idle");
 
         // Get latest processed measurements
         radar_distance_t measurements;
@@ -748,5 +774,17 @@ void radar_debug_measurements_periodic(void)
         debug_send("Timestamp: %lums | Processing healthy: %s", measurements.timestamp_ms, (HAL_GetTick() - measurements.timestamp_ms) < 1000 ? "YES" : "STALE");
 
         debug_send("=== END MEASUREMENTS DEBUG ===");
+    }
+}
+
+void radar_get_event_stats(uint32_t *event_count, uint32_t *last_event_time)
+{
+    if (event_count)
+    {
+        *event_count = event_stats.events_processed;
+    }
+    if (last_event_time)
+    {
+        *last_event_time = event_stats.last_event_time;
     }
 }

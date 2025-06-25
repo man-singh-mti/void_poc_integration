@@ -42,12 +42,13 @@ static void debug_init_status(void);
 static void debug_radar_diagnostics(void);
 static void debug_void_diagnostics(void);
 
-// Function needed by debug_init_status, ensure it's declared if not in a header
-// Assuming reserve_get(), imu_profile_get(), imu_active_get(), temp_is_initialized(),
-/// void_system_init(), void_is_system_ready(), can_run_diagnostics(), radar_run_diagnostics(),
-/// radar_get_latest_measurements(), get_active_sensor_count(), test_sensor_indexing(),
-/// test_sensor_responses(), void_run_diagnostics(), FW_VER_MAJOR, FW_VER_MINOR, FW_VER_SUB,
-/// device_init_finish_get() are defined elsewhere (e.g. specific module headers or main.h)
+/**
+ * @brief Runs the comprehensive void system test every 5 seconds.
+ */
+void debug_void_system_test_wrapper(void)
+{
+    void_run_system_test(5000);
+}
 
 /**
  * @brief Gets the current debug mode status.
@@ -285,8 +286,6 @@ bool module_init(void)
             if (debug_get())
             {
                 printf("@db,Radar system initialized\n");
-
-                // Add radar test
                 uint8_t responding_sensors = can_get_online_count();
                 printf("@db,Radar sensor test: %d/%d sensors (", responding_sensors, MAX_RADAR_SENSORS);
                 if (responding_sensors >= 2)
@@ -306,44 +305,32 @@ bool module_init(void)
             module_status_set(STATUS_RADAR_ERROR);
             radar_init_status_set(RADAR_INIT_ERROR);
         }
-        init_step = STEP_FINISH;
+        init_step = STEP_VOID; // NEW: Initialize void system next
         break;
 
-        /*    case STEP_VOID:
-                if (void_system_init())
+    case STEP_VOID:
+        if (void_system_init())
+        {
+            if (debug_get())
+            {
+                printf("@db,Void detection system initialized\n");
+                if (void_is_system_ready())
                 {
-                    if (void_is_system_ready())
-                    {
-                        if (debug_get())
-                        {
-                            printf("@db,Void detection ready\n");
-
-                            // Add void detection test
-                            void_run_diagnostics();
-
-                            // Test with simulated data if available
-                            circle_fit_result_t test_result;
-                            if (void_test_circle_fit(&test_result))
-                            {
-                                printf("@db,Void circle fit test: PASS\n");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (debug_get())
-                        {
-                            printf("@db,Void detection initialized but waiting for radar\n");
-                        }
-                    }
+                    printf("@db,Void detection ready\n");
                 }
                 else
                 {
-                    printf("@status,down,8\n"); // Void error
-                    module_status_set(STATUS_VOID_ERROR);
+                    printf("@db,Void detection initialized but waiting for radar\n");
                 }
-                init_step = STEP_FINISH;
-                break; */
+            }
+        }
+        else
+        {
+            printf("@status,down,8\n"); // Void error
+            module_status_set(STATUS_VOID_ERROR);
+        }
+        init_step = STEP_FINISH;
+        break;
 
     case STEP_FINISH:
         if (debug_get())
