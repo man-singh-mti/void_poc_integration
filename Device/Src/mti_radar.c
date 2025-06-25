@@ -122,7 +122,7 @@ bool radar_system_init(void)
 
     // Set sensors to calibration mode initially
     debug_send("RADAR: Setting sensors to calibration mode");
-    if (!radar_set_calibration_mode())
+    if (!radar_set_measurement_mode()) // ← Change to measurement mode (profile 1)
     {
         debug_send("RADAR: WARNING - Failed to set calibration mode");
     }

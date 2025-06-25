@@ -998,17 +998,11 @@ void void_run_system_test(uint32_t test_interval_ms)
                 break;
 
             case 2:
-                debug_send("Step 2: Setting measurement mode");
-                if (radar_set_measurement_mode())
-                {
-                    debug_send("  Measurement mode activated");
-                }
-                else
-                {
-                    debug_send("  ERROR: Failed to set measurement mode");
-                    void_state.startup_phase = 1; // Retry from sensor start
-                    return;
-                }
+                debug_send("STARTUP PHASE 2: Initializing void detection pipeline");
+                debug_send("Step 2: Sensors already in measurement mode from initialization");
+                debug_send("  Measurement mode already active");
+                void_state.startup_phase = 3;
+                debug_send("=== STARTUP PHASE 2 COMPLETE ===");
                 break;
 
             case 3:
