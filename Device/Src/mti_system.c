@@ -151,7 +151,7 @@ bool module_init(void)
     }
     timestamp = HAL_GetTick();
 
-    uart_tx_channel_set(UART_DEBUG);
+    uart_tx_channel_set(UART_UPHOLE);
 
     switch (init_step)
     {
@@ -169,6 +169,7 @@ bool module_init(void)
         }
         else if (retries_ver < 3)
         {
+            // Assuming FW_VER_MAJOR, FW_VER_MINOR, FW_VER_SUB are defined elsewhere
             printf("@status,down,0,ver,%d,%d,%d\n", FW_VER_MAJOR, FW_VER_MINOR, FW_VER_SUB);
             retries_ver++;
         }
@@ -176,9 +177,9 @@ bool module_init(void)
         {
             if (debug_get())
             {
-                printf("@db,Version not acknowledged after 3 attempts, proceeding\n");
+                printf("@db, Downhole version not acknowledged by uphole\n");
             }
-            init_step = STEP_WATER_SYNC; // Proceed after 3 attempts
+            init_step = STEP_WATER_SYNC; // Proceed even if not acknowledged after retries
         }
         break;
 
@@ -232,6 +233,7 @@ bool module_init(void)
         // Assuming imu_active_get() is defined elsewhere
         if (imu_active_get() == 10) // IMU Test in progress
         {
+            break; // Stay in this step
         }
         if (imu_active_get() == 30) // IMU Test failed
         {
@@ -239,7 +241,6 @@ bool module_init(void)
             module_status_set(STATUS_IMU_ERROR);
         }
         init_step = STEP_TEMP;
-        break; // Stay in this step
         // Fall-through intended
     case STEP_TEMP:
         if (temp_init())
@@ -269,17 +270,6 @@ bool module_init(void)
         break;
 
     case STEP_RADAR:
-        // Check if CAN was already initialized in dev_init_process()
-        if (!can_is_system_healthy())
-        {
-            if (debug_get())
-            {
-                printf("@db,Radar waiting for CAN system\n");
-            }
-            break; // Stay in this step until CAN is ready
-        }
-
-        // Now initialize radar system (depends on CAN)
         if (radar_system_init())
         {
             if (debug_get())

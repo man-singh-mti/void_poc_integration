@@ -797,14 +797,29 @@ static bool dev_init_process(void)
         step = STEP_CAN;
         break;
     case STEP_CAN:
-        // Initialize CAN hardware only - no radar logic
-        if (can_init())
+        // Use new clean CAN initialization
+        if (can_init()) // Replace can_initialize_system() with can_init()
         {
             if (h_dev_debug.b_init)
             {
                 printf("> can_init complete\r\n");
             }
-            step = STEP_FINISH;
+
+            // Initialize radar system after CAN is ready
+            if (radar_system_init())
+            {
+                if (h_dev_debug.b_init)
+                {
+                    printf("> radar_system_init complete\r\n");
+                }
+            }
+            else
+            {
+                if (h_dev_debug.b_init)
+                {
+                    printf("> radar_system_init FAILED\r\n");
+                }
+            }
         }
         else
         {
@@ -812,7 +827,6 @@ static bool dev_init_process(void)
             {
                 printf("> can_init FAILED\r\n");
             }
-            // Stay in this step to retry
         }
         step = STEP_FINISH;
         break;
