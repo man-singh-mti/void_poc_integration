@@ -1645,38 +1645,64 @@ static void cmd_debug(h_str_pointers_t *str_p)
         printf("@db,Restarting Downhole");
         HAL_NVIC_SystemReset();
     }
+    else if (strstr(str_p->part[1], "rad") != NULL)
+    {
+        if (str_p->part[2] != NULL)
+        {
+            // Control radar debug flag
+            bool          enable = atoi(str_p->part[2]);
+            h_dev_debug_t h_flag;
+            dev_printf_debug_get(&h_flag);
+            h_flag.b_radar_sample = enable;
+            dev_printf_debug_set(&h_flag);
+            printf("@db,Radar debug %s\r\n", enable ? "enabled" : "disabled");
+        }
+        else
+        {
+            // Show current status if no parameter provided
+            h_dev_debug_t h_flag;
+            dev_printf_debug_get(&h_flag);
+            printf("@db,Radar debug: %s\r\n", h_flag.b_radar_sample ? "enabled" : "disabled");
+        }
+    }
+    else if (strstr(str_p->part[1], "radv") != NULL)
+    {
+        if (str_p->part[2] != NULL)
+        {
+            // Control radar verbose debug flag
+            bool          enable = atoi(str_p->part[2]);
+            h_dev_debug_t h_flag;
+            dev_printf_debug_get(&h_flag);
+            h_flag.b_radar_verbose = enable;
+            dev_printf_debug_set(&h_flag);
+            printf("@db,Radar verbose debug %s\r\n", enable ? "enabled" : "disabled");
+        }
+        else
+        {
+            // Show current status if no parameter provided
+            h_dev_debug_t h_flag;
+            dev_printf_debug_get(&h_flag);
+            printf("@db,Radar verbose debug: %s\r\n", h_flag.b_radar_verbose ? "enabled" : "disabled");
+        }
+    }
     else if (strstr(str_p->part[1], "temp") != NULL)
     {
         if (str_p->part[2] != NULL)
         {
             // Control temperature debug flag
-            if (strcmp(str_p->part[2], "on") == 0)
-            {
-                h_dev_debug_t h_flag;
-                dev_printf_debug_get(&h_flag);
-                h_flag.b_temp_sample = true;
-                dev_printf_debug_set(&h_flag);
-                printf("@db,Temperature debug enabled\r\n");
-            }
-            else if (strcmp(str_p->part[2], "off") == 0)
-            {
-                h_dev_debug_t h_flag;
-                dev_printf_debug_get(&h_flag);
-                h_flag.b_temp_sample = false;
-                dev_printf_debug_set(&h_flag);
-                printf("@db,Temperature debug disabled\r\n");
-            }
+            bool          enable = atoi(str_p->part[2]);
+            h_dev_debug_t h_flag;
+            dev_printf_debug_get(&h_flag);
+            h_flag.b_temp_sample = enable;
+            dev_printf_debug_set(&h_flag);
+            printf("@db,Temperature debug %s\r\n", enable ? "enabled" : "disabled");
         }
         else
         {
-            // Show current status
-            temp_status_t status;
-            temp_get_latest_status(&status);
-            printf("@db,Temperature: %d°C, alerts: %d,%d, ready: %d\r\n",
-                   status.current_temperature,
-                   status.high_temp_alert ? 1 : 0,
-                   status.low_temp_alert ? 1 : 0,
-                   status.system_ready ? 1 : 0);
+            // Show current status if no parameter provided
+            h_dev_debug_t h_flag;
+            dev_printf_debug_get(&h_flag);
+            printf("@db,Temperature debug: %s\r\n", h_flag.b_temp_sample ? "enabled" : "disabled");
         }
     }
 

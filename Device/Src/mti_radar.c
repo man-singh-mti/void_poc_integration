@@ -11,7 +11,21 @@
 #include "mti_system.h"
 #include <string.h>
 #include <math.h>
+#include "vmt_device.h" // Make sure this is included
 
+// Add external declaration for debug flags
+h_dev_debug_t h_dev_debug;
+
+// Add macro for conditional radar debug
+#define RADAR_VERBOSE_SEND(fmt, ...)        \
+    do                                      \
+    {                                       \
+        if (h_dev_debug.b_radar_verbose)    \
+        {                                   \
+            debug_send(fmt, ##__VA_ARGS__); \
+        }                                   \
+    }                                       \
+    while (0)
 /*------------------------------------------------------------------------------
  * Static Variables and Configuration
  *----------------------------------------------------------------------------*/
@@ -257,12 +271,12 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
 
 static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr)
 {
-    debug_send("RADAR: Validating S%d: dist=%.3fm, snr=%.1f, thresh=%.1f", sensor_idx, distance_m, snr, radar_config.snr_threshold);
+    RADAR_VERBOSE_SEND("RADAR: S%d dist=%.2fm snr=%.1f", sensor_idx, distance_m, snr);
 
     // Check SNR threshold
     if (snr < radar_config.snr_threshold)
     {
-        debug_send("RADAR: S%d REJECTED - SNR %.1f < %.1f", sensor_idx, snr, radar_config.snr_threshold);
+        RADAR_VERBOSE_SEND("RADAR: S%d SNR=%.1f < %.1f (REJECT)", sensor_idx, snr, radar_config.snr_threshold);
         return false;
     }
 
@@ -272,11 +286,11 @@ static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, fl
     // Check distance range
     if (distance_mm < radar_config.min_distance_mm || distance_mm > radar_config.max_distance_mm)
     {
-        debug_send("RADAR: S%d REJECTED - distance %dmm out of range [%d-%dmm]", sensor_idx, distance_mm, radar_config.min_distance_mm, radar_config.max_distance_mm);
+        RADAR_VERBOSE_SEND("RADAR: S%d distance %dmm out of range [%d-%d]", sensor_idx, distance_mm, radar_config.min_distance_mm, radar_config.max_distance_mm);
         return false;
     }
 
-    debug_send("RADAR: S%d VALID - %.3fm, %.1f SNR", sensor_idx, distance_m, snr);
+    RADAR_VERBOSE_SEND("RADAR: S%d VALID (%.2fm, SNR %.1f)", sensor_idx, distance_m, snr);
     return true;
 }
 

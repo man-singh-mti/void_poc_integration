@@ -227,6 +227,7 @@ typedef union h_dev_debug_
         bool b_imu_sample : 1;     ///< Enable IMU sample debug messages.
         bool b_can_init : 1;       ///< Enable CAN initialization debug messages.
         bool b_radar_sample : 1;   ///< Enable radar sample debug messages.
+        bool b_radar_verbose : 1;  ///< Enable detailed radar debug messages.
         bool b_temp_sample : 1;    ///< Enable temperature sample debug messages.
         bool b_void_sample : 1;    ///< Enable void detection sample debug messages.
     };

@@ -647,7 +647,6 @@ void device_process(void)
     radar_system_process(); // Processes radar data
     temp_system_process();  // Handles temp data + streaming internally
                             // void_system_process();  // Should handle void data + streaming internally
-    radar_debug_measurements_periodic();
 
     can_process_timeouts(); // Timeout management (main loop)
     // can_test_periodic();    // Periodic test (every 10s) - includes status debug
@@ -1209,38 +1208,7 @@ static void dev_debug_process(void)
     // Add radar debug - every 2 seconds
     if (h_dev_debug.b_radar_sample)
     {
-        static uint32_t last_radar_debug = 0;
-        uint32_t        now              = HAL_GetTick();
-
-        if ((now - last_radar_debug) >= 2000) // Every 2 seconds
-        {
-            last_radar_debug = now;
-
-            radar_distance_t measurements;
-            bool             has_data = radar_get_latest_measurements(&measurements);
-
-            printf("@radar_debug");
-            if (has_data)
-            {
-                printf(",valid_count=%d", measurements.valid_sensor_count);
-                for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-                {
-                    if (measurements.data_valid[i])
-                    {
-                        printf(",S%d:%umm", i, measurements.distance_mm[i]);
-                    }
-                    else
-                    {
-                        printf(",S%d:INVALID", i);
-                    }
-                }
-            }
-            else
-            {
-                printf(",no_data");
-            }
-            printf("\n");
-        }
+        radar_debug_measurements_periodic();
     }
 
     // Add temperature debug - every 2 seconds

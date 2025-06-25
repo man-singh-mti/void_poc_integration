@@ -439,6 +439,36 @@ uint8_t can_get_online_count(void)
 
 bool can_is_system_healthy(void)
 {
+    // During initialization, system is healthy if it's initialized and we detected sensors
+    if (!can_system.system_initialized)
+    {
+        return false;
+    }
+
+    // If we're in initialization phase, consider system healthy if we detected sensors initially
+    // This allows radar_system_init() to proceed even when sensors are stopped
+    static bool initialization_complete = false;
+
+    if (!initialization_complete)
+    {
+        // Count how many sensors we've ever seen online
+        uint8_t detected_sensors = 0;
+        for (uint8_t i = 0; i < 3; i++)
+        {
+            if (can_system.sensors[i].msg_count > 0)
+            {
+                detected_sensors++;
+            }
+        }
+
+        if (detected_sensors >= 2)
+        {
+            initialization_complete = true;
+            return true;
+        }
+    }
+
+    // After initialization, require active sensors
     return can_system.system_initialized && (can_system.online_count >= 2);
 }
 
