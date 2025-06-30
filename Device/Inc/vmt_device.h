@@ -16,9 +16,17 @@
 #pragma anon_unions
 
 /* Defines */
+
+#define STR_HELPER(x) #x
+#define STR(x)        STR_HELPER(x)
+
 #define FW_VER_MAJOR (1) ///< Firmware version major number
 #define FW_VER_MINOR (2) ///< Firmware version minor number
 #define FW_VER_SUB   (4) ///< Firmware version sub number
+
+// Final firmware version string
+#define FW_VER_STRING STR(FW_VER_MAJOR) "." STR(FW_VER_MINOR) "." STR(FW_VER_SUB)
+#define FW_VER_NOTE   "VMT Device Firmware" ///< Firmware version note
 
 #define DEV_IMU_NUM    (2)           ///< Number of IMU units
 #define DEV_SPI_CH_NUM (DEV_IMU_NUM) ///< Number of SPI channels, typically one per IMU
@@ -217,18 +225,27 @@ typedef struct h_dev_log_
  */
 typedef union h_dev_debug_
 {
-    uint8_t byte; ///< All debug flags as a single byte.
+    uint16_t word; ///< FIXED - 16-bit structure for safe expansion
     struct
     {
-        bool b_init : 1;           ///< Enable init debug messages.
-        bool b_spi_init : 1;       ///< Enable SPI init debug messages.
-        bool b_imu_sample_set : 1; ///< Enable IMU sample set debug messages.
-        bool b_adc_sample : 1;     ///< Enable ADC sample debug messages.
-        bool b_imu_sample : 1;     ///< Enable IMU sample debug messages.
-        bool b_can_init : 1;       ///< Enable CAN initialization debug messages.
-        bool b_radar_sample : 1;   ///< Enable radar sample debug messages.
-        bool b_temp_sample : 1;    ///< Enable temperature sample debug messages.
-        bool b_void_sample : 1;    ///< Enable void detection sample debug messages.
+        // Core system debug flags (Bits 0-7)
+        bool b_init : 1;           // Bit 0
+        bool b_spi_init : 1;       // Bit 1
+        bool b_imu_sample_set : 1; // Bit 2
+        bool b_adc_sample : 1;     // Bit 3
+        bool b_imu_sample : 1;     // Bit 4
+        bool b_can_init : 1;       // Bit 5
+        bool b_water_sample : 1;   // Bit 6 (NEW)
+        bool b_system_sample : 1;  // Bit 7 (NEW)
+        // Processing module debug flags (Bits 8-15)
+        bool b_radar_sample : 1;   // Bit 8 (FIXED - was corrupted)
+        bool b_temp_sample : 1;    // Bit 9 (FIXED - was corrupted)
+        bool b_void_sample : 1;    // Bit 10 (FIXED - was corrupted)
+        bool b_command_sample : 1; // Bit 11 (NEW)
+        bool b_flash_sample : 1;   // Bit 12 (NEW)
+        bool b_uart_sample : 1;    // Bit 13 (NEW)
+        bool b_reserved_1 : 1;     // Bit 14 (FUTURE EXPANSION)
+        bool b_reserved_2 : 1;     // Bit 15 (FUTURE EXPANSION)
     };
 } h_dev_debug_t;
 

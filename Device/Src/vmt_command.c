@@ -1605,7 +1605,7 @@ static void cmd_debug(h_str_pointers_t *str_p)
         }
         printf("%s", cmd_str_debug);
         printf(",dev");
-        printf(",%02X", h_flag.byte);
+        printf(",%02X", h_flag.word);
         printf("\n");
     }
     else if (strstr(str_p->part[1], "imu") != NULL)
