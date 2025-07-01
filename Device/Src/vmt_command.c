@@ -1586,15 +1586,19 @@ void void_send_automatic_stream(void)
 static void cmd_debug(h_str_pointers_t *str_p)
 {
     uart_tx_channel_set(cmd_uart_ch);
-    //	printf("cmd_debug\r\n");
-    if (str_p->part[1] == NULL)
+
+    if (!str_p->part[1])
     {
+        printf("@cmd,usage: dev|imu|multiplier|reserve|air|water|adc|reset|temp|radar|void\n");
+        uart_tx_channel_undo();
         return;
     }
-    if (strstr(str_p->part[1], "dev") != NULL)
+
+    // Device debug flags (bitmask)
+    if (strcmp(str_p->part[1], "dev") == 0)
     {
         h_dev_debug_t h_flag;
-        if (str_p->part[2] != NULL)
+        if (str_p->part[2])
         {
             atox_n(str_p->part[2], &h_flag, sizeof(h_dev_debug_t));
             dev_printf_debug_set(&h_flag);
@@ -1603,81 +1607,184 @@ static void cmd_debug(h_str_pointers_t *str_p)
         {
             dev_printf_debug_get(&h_flag);
         }
-        printf("%s", cmd_str_debug);
-        printf(",dev");
-        printf(",%02X", h_flag.word);
-        printf("\n");
+        printf("%s,dev,%02X\n", cmd_str_debug, h_flag.word);
     }
-    else if (strstr(str_p->part[1], "imu") != NULL)
+    // IMU debug
+    else if (strcmp(str_p->part[1], "imu") == 0)
     {
-        live_imu = atoi(str_p->part[2]);
-        imu_ch   = cmd_uart_ch;
-        printf("@db,IMU dataset %d\r\n", live_imu);
+        if (str_p->part[2])
+        {
+            live_imu = atoi(str_p->part[2]);
+            imu_ch   = cmd_uart_ch;
+            printf("@db,IMU dataset %d\n", live_imu);
+        }
+        else
+        {
+            printf("@db,IMU usage: @cmd,imu,<dataset>\n");
+        }
     }
-    else if (strstr(str_p->part[1], "multiplier") != NULL)
+    // Water multiplier
+    else if (strcmp(str_p->part[1], "multiplier") == 0)
     {
-        multiplier_set(atof(str_p->part[2]));
-        printf("@db,water multiplier set: %d\r\n", atoi(str_p->part[2]));
+        if (str_p->part[2])
+        {
+            multiplier_set(atof(str_p->part[2]));
+            printf("@db,water multiplier set: %s\n", str_p->part[2]);
+        }
+        else
+        {
+            printf("@db,Usage: @cmd,multiplier,<value>\n");
+        }
     }
-    else if (strstr(str_p->part[1], "reserve") != NULL)
-    { // set from system config
-        reserve_set(atoi(str_p->part[2]));
-        printf("@db,water reserve threshold set: %d\r\n", atoi(str_p->part[2]));
-    }
-    else if (strstr(str_p->part[1], "air") != NULL)
+    // Water reserve threshold
+    else if (strcmp(str_p->part[1], "reserve") == 0)
     {
-        ratio_air = atof(str_p->part[2]);
-        printf("@db,air ratio = %f\r\n", ratio_air);
+        if (str_p->part[2])
+        {
+            reserve_set(atoi(str_p->part[2]));
+            printf("@db,water reserve threshold set: %s\n", str_p->part[2]);
+        }
+        else
+        {
+            printf("@db,Usage: @cmd,reserve,<value>\n");
+        }
     }
-    else if (strstr(str_p->part[1], "water") != NULL)
+    // Air ratio
+    else if (strcmp(str_p->part[1], "air") == 0)
     {
-        ratio_water = atof(str_p->part[2]);
-        printf("@db,water ratio = %f\r\n", ratio_water);
+        if (str_p->part[2])
+        {
+            ratio_air = atof(str_p->part[2]);
+            printf("@db,air ratio = %f\n", ratio_air);
+        }
+        else
+        {
+            printf("@db,Usage: @cmd,air,<value>\n");
+        }
     }
-    else if (strstr(str_p->part[1], "adc") != NULL)
+    // Water ratio
+    else if (strcmp(str_p->part[1], "water") == 0)
+    {
+        if (str_p->part[2])
+        {
+            ratio_water = atof(str_p->part[2]);
+            printf("@db,water ratio = %f\n", ratio_water);
+        }
+        else
+        {
+            printf("@db,Usage: @cmd,water,<value>\n");
+        }
+    }
+    // Water ADC print toggle
+    else if (strcmp(str_p->part[1], "adc") == 0)
     {
         water_ch  = cmd_uart_ch;
         adc_print = !adc_print;
-        printf("@db,Water ADC print = %d\r\n", adc_print);
+        printf("@db,Water ADC print = %d\n", adc_print);
     }
-    else if (strstr(str_p->part[1], "reset") != NULL && strstr(str_p->part[2], "down") != NULL)
+    // System reset
+    else if (strcmp(str_p->part[1], "reset") == 0 && str_p->part[2] && strcmp(str_p->part[2], "down") == 0)
     {
-        printf("@db,Restarting Downhole");
+        printf("@db,Restarting Downhole\n");
         HAL_NVIC_SystemReset();
     }
-    else if (strstr(str_p->part[1], "temp") != NULL)
+    // Temperature debug flag
+    else if (strcmp(str_p->part[1], "temp") == 0)
     {
-        if (str_p->part[2] != NULL)
+        h_dev_debug_t h_flag;
+        dev_printf_debug_get(&h_flag);
+        if (str_p->part[2])
         {
-            // Control temperature debug flag
             if (strcmp(str_p->part[2], "on") == 0)
             {
-                h_dev_debug_t h_flag;
-                dev_printf_debug_get(&h_flag);
                 h_flag.b_temp_sample = true;
                 dev_printf_debug_set(&h_flag);
-                printf("@db,Temperature debug enabled\r\n");
+                printf("@db,Temperature debug enabled\n");
             }
             else if (strcmp(str_p->part[2], "off") == 0)
             {
-                h_dev_debug_t h_flag;
-                dev_printf_debug_get(&h_flag);
                 h_flag.b_temp_sample = false;
                 dev_printf_debug_set(&h_flag);
-                printf("@db,Temperature debug disabled\r\n");
+                printf("@db,Temperature debug disabled\n");
+            }
+            else
+            {
+                printf("@db,Usage: @cmd,temp,on|off\n");
             }
         }
         else
         {
-            // Show current status
             temp_status_t status;
             temp_get_latest_status(&status);
-            printf("@db,Temperature: %d°C, alerts: %d,%d, ready: %d\r\n",
+            printf("@db,Temperature: %d°C, alerts: %d,%d, ready: %d\n",
                    status.current_temperature,
                    status.high_temp_alert ? 1 : 0,
                    status.low_temp_alert ? 1 : 0,
                    status.system_ready ? 1 : 0);
         }
+    }
+    // Radar debug flag
+    else if (strcmp(str_p->part[1], "radar") == 0)
+    {
+        h_dev_debug_t h_flag;
+        dev_printf_debug_get(&h_flag);
+        if (str_p->part[2])
+        {
+            if (strcmp(str_p->part[2], "on") == 0)
+            {
+                h_flag.b_radar_sample = true;
+                dev_printf_debug_set(&h_flag);
+                printf("@db,Radar debug enabled\n");
+            }
+            else if (strcmp(str_p->part[2], "off") == 0)
+            {
+                h_flag.b_radar_sample = false;
+                dev_printf_debug_set(&h_flag);
+                printf("@db,Radar debug disabled\n");
+            }
+            else
+            {
+                printf("@db,Usage: @cmd,radar,on|off\n");
+            }
+        }
+        else
+        {
+            printf("@db,Radar debug flag: %d\n", h_flag.b_radar_sample ? 1 : 0);
+        }
+    }
+    // Void debug flag
+    else if (strcmp(str_p->part[1], "void") == 0)
+    {
+        h_dev_debug_t h_flag;
+        dev_printf_debug_get(&h_flag);
+        if (str_p->part[2])
+        {
+            if (strcmp(str_p->part[2], "on") == 0)
+            {
+                h_flag.b_void_sample = true;
+                dev_printf_debug_set(&h_flag);
+                printf("@db,Void debug enabled\n");
+            }
+            else if (strcmp(str_p->part[2], "off") == 0)
+            {
+                h_flag.b_void_sample = false;
+                dev_printf_debug_set(&h_flag);
+                printf("@db,Void debug disabled\n");
+            }
+            else
+            {
+                printf("@db,Usage: @cmd,void,on|off\n");
+            }
+        }
+        else
+        {
+            printf("@db,Void debug flag: %d\n", h_flag.b_void_sample ? 1 : 0);
+        }
+    }
+    // Unknown subcommand
+    else
+    {
+        printf("@cmd,error,unknown_subcommand,%s\n", str_p->part[1]);
     }
 
     uart_tx_channel_undo();

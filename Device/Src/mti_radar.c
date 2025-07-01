@@ -163,7 +163,7 @@ void radar_system_process(void)
     uint32_t current_time       = HAL_GetTick();
     bool     new_data_processed = false;
 
-    // debug_send("RADAR: Processing triggered by CAN data");
+    // debug_send("[R]proc");
 
     // Process each sensor that has new data
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
@@ -176,7 +176,7 @@ void radar_system_process(void)
                 if (process_sensor_data_from_can(i, sensor))
                 {
                     new_data_processed = true;
-                    // debug_send("RADAR: Processed sensor %d (frame #%lu)", i, can_get_sensor_frame_count(i));
+                    // debug_send("[R]S%d F%lu", i, can_get_sensor_frame_count(i));
                 }
             }
 
@@ -207,7 +207,7 @@ void radar_system_process(void)
         event_stats.events_processed++;
         event_stats.last_event_time = current_time;
 
-        // debug_send("RADAR: Event #%lu processed - %d valid sensors", event_stats.events_processed, latest_measurements.valid_sensor_count);
+        // debug_send("[R]E%lu V%d", event_stats.events_processed, latest_measurements.valid_sensor_count);
     }
 
     // Update last process time
@@ -308,11 +308,17 @@ static uint16_t convert_to_millimeters(float distance_m)
     float distance_mm_f = distance_m * 1000.0f;
 
     if (distance_mm_f < 0.0f)
+    {
         return 0;
+    }
     else if (distance_mm_f > UINT16_MAX)
+    {
         return UINT16_MAX;
+    }
     else
+    {
         return (uint16_t)distance_mm_f;
+    }
 }
 
 static void update_system_health(void)

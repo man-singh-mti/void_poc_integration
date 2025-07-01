@@ -284,4 +284,11 @@ bool void_is_auto_streaming_enabled(void);
  */
 void void_run_system_test(uint32_t test_interval_ms);
 
+/**
+ * @brief Print brief status of the void detection system
+ *
+ * Outputs current configuration and latest results
+ */
+void void_status_brief(void);
+
 #endif // MTI_VOID_H

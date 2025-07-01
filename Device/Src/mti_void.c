@@ -154,7 +154,7 @@ void void_system_process(void)
 
     uint32_t current_time = HAL_GetTick();
 
-    debug_send("VOID: Processing triggered by radar data");
+    // debug_send("[V]proc");
 
     // Process new radar data immediately
     if (process_radar_data())
@@ -228,7 +228,7 @@ static bool process_radar_data(void)
     if (confidence < config.confidence_min_percent)
     {
         void_detected = false;
-        debug_send("VOID: Detection confidence too low (%d%% < %d%%)", confidence, config.confidence_min_percent);
+        // debug_send("[V]C%d<%d", confidence, config.confidence_min_percent);
     }
 
     // Update detection state
@@ -280,7 +280,7 @@ static bool process_radar_data(void)
 
     void_state.new_results_available = true;
 
-    debug_send("VOID: %s - conf=%d%%, size=%dmm, sensors=%d", latest_results.status_text, confidence, latest_results.void_size_mm, radar_data.valid_sensor_count);
+    // debug_send("[V]%s C%d Sz%d S%d", latest_results.void_detected ? "D" : "N", confidence, latest_results.void_size_mm, radar_data.valid_sensor_count);
 
     return true;
 }
@@ -316,7 +316,7 @@ static bool run_simple_algorithm(const radar_distance_t *radar_data)
             if (distance > threshold)
             {
                 void_sensors++;
-                debug_send("VOID: S%d void - %dmm > %dmm", i, distance, threshold);
+                // debug_send("[V]S%d>%d", i, threshold);
             }
         }
     }
@@ -324,7 +324,7 @@ static bool run_simple_algorithm(const radar_distance_t *radar_data)
     // Detection requires at least 1 sensor showing void
     bool detected = (void_sensors > 0);
 
-    debug_send("VOID: Simple algorithm - %d/%d sensors show void", void_sensors, radar_data->valid_sensor_count);
+    // debug_send("[V]S%d/%d", void_sensors, radar_data->valid_sensor_count);
 
     return detected;
 }
@@ -334,12 +334,12 @@ static bool run_circle_fit_algorithm(const radar_distance_t *radar_data)
     // Require at least 3 sensors for circle fitting
     if (radar_data->valid_sensor_count < 3)
     {
-        debug_send("VOID: Circle fit requires 3 sensors, only %d available", radar_data->valid_sensor_count);
+        // debug_send("[V]CF need3 S%d", radar_data->valid_sensor_count);
 
         // Auto-fallback to simple algorithm if enabled
         if (config.auto_fallback_enabled)
         {
-            debug_send("VOID: Auto-fallback to simple algorithm");
+            // debug_send("[V]fallback");
             void_state.algorithm_switches++;
             return run_simple_algorithm(radar_data);
         }
@@ -349,12 +349,12 @@ static bool run_circle_fit_algorithm(const radar_distance_t *radar_data)
     circle_fit_result_t fit_result;
     if (!calculate_circle_fit(radar_data, &fit_result))
     {
-        debug_send("VOID: Circle fit failed");
+        // debug_send("[V]CFfail");
 
         // Auto-fallback to simple algorithm if enabled
         if (config.auto_fallback_enabled)
         {
-            debug_send("VOID: Auto-fallback to simple algorithm");
+            // debug_send("[V]fallback");
             void_state.algorithm_switches++;
             return run_simple_algorithm(radar_data);
         }
@@ -365,7 +365,7 @@ static bool run_circle_fit_algorithm(const radar_distance_t *radar_data)
     uint16_t threshold_diameter = config.baseline_diameter_mm + config.threshold_mm;
     bool     void_detected      = fit_result.diameter_mm > threshold_diameter;
 
-    debug_send("VOID: Circle fit - diameter=%dmm, quality=%.2f, detected=%s", fit_result.diameter_mm, fit_result.fit_quality, void_detected ? "YES" : "NO");
+    // debug_send("[V]CF D%d Q%.2f %s", fit_result.diameter_mm, fit_result.fit_quality, void_detected ? "D" : "N");
 
     return void_detected;
 }
@@ -1123,4 +1123,9 @@ void void_run_system_test(uint32_t test_interval_ms)
 
         debug_send("=== END VOID SYSTEM TEST #%lu ===", void_state.test_counter);
     }
+}
+
+void void_status_brief(void)
+{
+    debug_send("[V]S:%d D:%d C:%d%%", latest_results.void_detected ? 1 : 0, latest_results.void_size_mm, latest_results.confidence_percent);
 }

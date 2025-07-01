@@ -93,7 +93,7 @@ static bool can_transmit(uint32_t can_id, uint8_t *data, uint8_t length)
 
     if (status == HAL_OK)
     {
-        debug_send("CAN: TX 0x%08lX [%02X]", can_id, data[0]);
+        debug_send("[C]TX %lX [%02X]", can_id, data[0]);
         return true;
     }
     else

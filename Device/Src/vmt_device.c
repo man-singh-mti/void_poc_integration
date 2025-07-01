@@ -1261,26 +1261,25 @@ static void dev_debug_process(void)
         }
     }
 
-    // Add void debug - every 2 seconds
+    // --- VOID DEBUG: Print whenever new measurement data is available ---
     if (h_dev_debug.b_void_sample)
     {
-        static uint32_t void_debug_time = 0;
-        if (HAL_GetTick() - void_debug_time >= 2000)
+        void_measurement_t measurement;
+        void_data_t        result;
+        if (void_get_measurement_data(&measurement) && void_get_latest_results(&result))
         {
-            void_debug_time = HAL_GetTick();
-            uart_tx_channel_set(UART_DEBUG);
-
-            void_data_t void_result;
-            if (void_get_latest_results(&void_result))
-            {
-                printf("@void_debug: detected=%s, conf=%d%%, size=%dmm, algo=%d\n",
-                       void_result.void_detected ? "YES" : "NO",
-                       void_result.confidence_percent,
-                       void_result.void_size_mm,
-                       void_result.algorithm_used);
-            }
-
-            uart_tx_channel_undo();
+            // Print only if new measurement data is available (mirrors uphole stream)
+            printf("@void_debug: flags=0x%02X [algo=%s, sensors=%d valid, void=%s], distances=[%d,%d,%d]mm, conf=%d%%, size=%dmm, status=\"%s\"\n",
+                   measurement.flags,
+                   void_get_algorithm_string(result.algorithm_used),
+                   measurement.valid_sensor_count,
+                   result.void_detected ? "YES" : "NO",
+                   measurement.distance_mm[0],
+                   measurement.distance_mm[1],
+                   measurement.distance_mm[2],
+                   result.confidence_percent,
+                   result.void_size_mm,
+                   result.status_text);
         }
     }
 }
