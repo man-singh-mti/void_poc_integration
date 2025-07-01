@@ -648,8 +648,8 @@ void device_process(void)
     temp_system_process();  // Handles temp data + streaming internally
     void_system_process();  // Should handle void data + streaming internally
 
-    debug_void_system_test_wrapper(); // NEW: Complete pipeline test every 5 seconds
-    can_process_timeouts();           // Timeout management (main loop)
+    // debug_void_system_test_wrapper(); // NEW: Complete pipeline test every 5 seconds
+    can_process_timeouts(); // Timeout management (main loop)
     // can_test_periodic();    // Periodic test (every 10s) - includes status debug
 
     icm20948_process(&h_icm20948[0]);
@@ -798,12 +798,32 @@ static bool dev_init_process(void)
         step = STEP_CAN;
         break;
     case STEP_CAN:
-        // Initialize CAN hardware only - no radar logic
+        // Initialize CAN hardware only - no sensor operations
         if (can_init())
         {
+            // Initialize radar system (sets up data structures, does quick check, then turns sensors OFF)
+            if (radar_system_init())
+            {
+                debug_send("RADAR: System ready for commands (sensors OFF until @st)");
+            }
+            else
+            {
+                debug_send("RADAR: System initialization failed");
+            }
+
+            // Initialize void detection system
+            if (void_system_init())
+            {
+                debug_send("VOID: System ready for commands");
+            }
+            else
+            {
+                debug_send("VOID: System initialization failed");
+            }
+
             if (h_dev_debug.b_init)
             {
-                printf("> can_init complete\r\n");
+                printf("> can_init and radar/void init complete\r\n");
             }
             step = STEP_FINISH;
         }
@@ -815,7 +835,6 @@ static bool dev_init_process(void)
             }
             // Stay in this step to retry
         }
-        step = STEP_FINISH;
         break;
     case STEP_FINISH:
         if (h_dev_debug.b_init)

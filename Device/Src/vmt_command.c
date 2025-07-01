@@ -640,22 +640,32 @@ static void cmd_start(h_str_pointers_t *str_p)
 {
     state_set(measure_state);
     uart_tx_channel_set(cmd_uart_ch);
+
     if (dev_log_save_enable_set(auto_log))
     {
         printf("@db,Log starting\n");
     }
+
     dev_dump_printf_set(true);
     dev_water_det_printf_set(true);
 
-    // printf("\n");
+    // Start the device and other modules
     device_restart();
     state_set(measure_state);
     keepalive_reset();
     imu_test_reset();
+
+    // Start void detection system
+    if (void_system_start())
+    {
+        printf("@db,Void detection started\n");
+    }
+    else
+    {
+        printf("@db,WARNING: Void detection failed to start\n");
+    }
+
     printf("@st\n");
-
-    /* auto log enable */
-
     uart_tx_channel_undo();
 }
 
@@ -663,16 +673,30 @@ static void cmd_finish(h_str_pointers_t *str_p)
 {
     state_set(stopped_state);
     uart_tx_channel_set(cmd_uart_ch);
+
     dev_dump_printf_set(false);
     dev_water_det_printf_set(false);
     keepalive_reset();
+
+    // Stop void detection system
+    if (void_system_stop())
+    {
+        printf("@db,Void detection stopped\n");
+    }
+    else
+    {
+        printf("@db,WARNING: Void detection failed to stop\n");
+    }
+
     printf("%s", cmd_str_finish);
     printf("\n");
+
     if (auto_log)
     {
         dev_log_save_enable_set(false);
         printf("@db,Logging complete\n");
     }
+
     imu_test_reset();
     uart_tx_channel_undo();
 }

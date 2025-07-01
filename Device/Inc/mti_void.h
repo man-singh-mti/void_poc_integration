@@ -291,4 +291,31 @@ void void_run_system_test(uint32_t test_interval_ms);
  */
 void void_status_brief(void);
 
+/** @name Simple System Control Functions (POC) */
+
+/**
+ * @brief Start void detection system (POC version)
+ *
+ * Simple startup: start radar sensors + enable auto streaming
+ *
+ * @return true if started successfully
+ */
+bool void_system_start(void);
+
+/**
+ * @brief Stop void detection system (POC version)
+ *
+ * Simple shutdown: stop radar sensors + disable auto streaming
+ *
+ * @return true if stopped successfully
+ */
+bool void_system_stop(void);
+
+/**
+ * @brief Check if void system is running
+ *
+ * @return true if system is active
+ */
+bool void_system_is_running(void);
+
 #endif // MTI_VOID_H

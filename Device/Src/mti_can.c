@@ -464,7 +464,15 @@ uint8_t can_get_online_count(void)
 
 bool can_is_system_healthy(void)
 {
-    return can_system.system_initialized && (can_system.online_count >= 2);
+    // System is healthy if CAN hardware was initialized successfully
+    // Sensors may be offline between commands, but the CAN system itself is functional
+    return can_system.system_initialized;
+}
+
+bool can_has_sufficient_sensors(void)
+{
+    // Check if we have enough sensors currently online for operation
+    return can_system.online_count >= 2;
 }
 
 can_status_t can_get_system_status(void)

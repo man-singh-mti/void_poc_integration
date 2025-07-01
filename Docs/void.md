@@ -268,49 +268,104 @@ void void_set_baseline(uint16_t baseline_mm);
 * **Protocol:** ASCII commands/responses, prefixed (`@`, `&`, `!`, `$`).
 * **Buffers:** Circular RX/TX buffers via HAL functions.
 
-#### 4.2.1. Command Format (Uphole/Debug → Downhole)
+#### 4.2.1. Integrated System Commands
 
-All commands **TO** downhole are prefixed with `@`.
-General structure:
-
-```bash
-@<command_family>,<action/target>,[param1],[param2],...<newline>
-```
-
-Parsing is handled by `string_decoder_by_end()` in [`vmt_string.c`](../Device/Src/vmt_string.c).
-
-**Examples (existing):**
+**Main System Control (includes all modules):**
 
 ```bash
-@connect                            // Request basic system status
-@status?                            // General status (similar to @connect response)
-@status,imu?                        // IMU status
-@status,water?                      // Water status
-@status,temp?                       // Temperature status
-@status,void?                       // Void status (same as @vd,status?)
-
-@void,status?                       // Equivalent to @vd,status?
-
-@temp,status?                       // Temperature status query
-@temp,config,high,<value>           // Set high temperature threshold
-@temp,config,low,<value>            // Set low temperature threshold
-
-@vd,status?                         // Void detection status
-@vd,config,thresh,<val>             // Set void detection threshold (mm)
-@vd,config,baseline,<val>           // Set expected diameter (mm)
-@vd,config,conf,<val>               // Set confidence threshold (%)
-@vd,config,range,<min>,<max>
-@vd,config,mode,baseline,<method_id>
-@vd,config,mode,multipoint,<algorithm_id>
-@vd,config,filter,median,<0_or_1>
-@vd,cal,sensor,<idx>,<factor_ppm>
-@vd,history,profile[,<count>]
-@vd,history,detection
-@vd,clear,history
-@vd,diag?
+@st                                     # Start entire system (radar, void, temp, imu, water)
+@fn                                     # Stop entire system (all modules)
 ```
 
-> **Note:** The `@vd,history,…` and `@vd,diag?` commands are currently **not yet supported** (handlers to be implemented in a future release).
+When `@st` is executed:
+
+1. All existing modules start (water, temp, IMU, etc.)
+2. **NEW:** Void detection system starts automatically:
+   * Radar sensors are started via CAN
+   * Sensors set to measurement mode  
+   * Auto streaming enabled for operational mode
+   * Processing statistics reset
+
+When `@fn` is executed:
+
+1. **NEW:** Void detection system stops automatically:
+   * Auto streaming disabled
+   * Radar sensors stopped via CAN
+   * Runtime statistics accumulated
+2. All existing modules stop (water, temp, IMU, etc.)
+
+**Simple Unified Control Examples:**
+
+```bash
+# Simple unified control
+@st                                     # Start everything including void detection
+@vd,status?                            # Check if void system is running
+@fn                                     # Stop everything including void detection
+
+# Configuration still works independently
+@vd,config,thresh,60                   # Change threshold while running
+@vd,config,algorithm,circlefit         # Switch algorithms
+```
+
+**Void-Specific Commands (configuration and status only):**
+
+```bash
+# Status and diagnostics
+@vd,status?                             # Get current void detection status + running state
+@vd,diag?                               # Get full diagnostics including runtime stats
+
+# Configuration (can be done while system is running)
+@vd,config,thresh,<val>                 # Set detection threshold (mm)
+@vd,config,baseline,<val>               # Set expected diameter (mm) 
+@vd,config,algorithm,simple|circlefit   # Switch detection algorithm
+@vd,config,conf,<val>                   # Set confidence threshold (%)
+
+# Data access and maintenance
+@vd,data                                # Get real-time measurement data
+@vd,clear                               # Clear detection statistics
+```
+
+**Response Examples:**
+
+```bash
+# Status response now includes running state
+&vd,status,0,0,85,150,simple,2,running  # No void, 85% conf, system running
+&vd,status,1,75,92,150,circlefit,3,stopped # Void detected, system stopped
+
+# Diagnostic response includes runtime information  
+&vd,diag,running,1                      # System is currently running
+&vd,diag,stats,15,2,45000               # 15 detections, 2 algorithm switches, 45s runtime
+```
+
+### System Integration Benefits
+
+1. **Unified Control:** One command (`@st`) starts everything, one command (`@fn`) stops everything
+2. **Consistent Behavior:** Void detection follows same lifecycle as other modules
+3. **Operational Mode Integration:** Auto streaming automatically enabled/disabled with system state
+4. **Simplified Usage:** Operators don't need to remember separate void start/stop commands
+5. **Runtime Tracking:** System automatically tracks total void detection runtime across sessions
+
+### Usage Examples
+
+```bash
+# Basic operation - start everything
+@st                                     # Starts all modules including void detection
+# System responds: @db,Void detection system started
+
+# Check void status during operation  
+@vd,status?                             # Shows detection status + "running"
+@vd,diag?                               # Shows full system diagnostics
+
+# Configure void detection while running
+@vd,config,algorithm,circlefit          # Switch to circle fitting algorithm
+@vd,config,thresh,60                    # Adjust threshold to 60mm
+
+# Stop everything
+@fn                                     # Stops all modules including void detection  
+# System responds: @db,Void detection system stopped
+```
+
+This integration makes the system much more intuitive and follows the existing pattern where `@st`/`@fn` control all system modules together.
 
 #### 4.2.2. Automatic Data Stream Architecture
 

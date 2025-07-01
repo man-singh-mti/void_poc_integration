@@ -80,63 +80,45 @@ bool radar_system_init(void)
     // Set sensor angles
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        latest_measurements.angle_deg[i]  = sensor_angles[i]; // Should be 0, 120, 240
+        latest_measurements.angle_deg[i]  = sensor_angles[i];
         latest_measurements.data_valid[i] = false;
-
         debug_send("RADAR: Sensor %d assigned angle %d deg", i, sensor_angles[i]);
     }
 
-    // Reset processing state
-    radar_config.last_process_time  = HAL_GetTick();
-    radar_config.new_data_available = false;
-
     debug_send("RADAR: Data structures initialized");
 
-    // Wait for CAN system to be ready
+    // Wait for CAN system to be ready (hardware only)
     if (!can_is_system_healthy())
     {
-        debug_send("RADAR: Waiting for CAN system...");
-        uint32_t wait_start = HAL_GetTick();
-        while (!can_is_system_healthy() && (HAL_GetTick() - wait_start) < 5000)
-        {
-            HAL_Delay(100);
-        }
-
-        if (!can_is_system_healthy())
-        {
-            debug_send("RADAR: ERROR - CAN system not ready after 5 seconds");
-            return false;
-        }
+        debug_send("RADAR: ERROR - CAN system not initialized");
+        return false;
     }
 
-    debug_send("RADAR: CAN system ready, %d sensors online", can_get_online_count());
+    debug_send("RADAR: CAN system ready");
 
-    // Verify firmware versions
-    debug_send("RADAR: Verifying sensor firmware versions...");
-    radar_config.firmware_verified = radar_verify_firmware_versions();
-
-    if (!radar_config.firmware_verified)
+    // OPTIONAL: Quick sensor check during initialization (then turn off)
+    debug_send("RADAR: Performing quick sensor check...");
+    if (radar_start_sensors())
     {
-        debug_send("RADAR: WARNING - Firmware verification failed, continuing anyway");
-    }
+        HAL_Delay(1000); // Wait for sensors to come online
 
-    // Set sensors to calibration mode initially
-    debug_send("RADAR: Setting sensors to calibration mode");
-    if (!radar_set_measurement_mode()) // ← Change to measurement mode (profile 1)
+        // Verify firmware versions if possible
+        radar_config.firmware_verified = radar_verify_firmware_versions();
+
+        // Turn sensors back OFF after check
+        radar_stop_sensors();
+        debug_send("RADAR: Sensor check complete, sensors turned OFF");
+    }
+    else
     {
-        debug_send("RADAR: WARNING - Failed to set calibration mode");
+        debug_send("RADAR: WARNING - Sensor check failed");
+        radar_config.firmware_verified = false;
     }
 
-    HAL_Delay(500); // Allow sensors to configure
-
-    // Mark system as initialized
+    // Mark system as initialized (ready for commands)
     radar_config.system_initialized = true;
 
-    // Report configuration to debug and uphole
-    radar_report_configuration(UART_DEBUG);
-    radar_report_configuration(UART_UPHOLE);
-
-    debug_send("RADAR: System initialization complete");
+    debug_send("RADAR: System initialization complete (sensors OFF until @st command)");
     debug_send("=== RADAR SYSTEM INITIALIZATION END ===");
 
     return true;
