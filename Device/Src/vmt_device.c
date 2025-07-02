@@ -1290,7 +1290,7 @@ static void dev_debug_process(void)
             // Print only if new measurement data is available (mirrors uphole stream)
             printf("@void_debug: flags=0x%02X [algo=%s, sensors=%d valid, void=%s], distances=[%d,%d,%d]mm, conf=%d%%, size=%dmm, status=\"%s\"\n",
                    measurement.flags,
-                   void_get_algorithm_string(result.algorithm_used),
+                   void_get_algorithm_string((void_algorithm_t)result.algorithm_used),
                    measurement.valid_sensor_count,
                    result.void_detected ? "YES" : "NO",
                    measurement.distance_mm[0],

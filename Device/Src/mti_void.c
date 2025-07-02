@@ -67,7 +67,7 @@ static uint16_t median_buffer[MAX_RADAR_SENSORS][3] = { 0 };
 static uint8_t  median_index[MAX_RADAR_SENSORS]     = { 0 };
 
 /** @brief Simple running state flag */
-static bool void_system_running = false;
+bool void_system_running = false; // Make it accessible externally
 
 /*------------------------------------------------------------------------------
  * Forward Declarations
@@ -296,7 +296,11 @@ static bool process_radar_data(void)
 
     void_state.new_results_available = true;
 
-    // debug_send("[V]%s C%d Sz%d S%d", latest_results.void_detected ? "D" : "N", confidence, latest_results.void_size_mm, radar_data.valid_sensor_count);
+    // Send automatic stream if enabled (this replaces the existing streaming code)
+    if (void_state.auto_streaming_enabled && system_is_operational_mode())
+    {
+        void_send_automatic_stream();
+    }
 
     return true;
 }
@@ -738,12 +742,9 @@ void void_set_median_filter(bool enabled)
     debug_send("VOID: Median filter %s", enabled ? "enabled" : "disabled");
 }
 
-void void_get_config(void_config_t *config_out)
+const void_config_t *void_get_config(void)
 {
-    if (config_out)
-    {
-        memcpy(config_out, &config, sizeof(void_config_t));
-    }
+    return &config;
 }
 
 /*------------------------------------------------------------------------------
@@ -842,8 +843,6 @@ static void void_send_automatic_stream_internal(void)
         return;
     }
 
-    uart_tx_channel_set(UART_UPHOLE);
-
     void_measurement_t measurement = latest_measurement;
     void_data_t        result      = latest_results;
 
@@ -863,17 +862,25 @@ static void void_send_automatic_stream_internal(void)
     }
 
     // Send measurement data
-    printf("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
-           flags,
-           measurement.distance_mm[0],
-           measurement.distance_mm[1],
-           measurement.distance_mm[2],
-           result.void_detected ? 1 : 0,
-           0, // Reserved
-           0, // Reserved
-           result.confidence_percent);
+    uphole_send("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+                flags,
+                measurement.distance_mm[0],
+                measurement.distance_mm[1],
+                measurement.distance_mm[2],
+                result.void_detected ? 1 : 0,
+                0, // Reserved
+                0, // Reserved
+                result.confidence_percent);
 
-    uart_tx_channel_undo();
+    debug_send("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
+               flags,
+               measurement.distance_mm[0],
+               measurement.distance_mm[1],
+               measurement.distance_mm[2],
+               result.void_detected ? 1 : 0,
+               0, // Reserved
+               0, // Reserved
+               result.confidence_percent);
 
     // Mark data as transmitted
     void_mark_results_processed();
@@ -894,7 +901,7 @@ static void void_send_immediate_stream(void)
            latest_results.void_detected ? "detected" : "clear",
            latest_results.void_size_mm,
            latest_results.confidence_percent,
-           void_get_algorithm_string(latest_results.algorithm_used));
+           void_get_algorithm_string((void_algorithm_t)latest_results.algorithm_used));
 
     uart_tx_channel_undo();
 
@@ -902,10 +909,13 @@ static void void_send_immediate_stream(void)
     latest_results.new_result_available = false;
     void_state.automatic_stream_count++;
 
-    debug_send("VOID: Event stream #%lu sent - %s (conf: %d%%)",
-               void_state.automatic_stream_count,
-               latest_results.void_detected ? "VOID DETECTED" : "clear",
-               latest_results.confidence_percent);
+    // Send void detection event immediately (more human-readable format)
+    debug_send("!vd | Time: %lu ms | Status: %s | Size: %d mm | Confidence: %d%% | Algorithm: %s",
+               HAL_GetTick(),
+               latest_results.void_detected ? "detected" : "clear",
+               latest_results.void_size_mm,
+               latest_results.confidence_percent,
+               void_get_algorithm_string((void_algorithm_t)latest_results.algorithm_used));
 }
 
 // Add streaming control functions
@@ -1217,4 +1227,157 @@ bool void_system_stop(void)
 bool void_system_is_running(void)
 {
     return void_system_running;
+}
+
+
+/*------------------------------------------------------------------------------
+ * Command Interface Implementation
+ *----------------------------------------------------------------------------*/
+
+char void_get_detection_character(void)
+{
+    if (!void_state.system_initialized || !latest_results.void_detected)
+    {
+        return VOID_CHAR_NONE;
+    }
+
+    switch (config.algorithm)
+    {
+    case VOID_ALGORITHM_BYPASS:
+        return VOID_CHAR_TEST;
+
+    case VOID_ALGORITHM_SIMPLE:
+    {
+        // For simple algorithm, determine which sensor detected the void
+        radar_distance_t radar_data;
+        if (radar_get_latest_measurements(&radar_data))
+        {
+            uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
+
+            // Check each sensor for void detection
+            for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+            {
+                if (radar_data.data_valid[i] && radar_data.distance_mm[i] > threshold)
+                {
+                    switch (i)
+                    {
+                    case 0:
+                        return VOID_CHAR_SENSOR0;
+                    case 1:
+                        return VOID_CHAR_SENSOR1;
+                    case 2:
+                        return VOID_CHAR_SENSOR2;
+                    default:
+                        break;
+                    }
+                }
+            }
+        }
+        return VOID_CHAR_NONE;
+    }
+
+    case VOID_ALGORITHM_CIRCLEFIT:
+        return VOID_CHAR_CIRCLE;
+
+    default:
+        return VOID_CHAR_ERROR;
+    }
+}
+
+const char *void_get_character_description(char void_char)
+{
+    switch (void_char)
+    {
+    case VOID_CHAR_NONE:
+        return "No void detected";
+    case VOID_CHAR_SENSOR0:
+        return "Void detected by sensor 0 (0°)";
+    case VOID_CHAR_SENSOR1:
+        return "Void detected by sensor 1 (120°)";
+    case VOID_CHAR_SENSOR2:
+        return "Void detected by sensor 2 (240°)";
+    case VOID_CHAR_CIRCLE:
+        return "Void detected by circle fitting";
+    case VOID_CHAR_TEST:
+        return "Void detected in test/bypass mode";
+    case VOID_CHAR_ERROR:
+        return "Unknown algorithm or error";
+    default:
+        return "Invalid character";
+    }
+}
+
+bool void_is_valid_detection_character(char void_char)
+{
+    switch (void_char)
+    {
+    case VOID_CHAR_NONE:
+    case VOID_CHAR_SENSOR0:
+    case VOID_CHAR_SENSOR1:
+    case VOID_CHAR_SENSOR2:
+    case VOID_CHAR_CIRCLE:
+    case VOID_CHAR_TEST:
+    case VOID_CHAR_ERROR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool void_get_status_compact(char *status_char, uint16_t *size_mm, uint8_t *confidence_pct, const char **system_state)
+{
+    if (!status_char || !size_mm || !confidence_pct || !system_state)
+    {
+        return false;
+    }
+
+    *status_char    = void_get_detection_character();
+    *size_mm        = latest_results.void_detected ? latest_results.void_size_mm : 0;
+    *confidence_pct = latest_results.confidence_percent;
+    *system_state   = void_system_is_running() ? "run" : "stop";
+
+    return true;
+}
+
+void void_send_automatic_stream(void)
+{
+    // Only send if auto streaming is enabled and system is operational
+    if (!void_state.auto_streaming_enabled || !system_is_operational_mode())
+    {
+        return;
+    }
+
+    char        status_char;
+    uint16_t    size_mm;
+    uint8_t     confidence_pct;
+    const char *system_state;
+
+    if (void_get_status_compact(&status_char, &size_mm, &confidence_pct, &system_state))
+    {
+        uart_tx_channel_set(UART_UPHOLE);
+
+        // Format: &vd,<void_det>,<size_mm>,<conf_pct>
+        printf("&vd,%c,%d,%d\r\n", status_char, size_mm, confidence_pct);
+
+        uart_tx_channel_undo();
+
+        void_state.automatic_stream_count++;
+        debug_send("VOID: Auto stream #%lu sent - %c,%d,%d", void_state.automatic_stream_count, status_char, size_mm, confidence_pct);
+    }
+}
+
+void void_get_diagnostics(bool *running, uint32_t *stats_detections, uint32_t *stats_switches, uint32_t *stats_runtime_ms, bool *ready, bool *streaming)
+{
+    if (running)
+        *running = void_system_is_running();
+    if (stats_detections)
+        *stats_detections = void_state.total_detections;
+    if (stats_switches)
+        *stats_switches = void_state.algorithm_switches;
+    if (stats_runtime_ms)
+        *stats_runtime_ms = HAL_GetTick() - void_state.init_time_ms;
+    if (ready)
+        *ready = void_is_system_ready();
+    if (streaming)
+        *streaming = void_state.auto_streaming_enabled;
 }

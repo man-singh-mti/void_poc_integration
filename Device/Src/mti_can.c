@@ -684,3 +684,8 @@ uint32_t can_get_sensor_frame_count(uint8_t sensor_id)
     }
     return can_sensor_frame_count[sensor_id];
 }
+
+bool can_is_system_initialized(void)
+{
+    return can_system.system_initialized;
+}

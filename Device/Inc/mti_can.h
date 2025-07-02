@@ -168,4 +168,10 @@ void can_clear_sensor_data_flag(uint8_t sensor_id);
  */
 uint32_t can_get_sensor_frame_count(uint8_t sensor_id);
 
+/**
+ * @brief Check if CAN system is initialized
+ * @return true if CAN system has been initialized
+ */
+bool can_is_system_initialized(void);
+
 #endif // MTI_CAN_H

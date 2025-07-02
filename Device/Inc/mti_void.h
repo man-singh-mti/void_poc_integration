@@ -20,6 +20,15 @@
 #define VOID_HYSTERESIS_MM           10  // Hysteresis to prevent false events
 #define VOID_CIRCLE_FIT_TOLERANCE_MM 20  // Circle fitting tolerance
 
+/** @name Void Detection Character Codes */
+#define VOID_CHAR_NONE    '0' // No void detected
+#define VOID_CHAR_SENSOR0 'A' // Void detected by sensor 0 (0°)
+#define VOID_CHAR_SENSOR1 'B' // Void detected by sensor 1 (120°)
+#define VOID_CHAR_SENSOR2 'C' // Void detected by sensor 2 (240°)
+#define VOID_CHAR_CIRCLE  'X' // Void detected by circle fitting
+#define VOID_CHAR_TEST    'T' // Void detected in test/bypass mode
+#define VOID_CHAR_ERROR   '?' // Unknown algorithm or error
+
 /** @name Algorithm Types */
 typedef enum
 {
@@ -191,10 +200,9 @@ void void_set_median_filter(bool enabled);
 
 /**
  * @brief Get current configuration
- *
- * @param config Pointer to structure to fill with current config
+ * @return Pointer to current configuration structure
  */
-void void_get_config(void_config_t *config);
+const void_config_t *void_get_config(void);
 
 /**
  * @brief Get algorithm name as string
@@ -317,5 +325,61 @@ bool void_system_stop(void);
  * @return true if system is active
  */
 bool void_system_is_running(void);
+
+/** @name Command Interface Functions */
+
+/**
+ * @brief Get current void detection status with character mapping
+ * @param status_char Pointer to store detection character (0,A,B,C,X,T,?)
+ * @param size_mm Pointer to store void size in mm
+ * @param confidence_pct Pointer to store confidence percentage
+ * @param system_state Pointer to store system state string
+ * @return true if status is available
+ */
+bool void_get_status_compact(char *status_char, uint16_t *size_mm, uint8_t *confidence_pct, const char **system_state);
+
+/**
+ * @brief Get void detection character for current status
+ * @return Character representing detection state (0,A,B,C,X,T,?)
+ */
+char void_get_detection_character(void);
+
+/**
+ * @brief Get description for a detection character
+ * @param void_char Detection character
+ * @return String description of the character
+ */
+const char *void_get_character_description(char void_char);
+
+/**
+ * @brief Check if a character is a valid detection character
+ * @param void_char Character to validate
+ * @return true if character is valid
+ */
+bool void_is_valid_detection_character(char void_char);
+
+/**
+ * @brief Send automatic data stream (called internally)
+ */
+void void_send_automatic_stream(void);
+
+/**
+ * @brief Get runtime diagnostics data
+ * @param running Pointer to store running state
+ * @param stats_detections Pointer to store detection count
+ * @param stats_switches Pointer to store algorithm switches
+ * @param stats_runtime_ms Pointer to store runtime in ms
+ * @param ready Pointer to store ready state
+ * @param streaming Pointer to store streaming state
+ */
+void void_get_diagnostics(bool *running, uint32_t *stats_detections, uint32_t *stats_switches, uint32_t *stats_runtime_ms, bool *ready, bool *streaming);
+
+/** @name External Variables for POC */
+
+/**
+ * @brief Global void system running state (POC access)
+ */
+extern bool void_system_running;
+
 
 #endif // MTI_VOID_H

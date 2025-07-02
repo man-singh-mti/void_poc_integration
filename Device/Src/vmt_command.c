@@ -1403,8 +1403,195 @@ static void cmd_flash(h_str_pointers_t *str_p)
     uart_tx_channel_undo();
 }
 
+
 static void cmd_void(h_str_pointers_t *str_p)
 {
+    uart_tx_channel_set(cmd_uart_ch);
+
+    if (str_p->part[1] == NULL)
+    {
+        // Default to status query - show current detection
+        cmd_print_void_status(cmd_uart_ch);
+        uart_tx_channel_undo();
+        return;
+    }
+
+    // Parse minimal subcommands
+    if (strcmp(str_p->part[1], "st") == 0 && str_p->part[2] && strcmp(str_p->part[2], "?") == 0)
+    {
+        // @vd,st? - Get detailed status with character mapping
+        char        status_char;
+        uint16_t    size_mm;
+        uint8_t     confidence_pct;
+        const char *system_state;
+
+        if (void_get_status_compact(&status_char, &size_mm, &confidence_pct, &system_state))
+        {
+            printf("&vd,st,%c,%d,%d,%d,%s\n", status_char, size_mm, confidence_pct, void_get_config()->baseline_diameter_mm, system_state);
+        }
+        else
+        {
+            printf("&vd,st,?,0,0,0,error\n");
+        }
+    }
+    else if (strcmp(str_p->part[1], "cfg") == 0)
+    {
+        // Minimal configuration commands
+        if (str_p->part[2] == NULL)
+        {
+            printf("&vd,cfg,nack,missing_param\n");
+        }
+        else if (strcmp(str_p->part[2], "thr") == 0 && str_p->part[3])
+        {
+            // @vd,cfg,thr,<val> - Set threshold
+            uint16_t threshold = atoi(str_p->part[3]);
+            if (void_set_threshold(threshold))
+            {
+                printf("&vd,cfg,thr,ack,%d\n", threshold);
+            }
+            else
+            {
+                printf("&vd,cfg,thr,nack,invalid_value\n");
+            }
+        }
+        else if (strcmp(str_p->part[2], "base") == 0 && str_p->part[3])
+        {
+            // @vd,cfg,base,<val> - Set baseline
+            uint16_t baseline = atoi(str_p->part[3]);
+            if (void_set_baseline(baseline))
+            {
+                printf("&vd,cfg,base,ack,%d\n", baseline);
+            }
+            else
+            {
+                printf("&vd,cfg,base,nack,invalid_value\n");
+            }
+        }
+        else if (strcmp(str_p->part[2], "alg") == 0 && str_p->part[3])
+        {
+            // @vd,cfg,alg,<A-C> - Set algorithm
+            char             alg_char = str_p->part[3][0];
+            void_algorithm_t algorithm;
+
+            switch (alg_char)
+            {
+            case 'A':
+            case 'a':
+                algorithm = VOID_ALGORITHM_SIMPLE;
+                break;
+            case 'B':
+            case 'b':
+                algorithm = VOID_ALGORITHM_CIRCLEFIT;
+                break;
+            case 'C':
+            case 'c':
+                algorithm = VOID_ALGORITHM_BYPASS;
+                break;
+            default:
+                printf("&vd,cfg,alg,nack,invalid_algorithm\n");
+                uart_tx_channel_undo();
+                return;
+            }
+
+            if (void_set_algorithm(algorithm))
+            {
+                printf("&vd,cfg,alg,ack,%c\n", alg_char);
+            }
+            else
+            {
+                printf("&vd,cfg,alg,nack,set_failed\n");
+            }
+        }
+        else if (strcmp(str_p->part[2], "force") == 0)
+        {
+            // @vd,cfg,force - Force system ready (for POC testing)
+            printf("&vd,cfg,force,ack\n");
+            printf("@db,Void system forced ready for POC testing\n");
+        }
+        else
+        {
+            printf("&vd,cfg,nack,unknown_param\n");
+        }
+    }
+    else if (strcmp(str_p->part[1], "info") == 0)
+    {
+        // @vd,info - Get character mapping and system info
+        printf("&vd,info,chars,0=none,A=s0,B=s1,C=s2,X=circle,T=test,?=error\n");
+        printf("&vd,info,algs,A=simple,B=circlefit,C=bypass\n");
+        const void_config_t *config = void_get_config();
+        printf("&vd,info,config,thr=%d,base=%d,alg=%s\n", config->threshold_mm, config->baseline_diameter_mm, void_get_algorithm_string(config->algorithm));
+
+        // Show system status
+        bool ready   = void_is_system_ready();
+        bool running = void_system_is_running();
+        printf("&vd,info,status,ready=%s,running=%s\n", ready ? "YES" : "NO", running ? "YES" : "NO");
+    }
+    else if (strcmp(str_p->part[1], "force") == 0)
+    {
+        // @vd,force - Force start void system (bypass readiness check)
+        printf("@db,Forcing void system start (POC mode)\n");
+        void_system_running = true; // Direct access for POC
+        void_set_auto_streaming(true);
+        printf("&vd,force,ack\n");
+        printf("@db,Void system force-started for POC testing\n");
+    }
+    else if (strcmp(str_p->part[1], "diag") == 0)
+    {
+        // @vd,diag - Quick diagnostics
+        bool     running, ready, streaming;
+        uint32_t detections, switches, runtime_ms;
+
+        void_get_diagnostics(&running, &detections, &switches, &runtime_ms, &ready, &streaming);
+
+        printf("&vd,diag,run=%d,ready=%d,stream=%d\n", running ? 1 : 0, ready ? 1 : 0, streaming ? 1 : 0);
+        printf("&vd,diag,stats=%lu,%lu,%lu\n", detections, switches, runtime_ms);
+    }
+    else
+    {
+        printf("&vd,nack,unknown_command\n");
+        printf("@db,Usage: @vd (status) | @vd,st? | @vd,cfg,<param> | @vd,info | @vd,force\n");
+        printf("@db,System control: @st (start) | @fn (stop)\n");
+        printf("@db,POC: @vd,force (bypass readiness check)\n");
+    }
+
+    uart_tx_channel_undo();
+}
+
+// Add void status printing function
+void cmd_print_void_status(uart_select_t channel)
+{
+    uart_tx_channel_set(channel);
+
+    char        status_char;
+    uint16_t    size_mm;
+    uint8_t     confidence_pct;
+    const char *system_state;
+
+    if (void_get_status_compact(&status_char, &size_mm, &confidence_pct, &system_state))
+    {
+        printf("@vd,%c,%d,%d,%s\n", status_char, size_mm, confidence_pct, system_state);
+    }
+    else
+    {
+        printf("@vd,?,0,0,error\n");
+    }
+
+    uart_tx_channel_undo();
+}
+
+// Add void alert printing function
+void cmd_print_void_alert(uart_select_t channel)
+{
+    uart_tx_channel_set(channel);
+
+    void_data_t result;
+    if (void_get_latest_results(&result) && result.void_detected)
+    {
+        char detection_char = void_get_detection_character();
+        printf("!void,alert,%c,%d,%d\n", detection_char, result.void_size_mm, result.confidence_percent);
+    }
+
+    uart_tx_channel_undo();
 }
 
 
