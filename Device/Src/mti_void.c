@@ -834,89 +834,6 @@ void void_get_statistics(uint32_t *total_detections, uint32_t *algorithm_switche
     }
 }
 
-// Add this internal function to mti_void.c
-static void void_send_automatic_stream_internal(void)
-{
-    // Only send when we have new measurement data
-    if (!void_state.new_measurement_available)
-    {
-        return;
-    }
-
-    void_measurement_t measurement = latest_measurement;
-    void_data_t        result      = latest_results;
-
-    // Format: &vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>
-    uint8_t flags = 0;
-    flags |= (config.algorithm & 0x03); // Bits 0-1: Algorithm
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        if (measurement.data_valid[i])
-        {
-            flags |= (0x04 << i); // Bits 2-4: Sensor validity
-        }
-    }
-    if (result.void_detected)
-    {
-        flags |= 0x20; // Bit 5: Void detected
-    }
-
-    // Send measurement data
-    uphole_send("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
-                flags,
-                measurement.distance_mm[0],
-                measurement.distance_mm[1],
-                measurement.distance_mm[2],
-                result.void_detected ? 1 : 0,
-                0, // Reserved
-                0, // Reserved
-                result.confidence_percent);
-
-    debug_send("&vd,%d,%d,%d,%d,%d,%d,%d,%d\r\n",
-               flags,
-               measurement.distance_mm[0],
-               measurement.distance_mm[1],
-               measurement.distance_mm[2],
-               result.void_detected ? 1 : 0,
-               0, // Reserved
-               0, // Reserved
-               result.confidence_percent);
-
-    // Mark data as transmitted
-    void_mark_results_processed();
-}
-
-static void void_send_immediate_stream(void)
-{
-    if (!latest_results.new_result_available)
-    {
-        return;
-    }
-
-    uart_tx_channel_set(UART_UPHOLE);
-
-    // Send void detection event immediately
-    printf("!vd,%lu,%s,%d,%d,%s\r\n",
-           HAL_GetTick(),
-           latest_results.void_detected ? "detected" : "clear",
-           latest_results.void_size_mm,
-           latest_results.confidence_percent,
-           void_get_algorithm_string((void_algorithm_t)latest_results.algorithm_used));
-
-    uart_tx_channel_undo();
-
-    // Mark as sent and update statistics
-    latest_results.new_result_available = false;
-    void_state.automatic_stream_count++;
-
-    // Send void detection event immediately (more human-readable format)
-    debug_send("!vd | Time: %lu ms | Status: %s | Size: %d mm | Confidence: %d%% | Algorithm: %s",
-               HAL_GetTick(),
-               latest_results.void_detected ? "detected" : "clear",
-               latest_results.void_size_mm,
-               latest_results.confidence_percent,
-               void_get_algorithm_string((void_algorithm_t)latest_results.algorithm_used));
-}
 
 // Add streaming control functions
 void void_set_auto_streaming(bool enabled)
@@ -1338,15 +1255,144 @@ bool void_get_status_compact(char *status_char, uint16_t *size_mm, uint8_t *conf
 
     return true;
 }
+/*------------------------------------------------------------------------------
+ * Immediate and Automatic Data Streaming Functions
+ *----------------------------------------------------------------------------*/
+/**
+ * @brief Send immediate void data stream (manual trigger)
+ */
 
+/**
+ * @brief Public wrapper for automatic streaming (called by external command interface)
+ */
 void void_send_automatic_stream(void)
 {
-    // Only send if auto streaming is enabled and system is operational
-    if (!void_state.auto_streaming_enabled || !system_is_operational_mode())
+    void_send_automatic_stream_internal();
+}
+
+static void void_send_immediate_stream(void)
+{
+    // Call the internal streaming function immediately
+    void_send_automatic_stream_internal();
+
+    // Update statistics
+    void_state.immediate_processing_count++;
+}
+
+static void void_send_automatic_stream_internal(void)
+{
+    // Only stream in operational mode
+    if (!void_system_running || state_get() != measure_state)
     {
         return;
     }
 
+    void_measurement_t measurement;
+    void_data_t        result;
+
+    // Get latest data from the void detection system
+    if (!void_get_measurement_data(&measurement) || !void_get_latest_results(&result))
+    {
+        return; // No data available
+    }
+
+    // Generate per-sensor void flags based on the detection algorithm
+    bool void_flags[MAX_RADAR_SENSORS] = { false, false, false };
+
+    // For simple algorithm: check each sensor individually
+    if (result.algorithm_used == VOID_ALGORITHM_SIMPLE)
+    {
+        uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            if (measurement.data_valid[i] && measurement.distance_mm[i] > threshold)
+            {
+                void_flags[i] = true;
+            }
+        }
+    }
+    // For circle fit algorithm: if void detected, mark all valid sensors
+    else if (result.algorithm_used == VOID_ALGORITHM_CIRCLEFIT && result.void_detected)
+    {
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            if (measurement.data_valid[i])
+            {
+                void_flags[i] = true;
+            }
+        }
+    }
+    // For bypass: never detect voids
+    // (void_flags remain false)
+
+    // Get algorithm character
+    char algorithm_char = 'a'; // Default to simple
+    switch (result.algorithm_used)
+    {
+    case VOID_ALGORITHM_SIMPLE:
+        algorithm_char = 'a';
+        break;
+    case VOID_ALGORITHM_CIRCLEFIT:
+        algorithm_char = 'b';
+        break;
+    case VOID_ALGORITHM_BYPASS:
+        algorithm_char = 'c';
+        break;
+    default:
+        algorithm_char = '?';
+        break;
+    }
+
+    // UPHOLE STREAM: Compact format for production use
+    uart_tx_channel_set(UART_UPHOLE);
+    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%c\r\n",
+           measurement.distance_mm[0],       // distance_0
+           measurement.distance_mm[1],       // distance_1
+           measurement.distance_mm[2],       // distance_2
+           algorithm_char,                   // algorithm (a/b/c)
+           void_flags[0] ? 1 : 0,            // void_0
+           void_flags[1] ? 1 : 0,            // void_1
+           void_flags[2] ? 1 : 0,            // void_2
+           void_system_running ? 'y' : 'n'); // status
+    uart_tx_channel_undo();
+
+    // DEBUG STREAM: Extended format for development/diagnostics
+    uart_tx_channel_set(UART_DEBUG);
+    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%d,%d,%d,0x%02X\r\n",
+           measurement.distance_mm[0],  // distance_0
+           measurement.distance_mm[1],  // distance_1
+           measurement.distance_mm[2],  // distance_2
+           algorithm_char,              // algorithm (a/b/c)
+           void_flags[0] ? 1 : 0,       // void_0
+           void_flags[1] ? 1 : 0,       // void_1
+           void_flags[2] ? 1 : 0,       // void_2
+           result.confidence_percent,   // confidence
+           config.baseline_diameter_mm, // baseline
+           config.threshold_mm,         // threshold
+           measurement.flags);          // system flags
+    uart_tx_channel_undo();
+
+    // Update statistics
+    void_state.automatic_stream_count++;
+
+    // Debug trace (can be disabled)
+    // debug_send("[V]stream sent: d=[%d,%d,%d] alg=%c void=[%d,%d,%d]",
+    //           measurement.distance_mm[0],
+    //           measurement.distance_mm[1],
+    //           measurement.distance_mm[2],
+    //           algorithm_char,
+    //           void_flags[0],
+    //           void_flags[1],
+    //           void_flags[2]);
+}
+
+/*------------------------------------------------------------------------------
+ * Command Interface Implementation (Legacy)
+ *----------------------------------------------------------------------------*/
+
+void void_send_command_response(void)
+{
+    // Legacy response format for compatibility
     char        status_char;
     uint16_t    size_mm;
     uint8_t     confidence_pct;
@@ -1354,30 +1400,142 @@ void void_send_automatic_stream(void)
 
     if (void_get_status_compact(&status_char, &size_mm, &confidence_pct, &system_state))
     {
-        uart_tx_channel_set(UART_UPHOLE);
-
         // Format: &vd,<void_det>,<size_mm>,<conf_pct>
+        uart_tx_channel_set(UART_UPHOLE);
         printf("&vd,%c,%d,%d\r\n", status_char, size_mm, confidence_pct);
-
         uart_tx_channel_undo();
-
-        void_state.automatic_stream_count++;
-        debug_send("VOID: Auto stream #%lu sent - %c,%d,%d", void_state.automatic_stream_count, status_char, size_mm, confidence_pct);
     }
 }
 
+/*------------------------------------------------------------------------------
+ * Diagnostics and Testing Functions
+ *----------------------------------------------------------------------------*/
+
+void void_run_diagnostics_extended(void)
+{
+    debug_send("=== VOID Detection System Extended Diagnostics ===");
+    debug_send("System initialized: %s", void_state.system_initialized ? "YES" : "NO");
+    debug_send("System ready: %s", void_is_system_ready() ? "YES" : "NO");
+    debug_send("Detection state: %d", void_state.detection_state);
+    debug_send("");
+
+    debug_send("Configuration:");
+    debug_send("  Algorithm: %d (%s)",
+               config.algorithm,
+               config.algorithm == VOID_ALGORITHM_BYPASS   ? "bypass"
+               : config.algorithm == VOID_ALGORITHM_SIMPLE ? "simple"
+                                                           : "circlefit");
+    debug_send("  Baseline: %dmm", config.baseline_diameter_mm);
+    debug_send("  Threshold: %dmm", config.threshold_mm);
+    debug_send("  Min confidence: %d%%", config.confidence_min_percent);
+    debug_send("  Auto fallback: %s", config.auto_fallback_enabled ? "enabled" : "disabled");
+    debug_send("  Median filter: %s", config.median_filter_enabled ? "enabled" : "disabled");
+    debug_send("");
+
+    debug_send("Latest Results:");
+    debug_send("  Void detected: %s", latest_results.void_detected ? "YES" : "NO");
+    debug_send("  Confidence: %d%%", latest_results.confidence_percent);
+    debug_send("  Void size: %dmm", latest_results.void_size_mm);
+    debug_send("  Sensors used: %d", latest_results.sensor_count_used);
+    debug_send("  Status: %s", latest_results.status_text);
+    debug_send("");
+
+    debug_send("Event-Driven Stats:");
+    debug_send("  Auto streaming: %s", void_state.auto_streaming_enabled ? "enabled" : "disabled");
+    debug_send("  Immediate processing count: %lu", void_state.immediate_processing_count);
+    debug_send("  Automatic stream count: %lu", void_state.automatic_stream_count);
+    debug_send("");
+
+    debug_send("Statistics:");
+    debug_send("  Total detections: %d", void_state.total_detections);
+    debug_send("  Algorithm switches: %d", void_state.algorithm_switches);
+    debug_send("  Uptime: %dms", HAL_GetTick() - void_state.init_time_ms);
+    debug_send("========================================");
+}
+
+void void_test_automatic_stream(void)
+{
+    debug_send("=== VOID Automatic Stream Test ===");
+
+    // Simulate radar data for testing
+    radar_distance_t test_data;
+    memset(&test_data, 0, sizeof(test_data));
+
+    test_data.valid_sensor_count = 3;
+    test_data.data_valid[0]      = true;
+    test_data.data_valid[1]      = true;
+    test_data.data_valid[2]      = true;
+
+    // Test case 1: Void detected by simple algorithm
+    test_data.distance_mm[0] = 600; // Above threshold
+    test_data.distance_mm[1] = 400; // Below threshold
+    test_data.distance_mm[2] = 700; // Above threshold
+    config.algorithm         = VOID_ALGORITHM_SIMPLE;
+    process_radar_data();                  // Process data
+    void_send_automatic_stream_internal(); // Test streaming
+    debug_send("");
+
+    // Test case 2: Void detected by circle fit algorithm
+    test_data.distance_mm[0] = 1000; // Far detection
+    test_data.distance_mm[1] = 1200; // Far detection
+    test_data.distance_mm[2] = 1100; // Far detection
+    config.algorithm         = VOID_ALGORITHM_CIRCLEFIT;
+    process_radar_data();                  // Process data
+    void_send_automatic_stream_internal(); // Test streaming
+    debug_send("");
+
+    // Test case 3: No void detected
+    test_data.distance_mm[0] = 100; // Below threshold
+    test_data.distance_mm[1] = 200; // Below threshold
+    test_data.distance_mm[2] = 150; // Below threshold
+    config.algorithm         = VOID_ALGORITHM_SIMPLE;
+    process_radar_data();                  // Process data
+    void_send_automatic_stream_internal(); // Test streaming
+    debug_send("");
+
+    debug_send("=== END VOID Automatic Stream Test ===");
+}
+
+// Add this function near the end of the file, in the diagnostic functions section
+
+/**
+ * @brief Get runtime diagnostics data
+ * @param running Pointer to store running state
+ * @param stats_detections Pointer to store detection count
+ * @param stats_switches Pointer to store algorithm switches
+ * @param stats_runtime_ms Pointer to store runtime in ms
+ * @param ready Pointer to store ready state
+ * @param streaming Pointer to store streaming state
+ */
 void void_get_diagnostics(bool *running, uint32_t *stats_detections, uint32_t *stats_switches, uint32_t *stats_runtime_ms, bool *ready, bool *streaming)
 {
     if (running)
-        *running = void_system_is_running();
+    {
+        *running = void_system_running;
+    }
+
     if (stats_detections)
+    {
         *stats_detections = void_state.total_detections;
+    }
+
     if (stats_switches)
+    {
         *stats_switches = void_state.algorithm_switches;
+    }
+
     if (stats_runtime_ms)
+    {
         *stats_runtime_ms = HAL_GetTick() - void_state.init_time_ms;
+    }
+
     if (ready)
+    {
         *ready = void_is_system_ready();
+    }
+
     if (streaming)
+    {
         *streaming = void_state.auto_streaming_enabled;
+    }
 }

@@ -18,7 +18,7 @@
 #define RADAR_SENSOR_TIMEOUT_MS      2000  // 2 second sensor timeout
 #define RADAR_MIN_VALID_DISTANCE_MM  50    // Minimum valid distance (50mm)
 #define RADAR_MAX_VALID_DISTANCE_MM  5000  // Maximum valid distance (5m)
-#define RADAR_MIN_SNR_THRESHOLD      10.0f // Minimum SNR for valid reading
+#define RADAR_MIN_SNR_THRESHOLD      20.0f // Minimum SNR for valid reading
 
 /** @name Expected Firmware Version */
 #define RADAR_EXPECTED_FW_MAJOR 1

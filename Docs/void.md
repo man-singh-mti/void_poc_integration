@@ -313,28 +313,256 @@ The system uses intuitive single-character codes to indicate void detection stat
 
 #### 4.2.3. Automatic Data Stream Architecture
 
-**Ultra-Compact Continuous Stream Format:**
+**Enhanced Continuous Stream Format:**
+
+The void detection system sends comprehensive measurement data automatically to both uphole and debug channels when in operational mode (`@st` command issued). The stream includes all sensor distances, void detection flags, algorithm information, and signal quality metrics.
+
+### Primary Uphole Stream Format
 
 ```bash
-# Continuous automatic data stream (no command needed)
-&vd,<void_det>,<size_mm>,<conf_pct>
+&vd,<dist_0>,<dist_1>,<dist_2>,<alg>,<void_0>,<void_1>,<void_2>,<status>,<snr_0>,<snr_1>,<snr_2>
 
-# Examples:
-&vd,0,0,85                     # No void, 85% confidence
-&vd,A,45,92                    # Sensor 0 void, 45mm, 92% confidence  
-&vd,B,78,88                    # Sensor 1 void, 78mm, 88% confidence
-&vd,C,134,94                   # Sensor 2 void, 134mm, 94% confidence
-&vd,X,156,95                   # Circle fit void, 156mm, 95% confidence
-&vd,T,999,100                  # Test mode, max size
-&vd,?,0,0                      # Error condition
+# Example:
+&vd,3542,3867,4021,b,0,1,0,y,287,193,241
 ```
 
-**Stream Timing:**
+| Field        | Description                    | Format / Range                   | Example |
+| ------------ | ------------------------------ | -------------------------------- | ------- |
+| `&vd`        | Header (always present)        | Fixed string                     | `&vd`   |
+| `distance_0` | Distance from Sensor 0 (in mm) | `0000`–`10000`                   | `3542`  |
+| `distance_1` | Distance from Sensor 1 (in mm) | `0000`–`10000`                   | `3867`  |
+| `distance_2` | Distance from Sensor 2 (in mm) | `0000`–`10000`                   | `4021`  |
+| `algorithm`  | Algorithm used                 | `a`, `b`, `c`                    | `b`     |
+| `void_0`     | Void flag Sensor 0             | `0` = valid, `1` = void          | `0`     |
+| `void_1`     | Void flag Sensor 1             | `0` = valid, `1` = void          | `1`     |
+| `void_2`     | Void flag Sensor 2             | `0` = valid, `1` = void          | `0`     |
+| `status`     | System running flag            | `y` = running, `n` = not running | `y`     |
+| `snr_0`      | SNR Sensor 0                   | `000`–`999` (int)                | `287`   |
+| `snr_1`      | SNR Sensor 1                   | `000`–`999` (int)                | `193`   |
+| `snr_2`      | SNR Sensor 2                   | `000`–`999` (int)                | `241`   |
+
+### Algorithm Codes
+
+| Code | Algorithm | Description                         |
+|------|-----------|-------------------------------------|
+| `a`  | Simple    | Fast threshold-based detection      |
+| `b`  | CircleFit | Advanced 3-point circle fitting     |
+| `c`  | Bypass    | Always detect (test mode)           |
+
+### Debug Stream Format (Optional Enhanced)
+
+For debug channel, an extended format with additional diagnostic information:
+
+```bash
+@void_debug,<dist_0>,<dist_1>,<dist_2>,<alg>,<void_0>,<void_1>,<void_2>,<conf>,<base>,<thresh>,<flags>
+
+# Example:
+@void_debug,3542,3867,4021,b,0,1,0,92,150,50,0x04
+```
+
+| Field        | Description                    | Format / Range                   | Example |
+| ------------ | ------------------------------ | -------------------------------- | ------- |
+| `@void_debug`| Debug header                   | Fixed string                     | `@void_debug` |
+| `distance_0` | Distance from Sensor 0 (in mm) | `0000`–`10000`                   | `3542`  |
+| `distance_1` | Distance from Sensor 1 (in mm) | `0000`–`10000`                   | `3867`  |
+| `distance_2` | Distance from Sensor 2 (in mm) | `0000`–`10000`                   | `4021`  |
+| `algorithm`  | Algorithm used                 | `a`, `b`, `c`                    | `b`     |
+| `void_0`     | Void flag Sensor 0             | `0` = valid, `1` = void          | `0`     |
+| `void_1`     | Void flag Sensor 1             | `0` = valid, `1` = void          | `1`     |
+| `void_2`     | Void flag Sensor 2             | `0` = valid, `1` = void          | `0`     |
+| `confidence` | Detection confidence           | `00`–`100` (percent)             | `92`    |
+| `baseline`   | Expected diameter (mm)         | `000`–`999`                      | `150`   |
+| `threshold`  | Void threshold (mm)            | `00`–`999`                       | `50`    |
+| `flags`      | System flags (hex)             | `0x00`–`0xFF`                    | `0x04`  |
+
+### Stream Timing and Triggers
+
+**Automatic Streaming Triggers:**
 
 * **Frequency:** Event-driven, typically 10 Hz (when radar data updates)
 * **Latency:** < 100ms from radar data reception to stream transmission
 * **Auto-enable:** Automatically enabled with `@st` command
 * **Auto-disable:** Automatically disabled with `@fn` command
+* **Change Detection:** Streams immediately when void status changes
+* **Periodic:** Minimum every 1 second even without changes (heartbeat)
+
+**Dual Channel Operation:**
+
+* **Uphole Channel:** Compact format for bandwidth efficiency
+* **Debug Channel:** Extended format with diagnostic information
+* **Asynchronous:** Both channels operate independently
+* **No Interference:** Debug stream doesn't affect uphole timing
+
+### Implementation in mti_void.c
+
+```c
+// Enhanced automatic streaming function
+static void void_send_automatic_stream(void)
+{
+    if (!void_system_running || state_get() != measure_state) {
+        return;
+    }
+
+    void_measurement_t measurement;
+    void_data_t        result;
+    
+    if (!void_get_measurement_data(&measurement) || !void_get_latest_results(&result)) {
+        return;
+    }
+
+    // UPHOLE STREAM: Compact format for production use
+    uart_tx_channel_set(UART_UPHOLE);
+    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%c,%d,%d,%d\r\n",
+           measurement.distance_mm[0],           // distance_0
+           measurement.distance_mm[1],           // distance_1  
+           measurement.distance_mm[2],           // distance_2
+           void_get_algorithm_char(result.algorithm_used), // algorithm
+           result.void_flags[0] ? 1 : 0,         // void_0
+           result.void_flags[1] ? 1 : 0,         // void_1
+           result.void_flags[2] ? 1 : 0,         // void_2
+           void_system_running ? 'y' : 'n',      // status
+           measurement.snr_values[0],            // snr_0
+           measurement.snr_values[1],            // snr_1
+           measurement.snr_values[2]);           // snr_2
+    uart_tx_channel_undo();
+
+    // DEBUG STREAM: Extended format for development/diagnostics
+    uart_tx_channel_set(UART_DEBUG);
+    printf("@void_debug,%d,%d,%d,%c,%d,%d,%d,%d,%d,%d,0x%02X\r\n",
+           measurement.distance_mm[0],           // distance_0
+           measurement.distance_mm[1],           // distance_1
+           measurement.distance_mm[2],           // distance_2
+           void_get_algorithm_char(result.algorithm_used), // algorithm
+           result.void_flags[0] ? 1 : 0,         // void_0
+           result.void_flags[1] ? 1 : 0,         // void_1
+           result.void_flags[2] ? 1 : 0,         // void_2
+           result.confidence_percent,            // confidence
+           latest_config.baseline_diameter_mm,   // baseline
+           latest_config.detection_threshold_mm, // threshold
+           measurement.flags);                   // system flags
+    uart_tx_channel_undo();
+
+    // Update statistics
+    stream_stats.automatic_stream_count++;
+    stream_stats.last_stream_time_ms = HAL_GetTick();
+}
+
+// Algorithm character conversion
+static char void_get_algorithm_char(void_algorithm_t algorithm)
+{
+    switch (algorithm) {
+        case VOID_ALGORITHM_SIMPLE:    return 'a';
+        case VOID_ALGORITHM_CIRCLEFIT: return 'b';
+        case VOID_ALGORITHM_BYPASS:    return 'c';
+        default:                       return '?';
+    }
+}
+```
+
+### Enhanced Data Structures
+
+```c
+// Enhanced measurement structure with SNR data
+typedef struct {
+    uint16_t distance_mm[MAX_RADAR_SENSORS];     // Distances in mm
+    uint16_t snr_values[MAX_RADAR_SENSORS];      // SNR values (integer)
+    bool     data_valid[MAX_RADAR_SENSORS];      // Validity flags
+    uint8_t  valid_sensor_count;                 // Number of valid sensors
+    uint8_t  flags;                              // System status flags
+    uint32_t measurement_time_ms;                // Timestamp
+} void_measurement_t;
+
+// Enhanced result structure with per-sensor void flags
+typedef struct {
+    bool             void_detected;              // Overall void detection
+    bool             void_flags[MAX_RADAR_SENSORS]; // Per-sensor void flags
+    uint8_t          void_sector_mask;           // Bitmask of affected sectors
+    uint16_t         void_size_mm;               // Calculated void size
+    uint8_t          confidence_percent;         // Detection confidence
+    void_algorithm_t algorithm_used;             // Active algorithm
+    bool             new_result_available;       // Flag for streaming
+    uint32_t         detection_time_ms;          // Timestamp
+    char             status_text[64];            // Human-readable status
+} void_data_t;
+```
+
+### Stream Control Functions
+
+```c
+// Enable/disable automatic streaming
+void void_set_auto_streaming(bool enabled);
+bool void_is_auto_streaming_enabled(void);
+
+// Stream immediately (manual trigger)
+void void_send_immediate_stream(void);
+
+// Get streaming statistics
+void void_get_stream_stats(uint32_t *stream_count, uint32_t *last_time_ms);
+
+// Reset streaming counters
+void void_reset_stream_stats(void);
+```
+
+### Bandwidth Analysis
+
+**Uphole Stream (Production):**
+
+* **Size:** ~45 bytes per message (including CRLF)
+* **Frequency:** 10 Hz typical, 1 Hz minimum heartbeat
+* **Bandwidth:** ~450 bytes/sec typical, ~45 bytes/sec minimum
+* **Percentage of 115200 baud:** <4% typical, <0.4% minimum
+
+**Debug Stream (Development):**
+
+* **Size:** ~65 bytes per message (including CRLF)
+* **Frequency:** Same as uphole (parallel)
+* **Bandwidth:** ~650 bytes/sec typical, ~65 bytes/sec minimum
+* **Impact:** Debug channel independent, no interference with uphole
+
+**Total System Efficiency:**
+
+* **Compact format:** Maximum information density
+* **Parallel channels:** No mutual interference
+* **Asynchronous operation:** Real-time responsiveness
+* **Bandwidth efficient:** <5% of available UART capacity
+
+This enhanced streaming format provides comprehensive real-time data for both production uphole communication and development debugging, while maintaining bandwidth efficiency and real-time performance requirements.
+
+---
+
+## Implementation Priority Update
+
+### 🔥 HIGH PRIORITY (Week 1): Enhanced Streaming Implementation
+
+1. **Complete Enhanced void_send_automatic_stream() Function**
+   * Implement the new field-by-field format as documented above
+   * Add dual-channel streaming (uphole + debug)
+   * Implement per-sensor void flags and SNR reporting
+   * Add algorithm character conversion function
+
+2. **Update Data Structures**
+   * Enhance `void_measurement_t` with SNR values array
+   * Update `void_data_t` with per-sensor void flags
+   * Add streaming statistics tracking
+
+3. **Integration Testing**
+   * Validate new streaming format with actual radar data
+   * Test dual-channel asynchronous operation
+   * Verify bandwidth efficiency and timing
+
+### 🔧 MEDIUM PRIORITY (Week 2): Command Interface and Validation
+
+1. **Complete @vd Command Interface**
+   * Support for new streaming format configuration
+   * Field-by-field status queries
+   * Algorithm switching with immediate stream update
+
+2. **Comprehensive Testing**
+   * End-to-end validation with new format
+   * Performance testing under high data rates
+   * Error condition handling and recovery
+
+The new format provides significantly more information for both production use and debugging while maintaining excellent bandwidth efficiency and real-time performance.
 
 #### 4.2.4. Configuration Commands
 
