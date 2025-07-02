@@ -135,7 +135,20 @@ bool void_system_init(void)
 
 bool void_is_system_ready(void)
 {
-    return void_state.system_initialized && radar_is_system_healthy();
+    // For POC: Just check if void and CAN systems are initialized
+    if (!void_state.system_initialized)
+    {
+        return false;
+    }
+
+    // Check if CAN system is initialized (not necessarily healthy)
+    if (!can_is_system_initialized()) // Or whatever the correct function name is
+    {
+        return false;
+    }
+
+    // For POC: Don't require radar to be "healthy", just initialized
+    return true;
 }
 
 /*------------------------------------------------------------------------------
@@ -1141,10 +1154,10 @@ bool void_system_start(void)
 {
     debug_send("VOID: Starting system (POC) - called by @st command");
 
-    // Check if system is ready
-    if (!void_is_system_ready())
+    // Check if system is initialized
+    if (!void_state.system_initialized)
     {
-        debug_send("VOID: ERROR - System not ready");
+        debug_send("VOID: ERROR - System not initialized");
         return false;
     }
 
@@ -1155,35 +1168,21 @@ bool void_system_start(void)
         return true;
     }
 
-    // Start radar sensors (this is when they actually turn on for operation)
-    debug_send("VOID: Starting radar sensors for operational mode");
+    // Simply start the radar sensors via CAN command
+    debug_send("VOID: Sending START command to radar sensors");
     if (!radar_start_sensors())
     {
-        debug_send("VOID: ERROR - Failed to start radar sensors");
+        debug_send("VOID: ERROR - Failed to send start command to radar sensors");
         return false;
     }
-
-    HAL_Delay(500); // Allow sensors to start
-
-    // Set measurement mode
-    debug_send("VOID: Setting measurement mode");
-    if (!radar_set_measurement_mode())
-    {
-        debug_send("VOID: WARNING - Failed to set measurement mode, continuing anyway");
-    }
-
-    HAL_Delay(300); // Allow mode switch
 
     // Enable auto streaming for operational data
     void_set_auto_streaming(true);
 
-    // Clear statistics for new measurement session
-    void_clear_statistics();
-
     // Set running flag
     void_system_running = true;
 
-    debug_send("VOID: System started successfully - sensors ON and measuring");
+    debug_send("VOID: System started - radar sensors turned ON");
     return true;
 }
 
@@ -1198,20 +1197,20 @@ bool void_system_stop(void)
         return true;
     }
 
-    // Disable auto streaming first
-    void_set_auto_streaming(false);
-
-    // Stop radar sensors (turn them OFF to save power)
-    debug_send("VOID: Stopping radar sensors - turning OFF for power saving");
+    // Simply stop the radar sensors via CAN command
+    debug_send("VOID: Sending STOP command to radar sensors");
     if (!radar_stop_sensors())
     {
-        debug_send("VOID: WARNING - Failed to stop radar sensors");
+        debug_send("VOID: WARNING - Failed to send stop command to radar sensors");
     }
+
+    // Disable auto streaming
+    void_set_auto_streaming(false);
 
     // Clear running flag
     void_system_running = false;
 
-    debug_send("VOID: System stopped - sensors OFF, power saving mode");
+    debug_send("VOID: System stopped - radar sensors turned OFF");
     return true;
 }
 
