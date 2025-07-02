@@ -25,6 +25,7 @@
         4.2.2. [Automatic Data Stream Architecture](#422-automatic-data-stream-architecture)
         4.2.3. [Current Implementation Status: Void Command Interface](#423-current-implementation-status-void-command-interface)
         4.2.4. [Implementation Roadmap](#424-implementation-roadmap)
+        4.2.5. [Implementation Roadmap for Ultra-Compact Commands](#425-implementation-roadmap-for-ultra-compact-commands)
 5. [Void Detection Methods](#5-void-detection-methods)    5.1. [Simplified POC Architecture](#51-simplified-poc-architecture)
     5.2. [Continuous Data Streaming Algorithm](#52-continuous-data-streaming-algorithm)
 6. [Detailed Design and Implementation](#6-detailed-design-and-implementation)
@@ -299,42 +300,60 @@ When `@fn` is executed:
 ```bash
 # Simple unified control
 @st                                     # Start everything including void detection
-@vd,status?                            # Check if void system is running
+@vd,st?                                 # Check if void system is running (ultra-compact)
 @fn                                     # Stop everything including void detection
 
-# Configuration still works independently
-@vd,config,thresh,60                   # Change threshold while running
-@vd,config,algorithm,circlefit         # Switch algorithms
+# Configuration still works independently (ultra-compact format)
+@vd,cfg,thr,60                          # Change threshold while running
+@vd,cfg,alg,B                           # Switch algorithms
 ```
 
 **Void-Specific Commands (configuration and status only):**
 
 ```bash
-# Status and diagnostics
-@vd,status?                             # Get current void detection status + running state
+# Status and diagnostics (ultra-compact)
+@vd,st?                                 # Get current void detection status + running state
 @vd,diag?                               # Get full diagnostics including runtime stats
 
-# Configuration (can be done while system is running)
-@vd,config,thresh,<val>                 # Set detection threshold (mm)
-@vd,config,baseline,<val>               # Set expected diameter (mm) 
-@vd,config,algorithm,simple|circlefit   # Switch detection algorithm
-@vd,config,conf,<val>                   # Set confidence threshold (%)
+# Ultra-Compact Configuration Commands (Maximum Efficiency)
+@vd,cfg,thr,<val>                       # Set detection threshold (mm)
+@vd,cfg,base,<val>                      # Set expected diameter (mm) 
+@vd,cfg,alg,<A-C>                       # Switch detection algorithm (A=simple, B=circlefit, C=bypass; D reserved)
+@vd,cfg,conf,<val>                      # Set confidence threshold (%)
+@vd,cfg,rng,<min>,<max>                 # Set measurement range (mm)
+@vd,cfg,filt,<0_or_1>                   # Enable/disable median filtering
 
-# Data access and maintenance
+# Data access and maintenance (ultra-compact)
 @vd,data                                # Get real-time measurement data
-@vd,clear                               # Clear detection statistics
+@vd,clr                                 # Clear detection statistics
 ```
 
-**Response Examples:**
+**Algorithm Codes (Single Character for Efficiency):**
+
+| Code | Algorithm | Description                         |
+|------|-----------|-------------------------------------|
+| `A`  | Simple    | Fast threshold-based detection      |
+| `B`  | CircleFit | Advanced 3-point circle fitting     |
+| `C`  | Bypass    | Always detect (test mode)           |
+| `D`  | Reserved  | Reserved for future use             |
+
+**Response Examples (Ultra-Compact Format):**
 
 ```bash
-# Status response now includes running state
-&vd,status,0,0,85,150,simple,2,running  # No void, 85% conf, system running
-&vd,status,1,75,92,150,circlefit,3,stopped # Void detected, system stopped
+# Status response with algorithm codes (shortened "run/stop")
+&vd,st,0,0,85,75,A,2,run                # No void, 85% conf, simple algorithm, system running
+&vd,st,1,1,92,88,B,3,stop               # Void detected, circlefit algorithm, system stopped
+
+# Configuration acknowledgments (ultra-compact format)
+&vd,cfg,thr,ack,50                      # Threshold set to 50mm
+&vd,cfg,base,ack,150                    # Baseline set to 150mm  
+&vd,cfg,alg,ack,B                       # Algorithm set to CircleFit
+&vd,cfg,conf,ack,70                     # Confidence set to 70%
 
 # Diagnostic response includes runtime information  
-&vd,diag,running,1                      # System is currently running
+&vd,diag,run,1                          # System is currently running
 &vd,diag,stats,15,2,45000               # 15 detections, 2 algorithm switches, 45s runtime
+&vd,diag,events,42,15                   # 42 processing events, 15 automatic streams
 ```
 
 ### System Integration Benefits
@@ -345,291 +364,405 @@ When `@fn` is executed:
 4. **Simplified Usage:** Operators don't need to remember separate void start/stop commands
 5. **Runtime Tracking:** System automatically tracks total void detection runtime across sessions
 
-### Usage Examples
+### Usage Examples with Ultra-Compact Commands
 
 ```bash
 # Basic operation - start everything
 @st                                     # Starts all modules including void detection
 # System responds: @db,Void detection system started
 
-# Check void status during operation  
-@vd,status?                             # Shows detection status + "running"
+# Check void status during operation (ultra-compact)
+@vd,st?                                 # Shows detection status + "run"
 @vd,diag?                               # Shows full system diagnostics
 
-# Configure void detection while running
-@vd,config,algorithm,circlefit          # Switch to circle fitting algorithm
-@vd,config,thresh,60                    # Adjust threshold to 60mm
+# Configure void detection while running (ultra-compact syntax)
+@vd,cfg,alg,B                           # Switch to circle fitting algorithm  
+@vd,cfg,thr,60                          # Adjust threshold to 60mm
+@vd,cfg,base,150                        # Set baseline diameter to 150mm
+@vd,cfg,conf,75                         # Set confidence threshold to 75%
+
+# Advanced configuration (ultra-compact)
+@vd,cfg,rng,50,500                      # Set measurement range 50-500mm
+@vd,cfg,filt,1                          # Enable median filtering
+
+# Data access (ultra-compact)
+@vd,data                                # Get real-time measurement data
+@vd,clr                                 # Clear detection statistics
 
 # Stop everything
 @fn                                     # Stops all modules including void detection  
 # System responds: @db,Void detection system stopped
 ```
 
+### Example Command Responses (Ultra-Compact Format)
+
+```bash
+# Status query response (ultra-compact)
+@vd,st?
+&vd,st,1,1,85,88,B,3,run                # Void detected, 85mm diameter, CircleFit algorithm
+
+# Configuration responses (ultra-compact acknowledgments)
+@vd,cfg,alg,A
+&vd,cfg,alg,ack,A                       # Algorithm set to Simple
+
+@vd,cfg,thr,50
+&vd,cfg,thr,ack,50                      # Threshold set to 50mm
+
+# Diagnostics response (ultra-compact)
+@vd,diag?
+&vd,diag,run,1                          # System running
+&vd,diag,stats,15,2,45000               # 15 detections, 2 switches, 45s runtime
+&vd,diag,events,42,15                   # 42 processing events, 15 streams
+&vd,diag,ready,1                        # System ready
+&vd,diag,stream,1                       # Auto streaming enabled
+
+# Real-time data (ultra-compact)
+@vd,data
+&vd,data,29,150,152,148,0,0,0,85        # Flags=29, distances, no void, 85% confidence
+
+# Automatic streams during operation (ultra-compact - no command needed)
+&vd,29,150,152,148,0,0,0,85             # Continuous automatic data stream
+```
+
 This integration makes the system much more intuitive and follows the existing pattern where `@st`/`@fn` control all system modules together.
 
-#### 4.2.2. Automatic Data Stream Architecture
+#### 4.2.5. Implementation Roadmap for Ultra-Compact Commands
 
-**Communication Modes:**
+This section outlines the specific implementation requirements to achieve the ultra-compact, efficient command interface and asynchronous streaming behavior.
 
-* **Coupled Mode (Initialization Phase):** Bidirectional communication during `module_init()` sequence, configuration commands accepted.
-* **Uncoupled Mode (Operational Phase):** Unidirectional (downhole→uphole) data streaming after initialization is complete.
+#### Required Code Changes
 
-**Mode Detection:** Initialization-based – the system operates in coupled mode during the `module_init()` sequence, then transitions to uncoupled operational mode.
+**1. Command Handler Update (vmt_command.c)**
 
-**System State Flow:**
-
-```c
-// In mti_system.c - initialization sequence determines mode
-typedef enum {
-    STEP_INIT_START,
-    STEP_VER_SYNC,          // Coupled mode - sync with uphole
-    STEP_WATER_SYNC,        // Coupled mode - water sensor config
-    STEP_IMU_SYNC,          // Coupled mode - IMU config 
-    STEP_IMU_TEST,          // Coupled mode - IMU validation
-    STEP_RADAR,             // Coupled mode - radar initialization
-    STEP_TEMP,              // Coupled mode - temperature module init (COMPLETED)
-    STEP_VOID,              // Coupled mode - void detection config
-    STEP_FINISH,            // Transition to uncoupled mode
-    STEP_OPERATIONAL        // Uncoupled mode - continuous data streaming
-} init_step_t;
-```
-
-**Timing Macros:**
+The `cmd_void()` function needs to be updated to handle ultra-compact commands:
 
 ```c
-#define MAX_TEMP_INTERVAL_MS              10000    // 10 seconds max temp interval
-#define TEMP_CHANGE_THRESHOLD_C           1        // 1°C change threshold  
-#define VOID_DATA_INSTANTANEOUS           true     // No periodic timer for void
-#define KEEPALIVE_INTERVAL_MS             5000     // @status,down,A keepalive interval
-#define INIT_TIMEOUT_MS                   30000    // Initialization phase timeout
-```
-
-**Communication Behaviour by Phase:**
-
-| Phase              | Mode      | Communication Pattern                    | Configuration Commands                |
-|:-------------------|:----------|:-----------------------------------------|:--------------------------------------|
-| **Initialization** | Coupled   | Bidirectional command/response           | `@vd,config`, `@temp,config` accepted |
-| **Operational**    | Uncoupled | Unidirectional data streaming            | Configuration commands ignored        |
-| **Keepalive**      | Uncoupled | Periodic `@status,down,A` + data streams | Status queries may respond            |
-
-**Automatic Data Streams (Operational Phase Only):**
-
-| Module          | Stream Type   | Trigger Conditions                  | Format                                                     |
-|:----------------|:--------------|:------------------------------------|:-----------------------------------------------------------|
-| **Void**        | Instantaneous | When measurements ready (\~100ms)   | `&vd,<flags>,<d0>,<d1>,<d2>,<v0>,<v1>,<v2>,<conf>`         |
-| **Temperature** | Change-based  | 10s periodic OR 1°C change OR alert | `&temp,status,<temp_c>,<alert>` OR `!temp,<msgID>,<event>` |
-| **Water**       | Event-based   | State change only                   | `!water,<messageID>,<state>`                               |
-| **IMU**         | Event-based   | Bump/motion detection               | `!imu,bump,<data>`                                         |
-
-#### Mode Transition Logic
-
-**Initialization Phase (Coupled Mode):**
-
-```bash
-# Uphole → Downhole (configuration)
-@vd,config,thresh,50                    // Set void threshold to 50mm
-@temp,config,warn_high,70               // Set temperature warning to 70°C
-@vd,config,algorithm,simple             // Set void algorithm to simple
-
-# Downhole → Uphole (acknowledgments)
-&vd,config,ack,thresh,50                // Void threshold configured
-&temp,config,ack,warn_high,70           // Temperature threshold configured  
-&vd,config,ack,algorithm,simple         // Algorithm configured
-```
-
-**Operational Phase (Uncoupled Mode):**
-
-```bash
-# Downhole → Uphole (continuous data streams)
-&vd,15,150,150,150,0,0,0,95             // Continuous void data
-&temp,status,25,0                       // Temperature status (no change)
-@status,down,A,uptime=3600,mode=operational // Periodic keepalive
-
-# Configuration attempts rejected
-@vd,config,thresh,60                    // Uphole attempts configuration
-!vd,error,operational_mode              // Downhole rejects - operational mode
-```
-
-#### 4.2.3. Current Implementation Status: Void Command Interface
-
-**Implementation Status:** ⚠️ **Placeholder only** | ❌ **Full @vd interface not implemented**
-
-#### Current Implementation (⚠️ Basic Placeholder)
-
-The current `cmd_void()` function in `vmt_command.c` is a basic placeholder:
-
-```c
-static void cmd_void(h_str_pointers_t *str_p) {
-    bool void_detected = atoi(str_p->part[1]);
-    uart_tx_channel_set(UART_DEBUG);
-    if (void_detected) {
-        printf("@db,Void detected\n");
-    } else {
-        printf("@db,Void ended\n");
+static void cmd_void(h_str_pointers_t *str_p)
+{
+    if (!str_p || !str_p->part[1])
+    {
+        uart_tx_channel_set(cmd_uart_ch);
+        printf("!vd,err,cmd\n");
+        uart_tx_channel_undo();
+        return;
     }
-    uart_tx_channel_set(UART_UPHOLE);
-    printf("%s,%s\n", str_p->part[0], str_p->part[1]);
+
+    uart_tx_channel_set(cmd_uart_ch);
+
+    // Handle @vd,st? command (status query)
+    if (strcmp(str_p->part[1], "st?") == 0 || strcmp(str_p->part[1], "st") == 0)
+    {
+        void_data_t results;
+        if (void_get_latest_results(&results))
+        {
+            void_config_t current_config;
+            void_get_config(&current_config);
+
+            // Convert algorithm to single character (A=simple, B=circlefit, C=bypass)
+            char alg_code = (results.algorithm_used == VOID_ALGORITHM_SIMPLE) ? 'A' :
+                           (results.algorithm_used == VOID_ALGORITHM_CIRCLEFIT) ? 'B' : 'C';
+
+            printf("&vd,st,%d,%d,%d,%d,%c,run\n",
+                   results.void_detected ? 1 : 0,
+                   results.void_size_mm,
+                   results.confidence_percent,
+                   current_config.baseline_diameter_mm,
+                   alg_code);
+        }
+        else
+        {
+            printf("&vd,st,0,0,0,150,A,stop\n"); // Default response with algorithm A
+        }
+    }
+    // Handle @vd,cfg commands (ultra-compact configuration)
+    else if (strcmp(str_p->part[1], "cfg") == 0 && str_p->part[2])
+    {
+        if (strcmp(str_p->part[2], "thr") == 0 && str_p->part[3])
+        {
+            uint16_t threshold = atoi(str_p->part[3]);
+            void_set_threshold(threshold);
+            printf("&vd,cfg,thr,ack,%d\n", threshold);
+        }
+        else if (strcmp(str_p->part[2], "base") == 0 && str_p->part[3])
+        {
+            uint16_t baseline = atoi(str_p->part[3]);
+            void_set_baseline(baseline);
+            printf("&vd,cfg,base,ack,%d\n", baseline);
+        }
+        else if (strcmp(str_p->part[2], "conf") == 0 && str_p->part[3])
+        {
+            uint8_t confidence = atoi(str_p->part[3]);
+            void_set_confidence_threshold(confidence);
+            printf("&vd,cfg,conf,ack,%d\n", confidence);
+        }
+        else if (strcmp(str_p->part[2], "alg") == 0 && str_p->part[3])
+        {
+            char alg_code = str_p->part[3][0];
+            if (alg_code == 'A')
+            {
+                void_set_algorithm(VOID_ALGORITHM_SIMPLE);
+                printf("&vd,cfg,alg,ack,A\n");
+            }
+            else if (alg_code == 'B')
+            {
+                void_set_algorithm(VOID_ALGORITHM_CIRCLEFIT);
+                printf("&vd,cfg,alg,ack,B\n");
+            }
+            else if (alg_code == 'C')
+            {
+                void_set_algorithm(VOID_ALGORITHM_BYPASS);
+                printf("&vd,cfg,alg,ack,C\n");
+            }
+            else
+            {
+                printf("!vd,err,alg\n");
+            }
+        }
+        else if (strcmp(str_p->part[2], "rng") == 0 && str_p->part[3] && str_p->part[4])
+        {
+            uint16_t min_mm = atoi(str_p->part[3]);
+            uint16_t max_mm = atoi(str_p->part[4]);
+            void_set_range(min_mm, max_mm);
+            printf("&vd,cfg,rng,ack,%d,%d\n", min_mm, max_mm);
+        }
+        else if (strcmp(str_p->part[2], "filt") == 0 && str_p->part[3])
+        {
+            bool enabled = (atoi(str_p->part[3]) != 0);
+            void_set_median_filter(enabled);
+            printf("&vd,cfg,filt,ack,%d\n", enabled ? 1 : 0);
+        }
+        else
+        {
+            printf("!vd,err,param\n");
+        }
+    }
+    // Handle @vd,diag? command (diagnostics) - ultra-compact
+    else if (strcmp(str_p->part[1], "diag?") == 0 || strcmp(str_p->part[1], "diag") == 0)
+    {
+        void_config_t config;
+        void_get_config(&config);
+
+        // Convert algorithm to single character
+        char alg_code = (config.algorithm == VOID_ALGORITHM_SIMPLE) ? 'A' :
+                       (config.algorithm == VOID_ALGORITHM_CIRCLEFIT) ? 'B' : 'C';
+
+        printf("&vd,diag,%d,%c,%d,%d,%d\n", 
+               void_is_system_ready() ? 1 : 0,
+               alg_code,
+               config.baseline_diameter_mm,
+               config.threshold_mm,
+               config.confidence_min_percent);
+
+        // Additional stats
+        uint32_t total_detections, algorithm_switches, uptime_ms;
+        void_get_statistics(&total_detections, &algorithm_switches, &uptime_ms);
+        printf("&vd,stats,%lu,%lu,%lu\n", total_detections, algorithm_switches, uptime_ms);
+    }
+    // Handle @vd,data command (raw measurement data)
+    else if (strcmp(str_p->part[1], "data") == 0)
+    {
+        void_measurement_t measurement;
+        if (void_get_measurement_data(&measurement))
+        {
+            printf("&vd,data,%d,%d,%d,%d\n", 
+                   measurement.distance_mm[0], 
+                   measurement.distance_mm[1], 
+                   measurement.distance_mm[2], 
+                   measurement.valid_sensor_count);
+        }
+        else
+        {
+            printf("&vd,data,0,0,0,0\n");
+        }
+    }
+    // Handle @vd,clr command (clear statistics)
+    else if (strcmp(str_p->part[1], "clr") == 0)
+    {
+        void_clear_statistics();
+        printf("&vd,clr,ack\n");
+    }
+    else
+    {
+        printf("!vd,err,cmd\n");
+    }
+
+    uart_tx_channel_undo();
 }
 ```
 
-This basic implementation only handles simple void on/off commands and does not provide the rich `@vd` interface described below.
+**2. Asynchronous Streaming Implementation (mti_void.c)**
 
-#### Required Commands (❌ Not Yet Implemented)
+Add immediate streaming function for asynchronous data transmission:
 
-**Basic Status and Configuration:**
+```c
+static void void_send_immediate_stream(void)
+{
+    if (!latest_results.new_result_available)
+    {
+        return;
+    }
 
-```bash
-# Status queries (NEEDS IMPLEMENTATION)
-@vd,status?                                 # Get current void detection status
-@status,void?                               # Alternative status query
-@void,status?                               # Legacy status query
+    uart_tx_channel_set(UART_UPHOLE);
 
-# Basic configuration (NEEDS IMPLEMENTATION)
-@vd,config,thresh,<threshold_mm>            # Set detection threshold (default: 50mm)
-@vd,config,baseline,<diameter_mm>           # Set expected borehole diameter (default: 150mm)
-@vd,config,conf,<confidence_%>              # Set minimum confidence threshold (default: 70%)
-@vd,config,range,<min_mm>,<max_mm>          # Set valid measurement range (default: 50-5000mm)
-@vd,config,filter,median,<0_or_1>           # Enable/disable median filtering
+    // Ultra-compact format: &vd,<detected>,<size>,<conf>,<alg>
+    // detected: 1=void, 0=clear
+    // alg: A=simple, B=circlefit, C=bypass
+    char alg_code = (latest_results.algorithm_used == VOID_ALGORITHM_SIMPLE) ? 'A' :
+                   (latest_results.algorithm_used == VOID_ALGORITHM_CIRCLEFIT) ? 'B' : 'C';
 
-# Circle fitting configuration (NEEDS IMPLEMENTATION)
-@vd,config,algorithm,simple                 # Use simple threshold detection
-@vd,config,algorithm,circlefit              # Use circle fitting detection
-@vd,config,circle_tolerance,<mm>            # Set circle fit tolerance (default: 20mm)
-@vd,config,min_sensors,<count>              # Min sensors for circle fit (default: 3)
-@vd,config,auto_fallback,<0_or_1>           # Enable auto fallback to simple algorithm
+    printf("&vd,%d,%d,%d,%c\r\n",
+           latest_results.void_detected ? 1 : 0,
+           latest_results.void_size_mm,
+           latest_results.confidence_percent,
+           alg_code);
+
+    uart_tx_channel_undo();
+
+    // Mark as sent and update statistics
+    latest_results.new_result_available = false;
+    void_state.automatic_stream_count++;
+}
+
+// Public API for automatic streaming
+void void_send_automatic_stream(void)
+{
+    // Only send if auto streaming is enabled and system is operational
+    if (!void_state.auto_streaming_enabled || !system_is_operational_mode())
+    {
+        return;
+    }
+
+    // Only send if we have new data
+    if (!latest_results.new_result_available)
+    {
+        return;
+    }
+
+    // Use the internal immediate stream function
+    void_send_immediate_stream();
+}
 ```
 
-#### Response Formats (❌ Not Yet Implemented)
+**3. Auto-Streaming Control in System Start/Stop**
 
-**Status Response:**
+Update the `void_system_start()` and `void_system_stop()` functions to enable/disable auto-streaming:
 
-```bash
-&vd,status,<detected>,<sector>,<diameter_mm>,<confidence_%>,<severity>,<algorithm>,<text>
+```c
+bool void_system_start(void)
+{
+    // ...existing initialization code...
 
-# Examples:
-&vd,status,0,0,0,0,0,simple,No void detected
-&vd,status,1,1,85,75,2,circlefit,Void detected: 85mm dia (circle fit)
+    // Enable auto streaming for operational data (CRITICAL)
+    void_set_auto_streaming(true);
+
+    // Clear statistics for new measurement session
+    void_clear_statistics();
+
+    // Set running flag
+    void_system_running = true;
+
+    debug_send("VOID: System started - auto streaming enabled");
+    return true;
+}
+
+bool void_system_stop(void)
+{
+    // Disable auto streaming first (CRITICAL)
+    void_set_auto_streaming(false);
+
+    // ...existing shutdown code...
+
+    // Clear running flag
+    void_system_running = false;
+
+    debug_send("VOID: System stopped - auto streaming disabled");
+    return true;
+}
 ```
 
-**Configuration Acknowledgements:**
+**4. Event-Driven Processing Integration**
 
-```bash
-&vd,config,thresh,ack,<value>               # Threshold set confirmation
-&vd,config,baseline,ack,<value>             # Baseline set confirmation
-&vd,config,algorithm,ack,<algorithm>        # Algorithm switch confirmation
+Ensure `void_system_process()` calls the streaming function when new data is available:
+
+```c
+void void_system_process(void)
+{
+    if (!void_is_system_ready())
+    {
+        return;
+    }
+
+    // Process immediately when radar has new data
+    if (!radar_has_new_data())
+    {
+        return;
+    }
+
+    // Process new radar data immediately
+    if (process_radar_data())
+    {
+        radar_mark_data_processed();
+        void_state.immediate_processing_count++;
+
+        // Send automatic stream if enabled and in operational mode
+        if (void_state.auto_streaming_enabled && system_is_operational_mode())
+        {
+            void_send_immediate_stream();
+        }
+    }
+}
 ```
 
-**Asynchronous Events:**
+#### Key Implementation Requirements
 
-```bash
-!vd,flag,<sector>,<diameter_mm>,<confidence_%>,<algorithm>
+**Efficiency Requirements:**
+1. **Ultra-Compact Commands:** Replace verbose strings with abbreviations:
+   - `status` → `st`
+   - `config` → `cfg`
+   - `thresh` → `thr`
+   - `baseline` → `base`
+   - `algorithm` → `alg`
+   - `clear` → `clr`
+   - `filter` → `filt`
+   - `range` → `rng`
 
-# Example:
-!vd,flag,1,85,75,circlefit                  # Void detected in sector 1, 85mm diameter, 75% confidence
-```
+2. **Single-Character Algorithm Codes:**
+   - `A` = Simple algorithm
+   - `B` = CircleFit algorithm  
+   - `C` = Bypass algorithm
+   - `D` = Reserved for future use
 
-#### Advanced Commands (⚠️ Partially Implemented)
+3. **Shortened Response States:**
+   - `running` → `run`
+   - `stopped` → `stop`
 
-```bash
-# History and diagnostics (⚠️ Framework exists, handlers need completion)
-@vd,history,detection                       # Get detection history
-@vd,history,profile,<count>                 # Get measurement profile
-@vd,clear,history                           # Clear detection history
-@vd,diag?                                   # System diagnostics
+**Asynchronous Streaming Requirements:**
+1. **Immediate Response to @st:** Auto-streaming MUST be enabled as soon as @st command is received
+2. **Event-Driven Transmission:** Send data immediately when void detection results change
+3. **No Rate Limiting:** Stream data as fast as radar provides new measurements (~100ms intervals)
+4. **Automatic Disable on @fn:** Auto-streaming MUST be disabled when @fn command is received
 
-# Calibration (⚠️ Framework exists, not fully implemented)
-@vd,cal,sensor,<idx>,<factor_ppm>           # Sensor calibration (future)
-```
+#### Testing and Validation
 
-#### Error Responses (✅ Implemented)
+**Protocol Testing:**
+- Update test protocol files (void_test.ptp, Downhole Test.ptp) to use ultra-compact commands
+- Verify all command abbreviations work correctly
+- Test algorithm code conversion (A/B/C)
+- Validate shortened response formats
 
-```bash
-!vd,error,missing_subcommand                # Command syntax error
-!vd,error,missing_config_param              # Missing configuration parameter
-!vd,error,invalid_algorithm                 # Invalid algorithm specified
-!vd,error,unknown_command                   # Unrecognized command
-```
+**Streaming Testing:**
+- Verify auto-streaming starts immediately after @st
+- Confirm data is sent asynchronously without rate limiting
+- Test auto-streaming stops immediately after @fn
+- Validate data format matches expected ultra-compact format
 
-#### Implementation Details
+**Performance Validation:**
+- Command parsing time < 50ms
+- Stream transmission latency < 100ms
+- Memory usage reduction vs. verbose commands
+- Network bandwidth efficiency improvement
 
-**Command Handler Location:** `vmt_command.c` → `cmd_void()` function
-
-**Current Implementation Status:**
-
-* ✅ **Basic void detection** (75% complete)
-* ✅ **Simple algorithm** (threshold-based detection)
-* ✅ **Circle fitting algorithm** (3-point circle fitting with fallback)
-* ✅ **Configuration interface** (threshold, baseline, confidence settings)
-* ✅ **Algorithm switching** (runtime selection between simple/circlefit)
-* ✅ **Event generation** (asynchronous void detection alerts)
-* ⚠️ **History management** (framework exists, needs completion)
-* ⚠️ **Advanced diagnostics** (planned for future implementation)
-
-**Integration Points:**
-
-* **Data Source:** `mti_radar.c` → `radar_get_measurement()`
-* **Processing:** `mti_void.c` → `void_system_process()` (called every 100ms)
-* **Commands:** `vmt_command.c` → `cmd_void()` handler
-* **Events:** `debug_send()` for asynchronous notifications
-
-**Performance Characteristics:**
-
-* **Processing Interval:** 100ms (10Hz)
-* **Command Response Time:** \<50ms
-* **Memory Usage:** \~4KB static allocation
-* **CPU Overhead:** \<10% of main loop time
-
-#### Usage Examples
-
-**Basic Setup:**
-
-```bash
-@vd,config,baseline,150                     # Set 150mm expected diameter
-@vd,config,thresh,50                        # Set 50mm void detection threshold
-@vd,config,conf,70                          # Require 70% confidence minimum
-@vd,status?                                 # Check current status
-```
-
-**Advanced Circle Fitting:**
-
-```bash
-@vd,config,algorithm,circlefit              # Switch to circle fitting
-@vd,config,circle_tolerance,15              # Set 15mm fit tolerance
-@vd,config,min_sensors,3                    # Require all 3 sensors
-@vd,config,auto_fallback,1                  # Enable fallback to simple
-```
-
-**Monitoring:**
-
-```bash
-@vd,status?                                 # Poll current status
-# System will also send automatic events:
-# !vd,flag,1,85,75,circlefit                # When voids are detected
-```
-
-### 4.2.4. Implementation Roadmap
-
-#### Phase 1: Core Functionality (✅ Complete)
-
-* [x] Basic threshold detection
-* [x] Circle fitting algorithm
-* [x] Configuration interface
-* [x] Algorithm switching
-* [x] Event generation
-
-#### Phase 2: Enhanced Features (🔄 In Progress)
-
-* [ ] Complete history management commands
-* [ ] Advanced diagnostics interface
-* [ ] Sensor calibration framework
-* [ ] Performance optimisation
-
-#### Phase 3: Production Features (📋 Planned)
-
-* [ ] Statistical analysis algorithms
-* [ ] Machine learning integration hooks
-* [ ] Advanced confidence models
-* [ ] Multi-algorithm fusion
+This implementation achieves both maximum efficiency and human readability through carefully designed abbreviations that remain intuitive while significantly reducing command length and processing overhead.
 
 ---
 
@@ -1592,7 +1725,7 @@ bool apply_void_hysteresis(uint8_t sensor_idx,
 * Implement `@vd` commands (Section 4.2).
 * Cross-validate detections across sensors if required.
 
-### 13.2. Performance Optimisation Guidelines
+###  13.2. Performance Optimisation Guidelines
 
 * **Static array sizing:** Keep `WALL_HISTORY_SIZE` and `MAX_VOID_DETECTIONS` small (e.g. 10, 5).
 * **Compile-time constants:** Use `#define` for thresholds (see Phase 1).
@@ -1795,44 +1928,406 @@ bool check_hysteresis(uint8_t idx, bool raw,
 
 ---
 
-### File Path Verification
+## Implementation Code for Efficient Commands
 
-All critical module references now include clickable links (where relevant):
-
-* [`mti_void.c`](../Device/Src/mti_void.c)
-* [`mti_can.c`](../Device/Src/mti_can.c)
-* [`mti_radar.c`](../Device/Src/mti_radar.c)
-* [`mti_temp.c`](../Device/Src/mti_temp.c)
-* [`mti_system.c`](../Device/Src/mti_system.c)
-* [`vmt_command.c`](../Device/Src/vmt_command.c)
-* [`vmt_uart.c`](../Device/Src/vmt_uart.c)
-* [`vmt_power.c`](../Device/Src/vmt_power.c)
-* [`vmt_icm20948.c`](../Device/Src/vmt_icm20948.c)
-
-If additional source files become relevant (e.g. new circle fitting code), they should also be linked here.
+### Header Definitions (`mti_void.h`)
 
 ```c
-# All 3 sensors valid, simple algorithm, sensor 1 has void
-&vd,29,150,250,148,0,1,0,0,85,0
+#ifndef MTI_VOID_H
+#define MTI_VOID_H
 
-# Decoded:
-# flags=29 (0x1D): algo=1(simple), sensors=111(all valid), void=1, status=0
-# distances: 150mm, 250mm, 148mm  
-# voids: only sensor 1 detected void (0,1,0)
-# confidence: 85% on sensor 1, 0% on others
+#include "mti_radar.h"
+#include <stdbool.h>
+#include <stdint.h>
 
-// Flag breakdown for 0x2D (45 decimal) example:
-// Binary: 00101101
-// Bits 0-1: 01 = Algorithm 1 (SIMPLE)
-// Bits 2-4: 011 = Sensors 0&1 valid, sensor 2 invalid  
-// Bit 5: 1 = Void detected
-// Bits 6-7: 00 = Normal system status
+/** @name Algorithm Codes for Efficient Commands */
+#define VOID_ALG_CODE_SIMPLE    'A'     // Simple threshold detection
+#define VOID_ALG_CODE_CIRCLEFIT 'B'     // Circle fitting detection  
+#define VOID_ALG_CODE_BYPASS    'C'     // Bypass mode (always detect)
+#define VOID_ALG_CODE_AUTO      'D'     // Auto-select best algorithm
 
-uint8_t flags = 0x2D;
-uint8_t algorithm = flags & 0x03;           // = 1 (SIMPLE)
-bool s0_valid = (flags & 0x04) != 0;        // = true
-bool s1_valid = (flags & 0x08) != 0;        // = true  
-bool s2_valid = (flags & 0x10) != 0;        // = false
-bool void_detected = (flags & 0x20) != 0;   // = true
-uint8_t sys_status = (flags >> 6) & 0x03;   // = 0 (normal)
+/** @name Algorithm Enumeration */
+typedef enum {
+    VOID_ALGORITHM_SIMPLE = 1,
+    VOID_ALGORITHM_CIRCLEFIT = 2,
+    VOID_ALGORITHM_BYPASS = 0,
+    VOID_ALGORITHM_AUTO = 3
+} void_algorithm_t;
+
+/** @name Algorithm Code Conversion */
+char void_algorithm_to_code(void_algorithm_t algorithm);
+void_algorithm_t void_code_to_algorithm(char code);
+bool void_set_algorithm_by_code(char algorithm_code);
+
+// ...existing void function declarations...
+
+#endif /* MTI_VOID_H */
 ```
+
+### Algorithm Code Conversion (`mti_void.c`)
+
+```c
+// Add these functions to the existing mti_void.c file:
+
+char void_algorithm_to_code(void_algorithm_t algorithm)
+{
+    switch (algorithm)
+    {
+        case VOID_ALGORITHM_SIMPLE:    return VOID_ALG_CODE_SIMPLE;
+        case VOID_ALGORITHM_CIRCLEFIT: return VOID_ALG_CODE_CIRCLEFIT;
+        case VOID_ALGORITHM_BYPASS:    return VOID_ALG_CODE_BYPASS;
+        case VOID_ALGORITHM_AUTO:      return VOID_ALG_CODE_AUTO;
+        default:                       return '?';
+    }
+}
+
+void_algorithm_t void_code_to_algorithm(char code)
+{
+    switch (code)
+    {
+        case VOID_ALG_CODE_SIMPLE:    return VOID_ALGORITHM_SIMPLE;
+        case VOID_ALG_CODE_CIRCLEFIT: return VOID_ALGORITHM_CIRCLEFIT;
+        case VOID_ALG_CODE_BYPASS:    return VOID_ALGORITHM_BYPASS;
+        case VOID_ALG_CODE_AUTO:      return VOID_ALGORITHM_AUTO;
+        default:                      return VOID_ALGORITHM_SIMPLE; // Safe default
+    }
+}
+
+bool void_set_algorithm_by_code(char algorithm_code)
+{
+    void_algorithm_t algorithm = void_code_to_algorithm(algorithm_code);
+    return void_set_algorithm(algorithm);
+}
+```
+
+### Enhanced Command Handler (`vmt_command.c`)
+
+```c
+// Replace the existing cmd_void() function with this enhanced version:
+
+static void cmd_void(h_str_pointers_t *str_p)
+{
+    if (!str_p || !str_p->part[1])
+    {
+        uart_tx_channel_set(cmd_uart_ch);
+        printf("!vd,err,cmd\n");
+        uart_tx_channel_undo();
+        return;
+    }
+
+    uart_tx_channel_set(cmd_uart_ch);
+
+    // Handle @vd,st? command (status query)
+    if (strcmp(str_p->part[1], "st?") == 0 || strcmp(str_p->part[1], "st") == 0)
+    {
+        void_data_t results;
+        if (void_get_latest_results(&results))
+        {
+            void_config_t current_config;
+            void_get_config(&current_config);
+
+            // Convert algorithm to single character (A=simple, B=circlefit, C=bypass)
+            char alg_code = (results.algorithm_used == VOID_ALGORITHM_SIMPLE) ? 'A' :
+                           (results.algorithm_used == VOID_ALGORITHM_CIRCLEFIT) ? 'B' : 'C';
+
+            printf("&vd,st,%d,%d,%d,%d,%c,run\n",
+                   results.void_detected ? 1 : 0,
+                   results.void_size_mm,
+                   results.confidence_percent,
+                   current_config.baseline_diameter_mm,
+                   alg_code);
+        }
+        else
+        {
+            printf("&vd,st,0,0,0,150,A,stop\n"); // Default response with algorithm A
+        }
+    }
+    // Handle @vd,cfg commands (ultra-compact configuration)
+    else if (strcmp(str_p->part[1], "cfg") == 0 && str_p->part[2])
+    {
+        if (strcmp(str_p->part[2], "thr") == 0 && str_p->part[3])
+        {
+            uint16_t threshold = atoi(str_p->part[3]);
+            void_set_threshold(threshold);
+            printf("&vd,cfg,thr,ack,%d\n", threshold);
+        }
+        else if (strcmp(str_p->part[2], "base") == 0 && str_p->part[3])
+        {
+            uint16_t baseline = atoi(str_p->part[3]);
+            void_set_baseline(baseline);
+            printf("&vd,cfg,base,ack,%d\n", baseline);
+        }
+        else if (strcmp(str_p->part[2], "conf") == 0 && str_p->part[3])
+        {
+            uint8_t confidence = atoi(str_p->part[3]);
+            void_set_confidence_threshold(confidence);
+            printf("&vd,cfg,conf,ack,%d\n", confidence);
+        }
+        else if (strcmp(str_p->part[2], "alg") == 0 && str_p->part[3])
+        {
+            char alg_code = str_p->part[3][0];
+            if (alg_code == 'A')
+            {
+                void_set_algorithm(VOID_ALGORITHM_SIMPLE);
+                printf("&vd,cfg,alg,ack,A\n");
+            }
+            else if (alg_code == 'B')
+            {
+                void_set_algorithm(VOID_ALGORITHM_CIRCLEFIT);
+                printf("&vd,cfg,alg,ack,B\n");
+            }
+            else if (alg_code == 'C')
+            {
+                void_set_algorithm(VOID_ALGORITHM_BYPASS);
+                printf("&vd,cfg,alg,ack,C\n");
+            }
+            else
+            {
+                printf("!vd,err,alg\n");
+            }
+        }
+        else if (strcmp(str_p->part[2], "rng") == 0 && str_p->part[3] && str_p->part[4])
+        {
+            uint16_t min_mm = atoi(str_p->part[3]);
+            uint16_t max_mm = atoi(str_p->part[4]);
+            void_set_range(min_mm, max_mm);
+            printf("&vd,cfg,rng,ack,%d,%d\n", min_mm, max_mm);
+        }
+        else if (strcmp(str_p->part[2], "filt") == 0 && str_p->part[3])
+        {
+            bool enabled = (atoi(str_p->part[3]) != 0);
+            void_set_median_filter(enabled);
+            printf("&vd,cfg,filt,ack,%d\n", enabled ? 1 : 0);
+        }
+        else
+        {
+            printf("!vd,err,param\n");
+        }
+    }
+    // Handle @vd,diag? command (diagnostics) - ultra-compact
+    else if (strcmp(str_p->part[1], "diag?") == 0 || strcmp(str_p->part[1], "diag") == 0)
+    {
+        void_config_t config;
+        void_get_config(&config);
+
+        // Convert algorithm to single character
+        char alg_code = (config.algorithm == VOID_ALGORITHM_SIMPLE) ? 'A' :
+                       (config.algorithm == VOID_ALGORITHM_CIRCLEFIT) ? 'B' : 'C';
+
+        printf("&vd,diag,%d,%c,%d,%d,%d\n", 
+               void_is_system_ready() ? 1 : 0,
+               alg_code,
+               config.baseline_diameter_mm,
+               config.threshold_mm,
+               config.confidence_min_percent);
+
+        // Additional stats
+        uint32_t total_detections, algorithm_switches, uptime_ms;
+        void_get_statistics(&total_detections, &algorithm_switches, &uptime_ms);
+        printf("&vd,stats,%lu,%lu,%lu\n", total_detections, algorithm_switches, uptime_ms);
+    }
+    // Handle @vd,data command (raw measurement data)
+    else if (strcmp(str_p->part[1], "data") == 0)
+    {
+        void_measurement_t measurement;
+        if (void_get_measurement_data(&measurement))
+        {
+            printf("&vd,data,%d,%d,%d,%d\n", 
+                   measurement.distance_mm[0], 
+                   measurement.distance_mm[1], 
+                   measurement.distance_mm[2], 
+                   measurement.valid_sensor_count);
+        }
+        else
+        {
+            printf("&vd,data,0,0,0,0\n");
+        }
+    }
+    // Handle @vd,clr command (clear statistics)
+    else if (strcmp(str_p->part[1], "clr") == 0)
+    {
+        void_clear_statistics();
+        printf("&vd,clr,ack\n");
+    }
+    else
+    {
+        printf("!vd,err,cmd\n");
+    }
+
+    uart_tx_channel_undo();
+}
+```
+
+**2. Asynchronous Streaming Implementation (mti_void.c)**
+
+Add immediate streaming function for asynchronous data transmission:
+
+```c
+static void void_send_immediate_stream(void)
+{
+    if (!latest_results.new_result_available)
+    {
+        return;
+    }
+
+    uart_tx_channel_set(UART_UPHOLE);
+
+    // Ultra-compact format: &vd,<detected>,<size>,<conf>,<alg>
+    // detected: 1=void, 0=clear
+    // alg: A=simple, B=circlefit, C=bypass
+    char alg_code = (latest_results.algorithm_used == VOID_ALGORITHM_SIMPLE) ? 'A' :
+                   (latest_results.algorithm_used == VOID_ALGORITHM_CIRCLEFIT) ? 'B' : 'C';
+
+    printf("&vd,%d,%d,%d,%c\r\n",
+           latest_results.void_detected ? 1 : 0,
+           latest_results.void_size_mm,
+           latest_results.confidence_percent,
+           alg_code);
+
+    uart_tx_channel_undo();
+
+    // Mark as sent and update statistics
+    latest_results.new_result_available = false;
+    void_state.automatic_stream_count++;
+}
+
+// Public API for automatic streaming
+void void_send_automatic_stream(void)
+{
+    // Only send if auto streaming is enabled and system is operational
+    if (!void_state.auto_streaming_enabled || !system_is_operational_mode())
+    {
+        return;
+    }
+
+    // Only send if we have new data
+    if (!latest_results.new_result_available)
+    {
+        return;
+    }
+
+    // Use the internal immediate stream function
+    void_send_immediate_stream();
+}
+```
+
+**3. Auto-Streaming Control in System Start/Stop**
+
+Update the `void_system_start()` and `void_system_stop()` functions to enable/disable auto-streaming:
+
+```c
+bool void_system_start(void)
+{
+    // ...existing initialization code...
+
+    // Enable auto streaming for operational data (CRITICAL)
+    void_set_auto_streaming(true);
+
+    // Clear statistics for new measurement session
+    void_clear_statistics();
+
+    // Set running flag
+    void_system_running = true;
+
+    debug_send("VOID: System started - auto streaming enabled");
+    return true;
+}
+
+bool void_system_stop(void)
+{
+    // Disable auto streaming first (CRITICAL)
+    void_set_auto_streaming(false);
+
+    // ...existing shutdown code...
+
+    // Clear running flag
+    void_system_running = false;
+
+    debug_send("VOID: System stopped - auto streaming disabled");
+    return true;
+}
+```
+
+**4. Event-Driven Processing Integration**
+
+Ensure `void_system_process()` calls the streaming function when new data is available:
+
+```c
+void void_system_process(void)
+{
+    if (!void_is_system_ready())
+    {
+        return;
+    }
+
+    // Process immediately when radar has new data
+    if (!radar_has_new_data())
+    {
+        return;
+    }
+
+    // Process new radar data immediately
+    if (process_radar_data())
+    {
+        radar_mark_data_processed();
+        void_state.immediate_processing_count++;
+
+        // Send automatic stream if enabled and in operational mode
+        if (void_state.auto_streaming_enabled && system_is_operational_mode())
+        {
+            void_send_immediate_stream();
+        }
+    }
+}
+```
+
+#### Key Implementation Requirements
+
+**Efficiency Requirements:**
+1. **Ultra-Compact Commands:** Replace verbose strings with abbreviations:
+   - `status` → `st`
+   - `config` → `cfg`
+   - `thresh` → `thr`
+   - `baseline` → `base`
+   - `algorithm` → `alg`
+   - `clear` → `clr`
+   - `filter` → `filt`
+   - `range` → `rng`
+
+2. **Single-Character Algorithm Codes:**
+   - `A` = Simple algorithm
+   - `B` = CircleFit algorithm  
+   - `C` = Bypass algorithm
+   - `D` = Reserved for future use
+
+3. **Shortened Response States:**
+   - `running` → `run`
+   - `stopped` → `stop`
+
+**Asynchronous Streaming Requirements:**
+1. **Immediate Response to @st:** Auto-streaming MUST be enabled as soon as @st command is received
+2. **Event-Driven Transmission:** Send data immediately when void detection results change
+3. **No Rate Limiting:** Stream data as fast as radar provides new measurements (~100ms intervals)
+4. **Automatic Disable on @fn:** Auto-streaming MUST be disabled when @fn command is received
+
+#### Testing and Validation
+
+**Protocol Testing:**
+- Update test protocol files (void_test.ptp, Downhole Test.ptp) to use ultra-compact commands
+- Verify all command abbreviations work correctly
+- Test algorithm code conversion (A/B/C)
+- Validate shortened response formats
+
+**Streaming Testing:**
+- Verify auto-streaming starts immediately after @st
+- Confirm data is sent asynchronously without rate limiting
+- Test auto-streaming stops immediately after @fn
+- Validate data format matches expected ultra-compact format
+
+**Performance Validation:**
+- Command parsing time < 50ms
+- Stream transmission latency < 100ms
+- Memory usage reduction vs. verbose commands
+- Network bandwidth efficiency improvement
+
+This implementation achieves both maximum efficiency and human readability through carefully designed abbreviations that remain intuitive while significantly reducing command length and processing overhead.
