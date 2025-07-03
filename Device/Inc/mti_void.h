@@ -14,8 +14,8 @@
 
 /** @name System Constants */
 #define VOID_PROCESSING_INTERVAL_MS  100 // 10Hz processing rate
-#define VOID_DEFAULT_BASELINE_MM     150 // Default expected borehole diameter
-#define VOID_DEFAULT_THRESHOLD_MM    50  // Default void detection threshold
+#define VOID_DEFAULT_BASELINE_MM     200 // Default expected borehole diameter
+#define VOID_DEFAULT_THRESHOLD_MM    100 // Default void detection threshold
 #define VOID_DEFAULT_CONFIDENCE_MIN  70  // Default minimum confidence
 #define VOID_HYSTERESIS_MM           10  // Hysteresis to prevent false events
 #define VOID_CIRCLE_FIT_TOLERANCE_MM 20  // Circle fitting tolerance

@@ -15,10 +15,10 @@
 
 /** @name System Constants */
 #define RADAR_PROCESSING_INTERVAL_MS 100    // Default 10Hz processing
-#define RADAR_SENSOR_TIMEOUT_MS      2000   // 2 second sensor timeout
+#define RADAR_SENSOR_TIMEOUT_MS      5000   // 5 second sensor timeout
 #define RADAR_MIN_VALID_DISTANCE_MM  50     // Minimum valid distance (50mm)
 #define RADAR_MAX_VALID_DISTANCE_MM  5000   // Maximum valid distance (5m)
-#define RADAR_MIN_SNR_THRESHOLD      200.0f // Minimum SNR for valid reading (was 20.0f)
+#define RADAR_MIN_SNR_THRESHOLD      100.0f // Minimum SNR for valid reading (was 20.0f)
 
 /** @name Expected Firmware Version */
 #define RADAR_EXPECTED_FW_MAJOR 1

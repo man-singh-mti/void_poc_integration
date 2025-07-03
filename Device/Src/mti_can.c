@@ -469,21 +469,33 @@ can_status_t can_get_system_status(void)
 
 void can_process_timeouts(void)
 {
-    uint32_t now                   = HAL_GetTick();
-    uint8_t  previous_online_count = can_system.online_count;
+    uint32_t        now                   = HAL_GetTick();
+    uint8_t         previous_online_count = can_system.online_count;
+    static uint32_t last_timeout_check    = 0;
+
+    // Only check timeouts every 500ms to reduce noise
+    if ((now - last_timeout_check) < 500)
+    {
+        return;
+    }
+    last_timeout_check = now;
 
     can_system.online_count = 0;
 
-    // Check each sensor for timeout
     for (uint8_t i = 0; i < 3; i++)
     {
-        if ((now - can_system.sensors[i].last_msg_time) > 3000)
+        uint32_t time_since_last_msg = now - can_system.sensors[i].last_msg_time;
+
+        // Use longer timeout for sensors that should be active
+        bool should_timeout = (can_system.sensors[i].status == RADAR_CHIRPING) && (time_since_last_msg > 5000); // 5 second timeout instead of 3
+
+        if (should_timeout)
         {
             if (can_system.sensors[i].online)
             {
                 can_system.sensors[i].online = false;
                 can_system.sensors[i].status = RADAR_STOPPED;
-                debug_send("CAN:timeout, S%d offline", i);
+                debug_send("CAN:timeout, S%d offline (no msgs for %lums)", i, time_since_last_msg);
             }
         }
         else if (can_system.sensors[i].online)
@@ -492,20 +504,13 @@ void can_process_timeouts(void)
         }
     }
 
-    // Only report system status changes
-    if (previous_online_count != can_system.online_count)
+    // Only report significant status changes
+    if (abs(previous_online_count - can_system.online_count) >= 1)
     {
         debug_send("CAN:status, Online sensors: %d/3", can_system.online_count);
     }
 
-    if (can_system.online_count == 0)
-    {
-        can_system.system_status = RADAR_STOPPED;
-    }
-    else
-    {
-        can_system.system_status = RADAR_READY;
-    }
+    can_system.system_status = (can_system.online_count > 0) ? RADAR_READY : RADAR_STOPPED;
 }
 
 /*------------------------------------------------------------------------------

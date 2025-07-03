@@ -18,7 +18,7 @@
  *----------------------------------------------------------------------------*/
 
 /** @brief System configuration */
-static void_config_t config = { .algorithm              = VOID_ALGORITHM_SIMPLE,
+static void_config_t config = { .algorithm              = VOID_ALGORITHM_BYPASS,
                                 .baseline_diameter_mm   = VOID_DEFAULT_BASELINE_MM,
                                 .threshold_mm           = VOID_DEFAULT_THRESHOLD_MM,
                                 .confidence_min_percent = VOID_DEFAULT_CONFIDENCE_MIN,
@@ -311,7 +311,8 @@ static bool process_radar_data(void)
 
 static bool run_bypass_algorithm(const radar_distance_t *radar_data)
 {
-    // Bypass algorithm - always return false (no detection)
+    // Bypass algorithm - no void detection, just pass through cleaned data
+    // Always return false (no void detected) since we're bypassing detection
     return false;
 }
 
@@ -1288,18 +1289,23 @@ static void void_send_automatic_stream_internal(void)
     else if (config.algorithm == VOID_ALGORITHM_BYPASS)
         algorithm_char = 'c';
 
-    // Enhanced format: Per-sensor void detection status
-    uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
-
-    // Determine which sensors detect voids independently
+    // FIXED: Determine void status based on algorithm choice
     uint8_t sensor_void_status[MAX_RADAR_SENSORS] = { 0 };
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+
+    if (config.algorithm != VOID_ALGORITHM_BYPASS)
     {
-        if (measurement.data_valid[i] && measurement.distance_mm[i] > threshold && measurement.snr_value[i] >= 200)
+        // Only apply void detection logic for active algorithms
+        uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
+
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            sensor_void_status[i] = 1; // Void detected by this sensor
+            if (measurement.data_valid[i] && measurement.distance_mm[i] > threshold && measurement.snr_value[i] >= 200)
+            {
+                sensor_void_status[i] = 1; // Void detected by this sensor
+            }
         }
     }
+    // For bypass mode: sensor_void_status remains all zeros
 
     // Format: &vd,<dist_0>,<dist_1>,<dist_2>,<alg>,<void_0>,<void_1>,<void_2>,<status>,<snr_0>,<snr_1>,<snr_2>
     printf("&vd,%d,%d,%d,%c,%d,%d,%d,%c,%d,%d,%d\r\n",
@@ -1307,9 +1313,9 @@ static void void_send_automatic_stream_internal(void)
            measurement.distance_mm[1],
            measurement.distance_mm[2],
            algorithm_char,
-           sensor_void_status[0], // Per-sensor void detection
-           sensor_void_status[1], // Per-sensor void detection
-           sensor_void_status[2], // Per-sensor void detection
+           sensor_void_status[0], // Per-sensor void detection (0 for bypass)
+           sensor_void_status[1], // Per-sensor void detection (0 for bypass)
+           sensor_void_status[2], // Per-sensor void detection (0 for bypass)
            void_system_running ? 'y' : 'n',
            measurement.snr_value[0],
            measurement.snr_value[1],
@@ -1322,9 +1328,9 @@ static void void_send_automatic_stream_internal(void)
                measurement.distance_mm[1],
                measurement.distance_mm[2],
                algorithm_char,
-               sensor_void_status[0], // Per-sensor void detection
-               sensor_void_status[1], // Per-sensor void detection
-               sensor_void_status[2], // Per-sensor void detection
+               sensor_void_status[0], // Per-sensor void detection (0 for bypass)
+               sensor_void_status[1], // Per-sensor void detection (0 for bypass)
+               sensor_void_status[2], // Per-sensor void detection (0 for bypass)
                void_system_running ? 'y' : 'n',
                measurement.snr_value[0],
                measurement.snr_value[1],
