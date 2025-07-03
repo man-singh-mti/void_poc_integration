@@ -14,11 +14,11 @@
 #include <stdint.h>
 
 /** @name System Constants */
-#define RADAR_PROCESSING_INTERVAL_MS 100   // Default 10Hz processing
-#define RADAR_SENSOR_TIMEOUT_MS      2000  // 2 second sensor timeout
-#define RADAR_MIN_VALID_DISTANCE_MM  50    // Minimum valid distance (50mm)
-#define RADAR_MAX_VALID_DISTANCE_MM  5000  // Maximum valid distance (5m)
-#define RADAR_MIN_SNR_THRESHOLD      20.0f // Minimum SNR for valid reading
+#define RADAR_PROCESSING_INTERVAL_MS 100    // Default 10Hz processing
+#define RADAR_SENSOR_TIMEOUT_MS      2000   // 2 second sensor timeout
+#define RADAR_MIN_VALID_DISTANCE_MM  50     // Minimum valid distance (50mm)
+#define RADAR_MAX_VALID_DISTANCE_MM  5000   // Maximum valid distance (5m)
+#define RADAR_MIN_SNR_THRESHOLD      200.0f // Minimum SNR for valid reading (was 20.0f)
 
 /** @name Expected Firmware Version */
 #define RADAR_EXPECTED_FW_MAJOR 1
@@ -50,6 +50,7 @@ typedef struct
 {
     uint16_t distance_mm[MAX_RADAR_SENSORS];   // Clean distances in millimeters
     uint16_t angle_deg[MAX_RADAR_SENSORS];     // Sensor angles (0,120,240)
+    uint16_t snr_value[MAX_RADAR_SENSORS];     // SNR values as integers
     bool     data_valid[MAX_RADAR_SENSORS];    // Validity flags per sensor
     float    confidence[MAX_RADAR_SENSORS];    // Confidence per sensor (0.0-1.0)
     uint8_t  quality_score[MAX_RADAR_SENSORS]; // Signal quality (0-100)

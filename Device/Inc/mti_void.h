@@ -65,6 +65,7 @@ typedef struct
 typedef struct
 {
     uint16_t distance_mm[MAX_RADAR_SENSORS]; // Current distances
+    uint16_t snr_value[MAX_RADAR_SENSORS];   // SNR values as integers
     bool     data_valid[MAX_RADAR_SENSORS];  // Data validity flags
     uint8_t  valid_sensor_count;             // Number of valid sensors
     uint32_t timestamp_ms;                   // Measurement timestamp

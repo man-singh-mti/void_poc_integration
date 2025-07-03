@@ -171,9 +171,8 @@ void radar_system_process(void)
             can_sensor_t *sensor = can_get_sensor(i);
             if (!sensor || !sensor->online)
             {
-                latest_measurements.data_valid[i]    = false;
-                latest_measurements.confidence[i]    = 0.0f;
-                latest_measurements.quality_score[i] = 0;
+                latest_measurements.data_valid[i] = false;
+                latest_measurements.snr_value[i]  = 0;
             }
         }
     }
@@ -207,54 +206,60 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         return false;
     }
 
-    // Check if sensor has detection points - use current_point_count instead of num_points
+    // Check if sensor has detection points
     if (sensor->current_point_count == 0)
     {
         latest_measurements.data_valid[sensor_idx] = false;
         return false;
     }
 
-    // Find the best detection point (closest with highest SNR)
+    // Find the best detection point
     float best_distance     = 0.0f;
     float best_snr          = 0.0f;
     bool  valid_point_found = false;
 
-    // Use current_point_count - this is the actual number of points received
-    for (uint8_t point_idx = 0; point_idx < sensor->current_point_count && point_idx < MAX_RADAR_DETECTED_POINTS; point_idx++)
+    // UPDATED: Only process first 5 points maximum (as requested)
+    uint8_t points_to_process = (sensor->current_point_count < 5) ? sensor->current_point_count : 5;
+
+    debug_send("RADAR: S%d processing %d/%d points", sensor_idx, points_to_process, sensor->current_point_count);
+
+    for (uint8_t point_idx = 0; point_idx < points_to_process; point_idx++)
     {
         float distance_m = sensor->detection_points[point_idx][0];
         float snr        = sensor->detection_points[point_idx][1];
 
-        if (validate_sensor_measurement(sensor_idx, distance_m, snr)) // Add sensor_idx parameter
+        if (validate_sensor_measurement(sensor_idx, distance_m, snr))
         {
-            // Prefer closer points with good SNR
-            if (!valid_point_found || (distance_m < best_distance && snr > (best_snr * 0.8f)) || (snr > best_snr * 1.2f))
+            // POC OPTION 2: Choose point with highest SNR above threshold (200.0)
+            if (!valid_point_found || snr > best_snr)
             {
                 best_distance     = distance_m;
                 best_snr          = snr;
                 valid_point_found = true;
+                debug_send("RADAR: S%d new best point - dist=%.3fm, SNR=%.1f", sensor_idx, distance_m, snr);
             }
+        }
+        else
+        {
+            debug_send("RADAR: S%d point %d rejected - dist=%.3fm, SNR=%.1f (SNR<200)", sensor_idx, point_idx, distance_m, snr);
         }
     }
 
     if (valid_point_found)
     {
-        // Store valid measurement
+        // Convert floats to integers when storing in radar struct
         latest_measurements.distance_mm[sensor_idx] = convert_to_millimeters(best_distance);
+        latest_measurements.snr_value[sensor_idx]   = (uint16_t)best_snr;
         latest_measurements.data_valid[sensor_idx]  = true;
 
-        // Calculate confidence and quality based on SNR
-        float confidence                              = fminf(best_snr / 100.0f, 1.0f);
-        latest_measurements.confidence[sensor_idx]    = confidence;
-        latest_measurements.quality_score[sensor_idx] = (uint8_t)(confidence * 100.0f);
-
+        debug_send("RADAR: S%d FINAL - %dmm, SNR=%d", sensor_idx, latest_measurements.distance_mm[sensor_idx], latest_measurements.snr_value[sensor_idx]);
         return true;
     }
     else
     {
-        latest_measurements.data_valid[sensor_idx]    = false;
-        latest_measurements.confidence[sensor_idx]    = 0.0f;
-        latest_measurements.quality_score[sensor_idx] = 0;
+        latest_measurements.data_valid[sensor_idx] = false;
+        latest_measurements.snr_value[sensor_idx]  = 0;
+        debug_send("RADAR: S%d NO VALID POINTS (all SNR<200)", sensor_idx);
         return false;
     }
 }
@@ -327,12 +332,12 @@ static void update_system_health(void)
 
 bool radar_set_calibration_mode(void)
 {
-    debug_send("RADAR: Setting calibration mode (profile %d)", RADAR_PROFILE_CALIBRATION);
+    debug_send("RADAR: Setting calibration mode (profile %d)", RADAR_PROFILE_MEASUREMENT);
 
     bool success = true;
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
-        uint8_t profile_data[1] = { RADAR_PROFILE_CALIBRATION };
+        uint8_t profile_data[1] = { RADAR_PROFILE_MEASUREMENT };
         if (!can_send_command_data(i, CAN_CMD_SELECT_PROFILE, profile_data, 1))
         {
             debug_send("RADAR: Failed to set calibration mode for sensor %d", i);
@@ -531,8 +536,7 @@ void radar_run_diagnostics(void)
             if (latest_measurements.data_valid[i])
             {
                 debug_send("  Distance: %dmm", latest_measurements.distance_mm[i]);
-                debug_send("  Confidence: %.2f", latest_measurements.confidence[i]);
-                debug_send("  Quality: %d%%", latest_measurements.quality_score[i]);
+                debug_send("  SNR: %d", latest_measurements.snr_value[i]);
             }
             else
             {
@@ -715,16 +719,14 @@ void radar_debug_measurements_periodic(void)
             if (measurements.data_valid[i])
             {
                 debug_send("  Distance: %dmm", measurements.distance_mm[i]);
-                debug_send("  Confidence: %.2f", measurements.confidence[i]);
-                debug_send("  Quality: %d%%", measurements.quality_score[i]);
+                debug_send("  SNR: %d", measurements.snr_value[i]);
                 debug_send("  Status: VALID");
             }
             else
             {
                 debug_send("  Status: INVALID - No valid detection points");
                 debug_send("  Distance: N/A");
-                debug_send("  Confidence: %.2f", measurements.confidence[i]);
-                debug_send("  Quality: %d%%", measurements.quality_score[i]);
+                debug_send("  SNR: %d", measurements.snr_value[i]);
             }
 
             // Also show raw CAN sensor data for comparison

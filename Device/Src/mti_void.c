@@ -317,77 +317,86 @@ static bool run_bypass_algorithm(const radar_distance_t *radar_data)
 
 static bool run_simple_algorithm(const radar_distance_t *radar_data)
 {
-    uint8_t  void_sensors = 0;
-    uint16_t threshold    = config.baseline_diameter_mm + config.threshold_mm;
+    uint16_t threshold                = config.baseline_diameter_mm + config.threshold_mm;
+    bool     void_detected_any_sensor = false;
+    uint8_t  detection_count          = 0;
 
+    // Check EACH sensor independently
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
         if (radar_data->data_valid[i])
         {
-            uint16_t distance = radar_data->distance_mm[i];
+            // Individual sensor void check
+            bool sensor_distance_void = (radar_data->distance_mm[i] > threshold);
+            bool sensor_snr_good      = (radar_data->snr_value[i] >= 200);
 
-            // Apply median filter if enabled
-            if (config.median_filter_enabled)
+            // INDEPENDENT per-sensor decision
+            if (sensor_distance_void && sensor_snr_good)
             {
-                distance = apply_median_filter(i, distance);
+                void_detected_any_sensor = true;
+                detection_count++;
+
+                debug_send("VOID: S%d DETECTS VOID - dist=%dmm (>%d), SNR=%d (>200)", i, radar_data->distance_mm[i], threshold, radar_data->snr_value[i]);
             }
-
-            // Check if distance exceeds threshold
-            if (distance > threshold)
+            else
             {
-                void_sensors++;
-                // debug_send("[V]S%d>%d", i, threshold);
+                debug_send("VOID: S%d sees wall - dist=%dmm, SNR=%d", i, radar_data->distance_mm[i], radar_data->snr_value[i]);
             }
         }
     }
 
-    // Detection requires at least 1 sensor showing void
-    bool detected = (void_sensors > 0);
+    debug_send("VOID: Simple algorithm - %d/%d sensors detect void", detection_count, radar_data->valid_sensor_count);
 
-    // debug_send("[V]S%d/%d", void_sensors, radar_data->valid_sensor_count);
-
-    return detected;
+    // ANY sensor detecting a void is sufficient
+    return void_detected_any_sensor;
 }
 
 static bool run_circle_fit_algorithm(const radar_distance_t *radar_data)
 {
-    // Require at least 3 sensors for circle fitting
-    if (radar_data->valid_sensor_count < 3)
-    {
-        // debug_send("[V]CF need3 S%d", radar_data->valid_sensor_count);
+    // For horizontal voids, circle fitting may not be appropriate
+    // since voids are typically asymmetric (only 1-2 sensors see them)
 
-        // Auto-fallback to simple algorithm if enabled
-        if (config.auto_fallback_enabled)
+    // NEW APPROACH: Use "partial circle fitting" or fallback to simple
+
+    uint8_t  high_quality_sensors   = 0;
+    uint8_t  void_detecting_sensors = 0;
+    uint16_t threshold              = config.baseline_diameter_mm + config.threshold_mm;
+
+    // Count sensors that see voids vs. sensors that see walls
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_data->data_valid[i] && radar_data->snr_value[i] >= 250)
         {
-            // debug_send("[V]fallback");
-            void_state.algorithm_switches++;
-            return run_simple_algorithm(radar_data);
+            high_quality_sensors++;
+
+            if (radar_data->distance_mm[i] > threshold)
+            {
+                void_detecting_sensors++;
+            }
         }
-        return false;
     }
 
-    circle_fit_result_t fit_result;
-    if (!calculate_circle_fit(radar_data, &fit_result))
+    // If all sensors see similar distances, try traditional circle fitting
+    if (high_quality_sensors >= 3 && void_detecting_sensors == 0)
     {
-        // debug_send("[V]CFfail");
-
-        // Auto-fallback to simple algorithm if enabled
-        if (config.auto_fallback_enabled)
+        // All sensors see walls - traditional circle fit
+        circle_fit_result_t fit_result;
+        if (calculate_circle_fit(radar_data, &fit_result))
         {
-            // debug_send("[V]fallback");
-            void_state.algorithm_switches++;
-            return run_simple_algorithm(radar_data);
+            uint16_t threshold_diameter = config.baseline_diameter_mm + config.threshold_mm;
+            return fit_result.diameter_mm > threshold_diameter;
         }
-        return false;
     }
 
-    // Check if fitted diameter is significantly larger than baseline
-    uint16_t threshold_diameter = config.baseline_diameter_mm + config.threshold_mm;
-    bool     void_detected      = fit_result.diameter_mm > threshold_diameter;
+    // For asymmetric cases (horizontal voids), use simple algorithm
+    debug_send("VOID: Circle fit fallback - %d high quality, %d detecting voids", high_quality_sensors, void_detecting_sensors);
 
-    // debug_send("[V]CF D%d Q%.2f %s", fit_result.diameter_mm, fit_result.fit_quality, void_detected ? "D" : "N");
+    if (config.auto_fallback_enabled)
+    {
+        return run_simple_algorithm(radar_data);
+    }
 
-    return void_detected;
+    return false;
 }
 
 /*------------------------------------------------------------------------------
@@ -547,31 +556,57 @@ static uint8_t calculate_confidence(const radar_distance_t *radar_data, bool voi
         return 0;
     }
 
-    // Base confidence on number of valid sensors and their quality
-    float confidence = 0.0f;
+    float    confidence = 0.0f;
+    uint16_t threshold  = config.baseline_diameter_mm + config.threshold_mm;
 
-    // Sensor count contribution (0-50%)
-    confidence += (float)radar_data->valid_sensor_count / MAX_RADAR_SENSORS * 50.0f;
-
-    // Signal quality contribution (0-50%)
-    float avg_quality = 0.0f;
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    if (!void_detected)
     {
-        if (radar_data->data_valid[i])
-        {
-            avg_quality += radar_data->confidence[i];
-        }
+        // No void detected - confidence based on system health
+        confidence = (float)radar_data->valid_sensor_count / MAX_RADAR_SENSORS * 80.0f;
     }
-    if (radar_data->valid_sensor_count > 0)
+    else
     {
-        avg_quality /= radar_data->valid_sensor_count;
-        confidence += avg_quality * 50.0f;
+        // Void detected - confidence based on DETECTING sensors only
+        uint8_t  detecting_sensors          = 0;
+        uint32_t detecting_sensor_snr_total = 0;
+        uint16_t max_detecting_snr          = 0;
+
+        // Only consider sensors that are actually detecting the void
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            if (radar_data->data_valid[i] && radar_data->distance_mm[i] > threshold && radar_data->snr_value[i] >= 200)
+            {
+                detecting_sensors++;
+                detecting_sensor_snr_total += radar_data->snr_value[i];
+
+                if (radar_data->snr_value[i] > max_detecting_snr)
+                {
+                    max_detecting_snr = radar_data->snr_value[i];
+                }
+            }
+        }
+
+        if (detecting_sensors > 0)
+        {
+            // Base confidence on the BEST detecting sensor
+            // SNR 200+ = 60%, SNR 300+ = 80%, SNR 400+ = 100%
+            float snr_confidence = fminf(100.0f, (float)(max_detecting_snr - 200) / 200.0f * 40.0f + 60.0f);
+
+            // Bonus for multiple sensors detecting (up to +20%)
+            float multi_sensor_bonus = fminf(20.0f, (float)(detecting_sensors - 1) * 10.0f);
+
+            confidence = snr_confidence + multi_sensor_bonus;
+        }
+        else
+        {
+            confidence = 0.0f; // Should not happen if void_detected is true
+        }
     }
 
     // Reduce confidence if system is not fully healthy
     if (!radar_data->system_healthy)
     {
-        confidence *= 0.8f;
+        confidence = confidence * 0.8f;
     }
 
     return (uint8_t)fminf(100.0f, fmaxf(0.0f, confidence));
@@ -583,6 +618,7 @@ static void update_measurement_data(const radar_distance_t *radar_data)
     for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
     {
         latest_measurement.distance_mm[i] = radar_data->distance_mm[i];
+        latest_measurement.snr_value[i]   = radar_data->snr_value[i]; // NEW: Copy SNR values
         latest_measurement.data_valid[i]  = radar_data->data_valid[i];
     }
 
@@ -1164,17 +1200,18 @@ char void_get_detection_character(void)
         return VOID_CHAR_TEST;
 
     case VOID_ALGORITHM_SIMPLE:
+    case VOID_ALGORITHM_CIRCLEFIT:
     {
-        // For simple algorithm, determine which sensor detected the void
         radar_distance_t radar_data;
         if (radar_get_latest_measurements(&radar_data))
         {
             uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
 
-            // Check each sensor for void detection
+            // Return character for the FIRST sensor that detects a void
+            // Priority: Sensor 0, then 1, then 2
             for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
             {
-                if (radar_data.data_valid[i] && radar_data.distance_mm[i] > threshold)
+                if (radar_data.data_valid[i] && radar_data.distance_mm[i] > threshold && radar_data.snr_value[i] >= 200)
                 {
                     switch (i)
                     {
@@ -1184,17 +1221,12 @@ char void_get_detection_character(void)
                         return VOID_CHAR_SENSOR1;
                     case 2:
                         return VOID_CHAR_SENSOR2;
-                    default:
-                        break;
                     }
                 }
             }
         }
         return VOID_CHAR_NONE;
     }
-
-    case VOID_ALGORITHM_CIRCLEFIT:
-        return VOID_CHAR_CIRCLE;
 
     default:
         return VOID_CHAR_ERROR;
@@ -1281,109 +1313,54 @@ static void void_send_immediate_stream(void)
 
 static void void_send_automatic_stream_internal(void)
 {
-    // Only stream in operational mode
-    if (!void_system_running || state_get() != measure_state)
+    if (!void_state.auto_streaming_enabled || !system_is_operational_mode())
     {
         return;
     }
 
     void_measurement_t measurement;
-    void_data_t        result;
-
-    // Get latest data from the void detection system
-    if (!void_get_measurement_data(&measurement) || !void_get_latest_results(&result))
+    if (!void_get_measurement_data(&measurement))
     {
-        return; // No data available
+        return;
     }
 
-    // Generate per-sensor void flags based on the detection algorithm
-    bool void_flags[MAX_RADAR_SENSORS] = { false, false, false };
-
-    // For simple algorithm: check each sensor individually
-    if (result.algorithm_used == VOID_ALGORITHM_SIMPLE)
-    {
-        uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
-        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-        {
-            if (measurement.data_valid[i] && measurement.distance_mm[i] > threshold)
-            {
-                void_flags[i] = true;
-            }
-        }
-    }
-    // For circle fit algorithm: if void detected, mark all valid sensors
-    else if (result.algorithm_used == VOID_ALGORITHM_CIRCLEFIT && result.void_detected)
-    {
-        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-        {
-            if (measurement.data_valid[i])
-            {
-                void_flags[i] = true;
-            }
-        }
-    }
-    // For bypass: never detect voids
-    // (void_flags remain false)
-
-    // Get algorithm character
-    char algorithm_char = 'a'; // Default to simple
-    switch (result.algorithm_used)
-    {
-    case VOID_ALGORITHM_SIMPLE:
-        algorithm_char = 'a';
-        break;
-    case VOID_ALGORITHM_CIRCLEFIT:
-        algorithm_char = 'b';
-        break;
-    case VOID_ALGORITHM_BYPASS:
-        algorithm_char = 'c';
-        break;
-    default:
-        algorithm_char = '?';
-        break;
-    }
-
-    // UPHOLE STREAM: Compact format for production use
     uart_tx_channel_set(UART_UPHOLE);
-    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%c\r\n",
-           measurement.distance_mm[0],       // distance_0
-           measurement.distance_mm[1],       // distance_1
-           measurement.distance_mm[2],       // distance_2
-           algorithm_char,                   // algorithm (a/b/c)
-           void_flags[0] ? 1 : 0,            // void_0
-           void_flags[1] ? 1 : 0,            // void_1
-           void_flags[2] ? 1 : 0,            // void_2
-           void_system_running ? 'y' : 'n'); // status
-    uart_tx_channel_undo();
 
-    // DEBUG STREAM: Extended format for development/diagnostics
-    uart_tx_channel_set(UART_DEBUG);
-    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%d,%d,%d,0x%02X\r\n",
-           measurement.distance_mm[0],  // distance_0
-           measurement.distance_mm[1],  // distance_1
-           measurement.distance_mm[2],  // distance_2
-           algorithm_char,              // algorithm (a/b/c)
-           void_flags[0] ? 1 : 0,       // void_0
-           void_flags[1] ? 1 : 0,       // void_1
-           void_flags[2] ? 1 : 0,       // void_2
-           result.confidence_percent,   // confidence
-           config.baseline_diameter_mm, // baseline
-           config.threshold_mm,         // threshold
-           measurement.flags);          // system flags
-    uart_tx_channel_undo();
+    char algorithm_char = 'a';
+    if (config.algorithm == VOID_ALGORITHM_CIRCLEFIT)
+        algorithm_char = 'b';
+    else if (config.algorithm == VOID_ALGORITHM_BYPASS)
+        algorithm_char = 'c';
 
-    // Update statistics
+    // Enhanced format: Per-sensor void detection status
+    uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
+
+    // Determine which sensors detect voids independently
+    uint8_t sensor_void_status[MAX_RADAR_SENSORS] = { 0 };
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (measurement.data_valid[i] && measurement.distance_mm[i] > threshold && measurement.snr_value[i] >= 200)
+        {
+            sensor_void_status[i] = 1; // Void detected by this sensor
+        }
+    }
+
+    // Format: &vd,<dist_0>,<dist_1>,<dist_2>,<alg>,<void_0>,<void_1>,<void_2>,<status>,<snr_0>,<snr_1>,<snr_2>
+    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%c,%d,%d,%d\r\n",
+           measurement.distance_mm[0],
+           measurement.distance_mm[1],
+           measurement.distance_mm[2],
+           algorithm_char,
+           sensor_void_status[0], // Per-sensor void detection
+           sensor_void_status[1], // Per-sensor void detection
+           sensor_void_status[2], // Per-sensor void detection
+           void_system_running ? 'y' : 'n',
+           measurement.snr_value[0],
+           measurement.snr_value[1],
+           measurement.snr_value[2]);
+
+    uart_tx_channel_undo();
     void_state.automatic_stream_count++;
-
-    // Debug trace (can be disabled)
-    // debug_send("[V]stream sent: d=[%d,%d,%d] alg=%c void=[%d,%d,%d]",
-    //           measurement.distance_mm[0],
-    //           measurement.distance_mm[1],
-    //           measurement.distance_mm[2],
-    //           algorithm_char,
-    //           void_flags[0],
-    //           void_flags[1],
-    //           void_flags[2]);
 }
 
 /*------------------------------------------------------------------------------
