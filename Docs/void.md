@@ -1702,3 +1702,188 @@ bool run_streaming_protocol_tests(void) {
 * Temporal pattern analysis for void event validation
 
 This enhanced implementation guide provides a comprehensive roadmap for the character-based void detection system, focusing on the core modules (void, radar, CAN, temperature) while providing clear implementation steps and validation strategies for the production-ready system.
+
+# Radar Point Selection Strategy for Horizontal Void Detection
+
+## Overview
+
+This document outlines the point selection strategy for radar sensors used in horizontal void detection in boreholes. The system uses radar sensors originally designed for borehole depth measurement, mounted sideways to detect voids while the probe is lowered.
+
+## System Configuration
+
+* **Application**: Horizontal void detection in boreholes (proof of concept)
+* **Sensor Orientation**: Sideways-mounted depth measurement radars
+* **Detection Target**: Cavities/voids in borehole walls
+* **Operating Environment**: Downhole conditions during probe descent
+* **Edge Cases**: Large caverns or walls beyond 10m range
+
+## CFAR Algorithm Background
+
+The radar sensors use **CFAR (Constant False Alarm Rate)** algorithm for peak detection:
+
+* **Purpose**: Separates real target peaks from background noise in FFT output
+* **Application**: Applied to both range and Doppler directions
+* **Key Setting**: Detection threshold scale (adjustable via `setDetectionThreshold`)
+* **Optimization**: Best tuned during actual use-case data capture
+
+### Spur Rejection
+
+* **Challenge**: Distinguishing real targets from spur-induced peaks
+* **Solution**: Toggle spread spectrum mode (`enableSpreadSpec` command)
+  * **Spurs**: Appear as wide hills when spread spectrum enabled
+  * **Real targets**: Remain narrow peaks regardless of spread spectrum mode
+* **Real-time verification**: Can toggle during operation to verify peak authenticity
+
+## Current Implementation: Highest SNR Selection
+
+### Current Strategy
+
+```c
+// Select point with highest SNR among valid points
+if (!valid_point_found || snr > best_snr) {
+    best_distance = distance_m;
+    best_snr = snr;
+    // ...
+}
+```
+
+### Characteristics
+
+* ✅ **Most reliable**: CFAR has already filtered noise
+
+* ✅ **High confidence**: SNR indicates signal quality
+* ✅ **Spur resistant**: Strong signals less likely to be spurious
+* ❌ **Wall bias**: Closer reflections often stronger
+* ❌ **Void edge miss**: May not detect cavity boundaries
+
+## Proposed Hybrid Strategy (Future Implementation)
+
+### Strategy Overview
+
+Combine distance priority with SNR quality thresholds to optimize for void detection while maintaining reliability.
+
+### Implementation Approach
+
+```c
+// Hybrid selection logic
+const float MIN_SNR_FOR_VOID = 100.0f;           // Minimum acceptable SNR
+const float SNR_PREFERENCE_THRESHOLD = 150.0f;   // High-quality SNR threshold
+
+// Strategy 1: Both points have good SNR → prefer farthest
+if (snr >= SNR_PREFERENCE_THRESHOLD && candidate_snr >= SNR_PREFERENCE_THRESHOLD) {
+    if (distance_m > candidate_distance) {
+        select_this_point = true;  // Prefer distance for void detection
+    }
+}
+
+// Strategy 2: Current candidate has poor SNR → prefer better SNR
+else if (candidate_snr < SNR_PREFERENCE_THRESHOLD && snr > candidate_snr) {
+    select_this_point = true;  // Prioritize signal quality
+}
+
+// Strategy 3: Significantly farther with reasonable SNR
+else if (distance_m > (candidate_distance * 1.2f) && snr >= MIN_SNR_FOR_VOID) {
+    select_this_point = true;  // Geometric priority for void detection
+}
+```
+
+### Benefits
+
+* **Void Detection**: Prioritizes cavity boundaries over wall reflections
+
+* **Reliability**: Maintains minimum SNR requirements
+* **Geometric Accuracy**: Measures actual borehole dimensions
+* **Noise Rejection**: Leverages CFAR pre-filtering
+
+### Expected Improvements
+
+* Better detection of void edges vs. wall reflections
+
+* More accurate cavity size measurements
+* Reduced bias toward near-field targets
+
+## Edge Case Considerations
+
+### Large Caverns
+
+* **Scenario**: Cavity extends beyond 10m sensor range
+
+* **Current Handling**: May appear as no detection
+* **Future Enhancement**: Classify as "large void" based on signal characteristics
+
+### No Wall Detection
+
+* **Scenario**: Open cavity with no back wall within range
+
+* **Current Handling**: Depends on available reflection points
+* **Future Enhancement**: Pattern recognition for cavity signatures
+
+### Spur Interference
+
+* **Detection**: Use spread spectrum toggle for real-time verification
+
+* **Mitigation**: CFAR algorithm provides primary filtering
+* **Validation**: SNR thresholds help reject spurious peaks
+
+## Implementation Timeline
+
+### Phase 1 (Current)
+
+* ✅ Highest SNR selection with basic validation
+
+* ✅ Configurable SNR thresholds (50.0f minimum)
+* ✅ Wide distance range (10mm - 15m)
+
+### Phase 2 (Future)
+
+* 🔄 Implement hybrid distance/SNR strategy
+
+* 🔄 Add configurable selection modes
+* 🔄 Enhanced spur detection capabilities
+
+### Phase 3 (Advanced)
+
+* 🔄 Pattern recognition for cavity types
+
+* 🔄 Multi-frame analysis for edge cases
+* 🔄 Adaptive threshold adjustment
+
+## Configuration Parameters
+
+### Current Thresholds
+
+```c
+#define RADAR_MIN_VALID_DISTANCE_MM  10      // 1cm minimum
+#define RADAR_MAX_VALID_DISTANCE_MM  15000   // 15m maximum  
+#define RADAR_MIN_SNR_THRESHOLD      50.0f   // Very permissive
+```
+
+### Proposed Hybrid Parameters
+
+```c
+// Future hybrid configuration
+#define RADAR_MIN_SNR_FOR_VOID       100.0f  // Minimum for void detection
+#define RADAR_SNR_PREFERENCE_THRESHOLD 150.0f // High-quality threshold
+#define RADAR_DISTANCE_PREFERENCE_FACTOR 1.2f // 20% distance advantage
+```
+
+## Testing Considerations
+
+### Validation Approach
+
+1. **Controlled Environment**: Test with known cavity sizes
+2. **Comparative Analysis**: Current vs. hybrid selection
+3. **Real-world Validation**: Field testing in various borehole conditions
+4. **Spur Testing**: Use spread spectrum toggle for verification
+
+### Success Metrics
+
+* **Detection Accuracy**: Correct identification of void presence
+
+* **Size Accuracy**: Measurement precision for cavity dimensions
+* **False Positive Rate**: Rejection of spurious detections
+* **Consistency**: Repeatability across multiple passes
+
+## Conclusion
+
+The current highest SNR strategy provides a solid foundation for reliable void detection. The proposed hybrid approach offers potential improvements for geometric accuracy and void boundary detection while maintaining the reliability benefits of CFAR pre-filtering. Implementation should be phased with thorough testing to validate improvements in real-world conditions.

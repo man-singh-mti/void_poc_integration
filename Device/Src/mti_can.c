@@ -484,18 +484,26 @@ void can_process_timeouts(void)
 
     for (uint8_t i = 0; i < 3; i++)
     {
-        uint32_t time_since_last_msg = now - can_system.sensors[i].last_msg_time;
+        bool has_timed_out      = (now - can_system.sensors[i].last_msg_time) > 3000;
+        bool was_expecting_data = (can_system.sensors[i].status == RADAR_CHIRPING);
 
-        // Use longer timeout for sensors that should be active
-        bool should_timeout = (can_system.sensors[i].status == RADAR_CHIRPING) && (time_since_last_msg > 5000); // 5 second timeout instead of 3
-
-        if (should_timeout)
+        if (has_timed_out)
         {
             if (can_system.sensors[i].online)
             {
                 can_system.sensors[i].online = false;
-                can_system.sensors[i].status = RADAR_STOPPED;
-                debug_send("CAN:timeout, S%d offline (no msgs for %lums)", i, time_since_last_msg);
+
+                // Only report as timeout if we were expecting data
+                if (was_expecting_data)
+                {
+                    debug_send("CAN:timeout, S%d offline (was chirping)", i);
+                    can_system.sensors[i].status = RADAR_STOPPED;
+                }
+                else
+                {
+                    // Sensor was stopped - this is expected silence, not a timeout
+                    debug_send("CAN:quiet, S%d stopped (expected)", i);
+                }
             }
         }
         else if (can_system.sensors[i].online)

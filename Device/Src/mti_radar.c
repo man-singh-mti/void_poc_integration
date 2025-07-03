@@ -222,6 +222,7 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
     // Check if sensor has detection points
     if (sensor->current_point_count == 0)
     {
+        debug_send("RAD:S%d, No points available", sensor_idx);
         latest_measurements.data_valid[sensor_idx] = false;
         return false;
     }
@@ -229,12 +230,18 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
     float   best_distance     = 0.0f;
     float   best_snr          = 0.0f;
     bool    valid_point_found = false;
+    uint8_t best_point_idx    = 0;
     uint8_t points_to_process = (sensor->current_point_count < 5) ? sensor->current_point_count : 5;
 
+    debug_send("RAD:S%d, Processing %d points", sensor_idx, points_to_process);
+
+    // Find the point with highest SNR among valid points
     for (uint8_t point_idx = 0; point_idx < points_to_process; point_idx++)
     {
         float distance_m = sensor->detection_points[point_idx][0];
         float snr        = sensor->detection_points[point_idx][1];
+
+        debug_send("RAD:S%d, Point %d: %.3fm (%dmm), SNR=%.1f", sensor_idx, point_idx, distance_m, convert_to_millimeters(distance_m), snr);
 
         if (validate_sensor_measurement(sensor_idx, distance_m, snr))
         {
@@ -242,7 +249,9 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
             {
                 best_distance     = distance_m;
                 best_snr          = snr;
+                best_point_idx    = point_idx;
                 valid_point_found = true;
+                debug_send("RAD:S%d, New best: Point %d, SNR=%.1f", sensor_idx, point_idx, snr);
             }
         }
     }
@@ -252,39 +261,45 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         latest_measurements.distance_mm[sensor_idx] = convert_to_millimeters(best_distance);
         latest_measurements.snr_value[sensor_idx]   = (uint16_t)best_snr;
         latest_measurements.data_valid[sensor_idx]  = true;
+
+        debug_send("RAD:S%d, Selected: %.3fm (%dmm), SNR=%d (point %d)",
+                   sensor_idx,
+                   best_distance,
+                   latest_measurements.distance_mm[sensor_idx],
+                   latest_measurements.snr_value[sensor_idx],
+                   best_point_idx);
         return true;
     }
     else
     {
         latest_measurements.data_valid[sensor_idx] = false;
         latest_measurements.snr_value[sensor_idx]  = 0;
+        debug_send("RAD:S%d, No valid points found", sensor_idx);
         return false;
     }
 }
 
 static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr)
 {
-    // debug_send("RADAR: Validating S%d: dist=%.3fm, snr=%.1f, thresh=%.1f", sensor_idx, distance_m, snr, radar_config.snr_threshold);
+    // Minimal validation - only exclude obviously invalid data
+    // Let the void layer handle algorithm-specific filtering
 
-    // Check SNR threshold
-    if (snr < radar_config.snr_threshold)
-    {
-        //  debug_send("RADAR: S%d REJECTED - SNR %.1f < %.1f", sensor_idx, snr, radar_config.snr_threshold);
-        return false;
-    }
-
-    // Convert to millimeters for range check
+    // Basic range check (very permissive)
     uint16_t distance_mm = convert_to_millimeters(distance_m);
-
-    // Check distance range
-    if (distance_mm < radar_config.min_distance_mm || distance_mm > radar_config.max_distance_mm)
+    if (distance_mm < 50 || distance_mm > 15000) // 1cm to 15m range
     {
-        //  debug_send("RADAR: S%d REJECTED - distance %dmm out of range [%d-%dmm]", sensor_idx, distance_mm, radar_config.min_distance_mm,
-        //  radar_config.max_distance_mm);
+        debug_send("RAD:S%d, REJECTED - distance %dmm out of basic range [10-15000mm]", sensor_idx, distance_mm);
         return false;
     }
 
-    //  debug_send("RADAR: S%d VALID - %.3fm, %.1f SNR", sensor_idx, distance_m, snr);
+    // Basic SNR check (very permissive)
+    if (snr < 50.0f) // Only reject very poor signals
+    {
+        debug_send("RAD:S%d, REJECTED - SNR %.1f too low (< 50)", sensor_idx, snr);
+        return false;
+    }
+
+    debug_send("RAD:S%d, VALID - %.3fm (%dmm), SNR=%.1f", sensor_idx, distance_m, distance_mm, snr);
     return true;
 }
 

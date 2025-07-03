@@ -14,11 +14,11 @@
 #include <stdint.h>
 
 /** @name System Constants */
-#define RADAR_PROCESSING_INTERVAL_MS 100    // Default 10Hz processing
-#define RADAR_SENSOR_TIMEOUT_MS      5000   // 5 second sensor timeout
-#define RADAR_MIN_VALID_DISTANCE_MM  50     // Minimum valid distance (50mm)
-#define RADAR_MAX_VALID_DISTANCE_MM  5000   // Maximum valid distance (5m)
-#define RADAR_MIN_SNR_THRESHOLD      100.0f // Minimum SNR for valid reading (was 20.0f)
+#define RADAR_PROCESSING_INTERVAL_MS 100   // Default 10Hz processing
+#define RADAR_SENSOR_TIMEOUT_MS      5000  // 5 second sensor timeout
+#define RADAR_MIN_VALID_DISTANCE_MM  10    // Very permissive minimum (1cm)
+#define RADAR_MAX_VALID_DISTANCE_MM  15000 // Very permissive maximum (15m)
+#define RADAR_MIN_SNR_THRESHOLD      50.0f // Very permissive SNR threshold
 
 /** @name Expected Firmware Version */
 #define RADAR_EXPECTED_FW_MAJOR 1

@@ -635,26 +635,49 @@ static bool validate_radar_data(const radar_distance_t *radar_data)
         return false;
     }
 
-    // Check if we have any valid sensors
-    if (radar_data->valid_sensor_count == 0)
+    // Algorithm-specific validation
+    if (config.algorithm == VOID_ALGORITHM_BYPASS)
     {
-        return false;
-    }
-
-    // Check if distances are within reasonable range
-    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-    {
-        if (radar_data->data_valid[i])
+        // Bypass mode: Accept all radar data that passed basic validation
+        bool any_valid_data = false;
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
         {
-            if (radar_data->distance_mm[i] < config.min_distance_mm || radar_data->distance_mm[i] > config.max_distance_mm)
+            if (radar_data->data_valid[i])
             {
-                debug_send("VOID:valid, S%d distance %dmm out of range (%d-%dmm)", i, radar_data->distance_mm[i], config.min_distance_mm, config.max_distance_mm);
-                return false;
+                any_valid_data = true;
+                debug_send("VOID:S%d, Bypass accepts: %dmm, SNR=%d", i, radar_data->distance_mm[i], radar_data->snr_value[i]);
             }
         }
-    }
 
-    return true;
+        debug_send("VOID:valid, Bypass mode - %s", any_valid_data ? "ACCEPTED" : "NO DATA");
+        return any_valid_data;
+    }
+    else
+    {
+        // Active algorithms: Apply stricter validation
+        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+        {
+            if (radar_data->data_valid[i])
+            {
+                // Apply algorithm-specific distance limits
+                if (radar_data->distance_mm[i] < config.min_distance_mm || radar_data->distance_mm[i] > config.max_distance_mm)
+                {
+                    debug_send("VOID:S%d, REJECTED - %dmm out of range [%d-%dmm]", i, radar_data->distance_mm[i], config.min_distance_mm, config.max_distance_mm);
+                    return false;
+                }
+
+                // Apply algorithm-specific SNR limits
+                if (radar_data->snr_value[i] < config.confidence_min_percent * 2) // Convert % to SNR approx
+                {
+                    debug_send("VOID:S%d, REJECTED - SNR %d too low for algorithm", i, radar_data->snr_value[i]);
+                    return false;
+                }
+            }
+        }
+
+        debug_send("VOID:valid, Algorithm validation passed");
+        return true;
+    }
 }
 
 /*------------------------------------------------------------------------------
