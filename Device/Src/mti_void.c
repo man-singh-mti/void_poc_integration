@@ -105,7 +105,7 @@ static float calculate_circle_quality(const radar_distance_t *radar_data, const 
 
 bool void_system_init(void)
 {
-    debug_send("VOID: Initializing detection system");
+    debug_send("VOID:init, Void detection system initialization");
 
     // Initialize data structures
     memset(&latest_results, 0, sizeof(latest_results));
@@ -128,7 +128,7 @@ bool void_system_init(void)
     latest_results.algorithm_used    = config.algorithm;
     latest_results.detection_time_ms = HAL_GetTick();
 
-    debug_send("VOID: System initialized - Algorithm: %d, Baseline: %dmm, Threshold: %dmm", config.algorithm, config.baseline_diameter_mm, config.threshold_mm);
+    debug_send("VOID:init, System initialized - Algorithm: %d, Baseline: %dmm, Threshold: %dmm", config.algorithm, config.baseline_diameter_mm, config.threshold_mm);
 
     return true;
 }
@@ -233,7 +233,7 @@ static bool process_radar_data(void)
         break;
 
     default:
-        debug_send("VOID: Unknown algorithm %d", config.algorithm);
+        debug_send("VOID:proc, Unknown algorithm %d", config.algorithm);
         return false;
     }
 
@@ -244,7 +244,6 @@ static bool process_radar_data(void)
     if (confidence < config.confidence_min_percent)
     {
         void_detected = false;
-        // debug_send("[V]C%d<%d", confidence, config.confidence_min_percent);
     }
 
     // Update detection state
@@ -255,6 +254,7 @@ static bool process_radar_data(void)
         if (void_detected)
         {
             void_state.total_detections++;
+            debug_send("VOID:detect, Void detected by %s, confidence %d%%", algorithm_name, confidence);
         }
     }
 
@@ -335,17 +335,9 @@ static bool run_simple_algorithm(const radar_distance_t *radar_data)
             {
                 void_detected_any_sensor = true;
                 detection_count++;
-
-                debug_send("VOID: S%d DETECTS VOID - dist=%dmm (>%d), SNR=%d (>200)", i, radar_data->distance_mm[i], threshold, radar_data->snr_value[i]);
-            }
-            else
-            {
-                debug_send("VOID: S%d sees wall - dist=%dmm, SNR=%d", i, radar_data->distance_mm[i], radar_data->snr_value[i]);
             }
         }
     }
-
-    debug_send("VOID: Simple algorithm - %d/%d sensors detect void", detection_count, radar_data->valid_sensor_count);
 
     // ANY sensor detecting a void is sufficient
     return void_detected_any_sensor;
@@ -353,11 +345,6 @@ static bool run_simple_algorithm(const radar_distance_t *radar_data)
 
 static bool run_circle_fit_algorithm(const radar_distance_t *radar_data)
 {
-    // For horizontal voids, circle fitting may not be appropriate
-    // since voids are typically asymmetric (only 1-2 sensors see them)
-
-    // NEW APPROACH: Use "partial circle fitting" or fallback to simple
-
     uint8_t  high_quality_sensors   = 0;
     uint8_t  void_detecting_sensors = 0;
     uint16_t threshold              = config.baseline_diameter_mm + config.threshold_mm;
@@ -389,8 +376,6 @@ static bool run_circle_fit_algorithm(const radar_distance_t *radar_data)
     }
 
     // For asymmetric cases (horizontal voids), use simple algorithm
-    debug_send("VOID: Circle fit fallback - %d high quality, %d detecting voids", high_quality_sensors, void_detecting_sensors);
-
     if (config.auto_fallback_enabled)
     {
         return run_simple_algorithm(radar_data);
@@ -662,7 +647,7 @@ static bool validate_radar_data(const radar_distance_t *radar_data)
         {
             if (radar_data->distance_mm[i] < config.min_distance_mm || radar_data->distance_mm[i] > config.max_distance_mm)
             {
-                debug_send("VOID: S%d distance %dmm out of range (%d-%dmm)", i, radar_data->distance_mm[i], config.min_distance_mm, config.max_distance_mm);
+                debug_send("VOID:valid, S%d distance %dmm out of range (%d-%dmm)", i, radar_data->distance_mm[i], config.min_distance_mm, config.max_distance_mm);
                 return false;
             }
         }
@@ -723,7 +708,7 @@ bool void_set_algorithm(void_algorithm_t algorithm)
     if (config.algorithm != algorithm)
     {
         void_state.algorithm_switches++;
-        debug_send("VOID: Algorithm changed from %d to %d", config.algorithm, algorithm);
+        debug_send("VOID:config, Algorithm switched to %d", algorithm);
     }
 
     config.algorithm = algorithm;
@@ -738,7 +723,7 @@ bool void_set_baseline_diameter(uint16_t diameter_mm)
     }
 
     config.baseline_diameter_mm = diameter_mm;
-    debug_send("VOID: Baseline diameter set to %dmm", diameter_mm);
+    debug_send("VOID:config, Baseline set to %dmm", diameter_mm);
     return true;
 }
 
@@ -750,7 +735,7 @@ bool void_set_threshold(uint16_t threshold_mm)
     }
 
     config.threshold_mm = threshold_mm;
-    debug_send("VOID: Threshold set to %dmm", threshold_mm);
+    debug_send("VOID:config, Threshold set to %dmm", threshold_mm);
     return true;
 }
 
@@ -762,7 +747,7 @@ bool void_set_confidence_threshold(uint8_t confidence_percent)
     }
 
     config.confidence_min_percent = confidence_percent;
-    debug_send("VOID: Confidence threshold set to %d%%", confidence_percent);
+    debug_send("VOID:config, Confidence threshold set to %d%%", confidence_percent);
     return true;
 }
 
@@ -814,44 +799,15 @@ void_detection_state_t void_get_detection_state(void)
 
 void void_run_diagnostics(void)
 {
-    debug_send("=== VOID Detection System Diagnostics ===");
-    debug_send("System initialized: %s", void_state.system_initialized ? "YES" : "NO");
-    debug_send("System ready: %s", void_is_system_ready() ? "YES" : "NO");
-    debug_send("Detection state: %d", void_state.detection_state);
-    debug_send("");
-
-    debug_send("Configuration:");
-    debug_send("  Algorithm: %d (%s)",
-               config.algorithm,
-               config.algorithm == VOID_ALGORITHM_BYPASS   ? "bypass"
-               : config.algorithm == VOID_ALGORITHM_SIMPLE ? "simple"
-                                                           : "circlefit");
-    debug_send("  Baseline: %dmm", config.baseline_diameter_mm);
-    debug_send("  Threshold: %dmm", config.threshold_mm);
-    debug_send("  Min confidence: %d%%", config.confidence_min_percent);
-    debug_send("  Auto fallback: %s", config.auto_fallback_enabled ? "enabled" : "disabled");
-    debug_send("  Median filter: %s", config.median_filter_enabled ? "enabled" : "disabled");
-    debug_send("");
-
-    debug_send("Latest Results:");
-    debug_send("  Void detected: %s", latest_results.void_detected ? "YES" : "NO");
-    debug_send("  Confidence: %d%%", latest_results.confidence_percent);
-    debug_send("  Void size: %dmm", latest_results.void_size_mm);
-    debug_send("  Sensors used: %d", latest_results.sensor_count_used);
-    debug_send("  Status: %s", latest_results.status_text);
-    debug_send("");
-
-    debug_send("Event-Driven Stats:");
-    debug_send("  Auto streaming: %s", void_state.auto_streaming_enabled ? "enabled" : "disabled");
-    debug_send("  Immediate processing count: %lu", void_state.immediate_processing_count);
-    debug_send("  Automatic stream count: %lu", void_state.automatic_stream_count);
-    debug_send("");
-
-    debug_send("Statistics:");
-    debug_send("  Total detections: %d", void_state.total_detections);
-    debug_send("  Algorithm switches: %d", void_state.algorithm_switches);
-    debug_send("  Uptime: %dms", HAL_GetTick() - void_state.init_time_ms);
-    debug_send("========================================");
+    debug_send("VOID:diag, Void detection diagnostics");
+    debug_send("VOID:diag, Initialized: %s", void_state.system_initialized ? "YES" : "NO");
+    debug_send("VOID:diag, Ready: %s", void_is_system_ready() ? "YES" : "NO");
+    debug_send("VOID:diag, Algorithm: %d, Baseline: %dmm, Threshold: %dmm", config.algorithm, config.baseline_diameter_mm, config.threshold_mm);
+    debug_send("VOID:diag, Detections: %d, Switches: %d, Uptime: %dms",
+               void_state.total_detections,
+               void_state.algorithm_switches,
+               HAL_GetTick() - void_state.init_time_ms);
+    debug_send("VOID:diag, Current state: %s, Confidence: %d%%", latest_results.void_detected ? "DETECTED" : "NONE", latest_results.confidence_percent);
 }
 
 void void_get_statistics(uint32_t *total_detections, uint32_t *algorithm_switches, uint32_t *uptime_ms)
@@ -1360,6 +1316,19 @@ static void void_send_automatic_stream_internal(void)
            measurement.snr_value[2]);
 
     uart_tx_channel_undo();
+
+    debug_send("&vd,%d,%d,%d,%c,%d,%d,%d,%c,%d,%d,%d\r\n",
+               measurement.distance_mm[0],
+               measurement.distance_mm[1],
+               measurement.distance_mm[2],
+               algorithm_char,
+               sensor_void_status[0], // Per-sensor void detection
+               sensor_void_status[1], // Per-sensor void detection
+               sensor_void_status[2], // Per-sensor void detection
+               void_system_running ? 'y' : 'n',
+               measurement.snr_value[0],
+               measurement.snr_value[1],
+               measurement.snr_value[2]);
     void_state.automatic_stream_count++;
 }
 
