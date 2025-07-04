@@ -1293,72 +1293,54 @@ static void void_send_immediate_stream(void)
 
 static void void_send_automatic_stream_internal(void)
 {
-    if (!void_state.auto_streaming_enabled || !system_is_operational_mode())
+    if (!system_is_operational_mode())
     {
         return;
     }
 
-    void_measurement_t measurement;
-    if (!void_get_measurement_data(&measurement))
+    radar_distance_t radar_data;
+    if (!radar_get_latest_measurements(&radar_data))
     {
         return;
     }
 
-    uart_tx_channel_set(UART_UPHOLE);
 
-    char algorithm_char = 'a';
-    if (config.algorithm == VOID_ALGORITHM_CIRCLEFIT)
-        algorithm_char = 'b';
-    else if (config.algorithm == VOID_ALGORITHM_BYPASS)
-        algorithm_char = 'c';
+    // Convert 65535 to -1 for uphole transmission
+    int16_t s0_distance = (radar_data.distance_mm[0] == 65535) ? -1 : (int16_t)radar_data.distance_mm[0];
+    int16_t s1_distance = (radar_data.distance_mm[1] == 65535) ? -1 : (int16_t)radar_data.distance_mm[1];
+    int16_t s2_distance = (radar_data.distance_mm[2] == 65535) ? -1 : (int16_t)radar_data.distance_mm[2];
 
-    // FIXED: Determine void status based on algorithm choice
-    uint8_t sensor_void_status[MAX_RADAR_SENSORS] = { 0 };
+    // Determine void flags (in bypass mode, always 0)
+    uint8_t void_flag_0 = 0;
+    uint8_t void_flag_1 = 0;
+    uint8_t void_flag_2 = 0;
 
-    if (config.algorithm != VOID_ALGORITHM_BYPASS)
-    {
-        // Only apply void detection logic for active algorithms
-        uint16_t threshold = config.baseline_diameter_mm + config.threshold_mm;
+    char detection_char = 'c'; // Clear by default in bypass mode
 
-        for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
-        {
-            if (measurement.data_valid[i] && measurement.distance_mm[i] > threshold && measurement.snr_value[i] >= 200)
-            {
-                sensor_void_status[i] = 1; // Void detected by this sensor
-            }
-        }
-    }
-    // For bypass mode: sensor_void_status remains all zeros
+    uphole_send("&vd,%d,%d,%d,%c,%d,%d,%d,y,%d,%d,%d\r\n",
+                s0_distance,
+                s1_distance,
+                s2_distance,
+                detection_char,
+                void_flag_0,
+                void_flag_1,
+                void_flag_2,
+                radar_data.snr_value[0],
+                radar_data.snr_value[1],
+                radar_data.snr_value[2]);
 
-    // Format: &vd,<dist_0>,<dist_1>,<dist_2>,<alg>,<void_0>,<void_1>,<void_2>,<status>,<snr_0>,<snr_1>,<snr_2>
-    printf("&vd,%d,%d,%d,%c,%d,%d,%d,%c,%d,%d,%d\r\n",
-           measurement.distance_mm[0],
-           measurement.distance_mm[1],
-           measurement.distance_mm[2],
-           algorithm_char,
-           sensor_void_status[0], // Per-sensor void detection (0 for bypass)
-           sensor_void_status[1], // Per-sensor void detection (0 for bypass)
-           sensor_void_status[2], // Per-sensor void detection (0 for bypass)
-           void_system_running ? 'y' : 'n',
-           measurement.snr_value[0],
-           measurement.snr_value[1],
-           measurement.snr_value[2]);
 
-    uart_tx_channel_undo();
-
-    debug_send("&vd,%d,%d,%d,%c,%d,%d,%d,%c,%d,%d,%d\r\n",
-               measurement.distance_mm[0],
-               measurement.distance_mm[1],
-               measurement.distance_mm[2],
-               algorithm_char,
-               sensor_void_status[0], // Per-sensor void detection (0 for bypass)
-               sensor_void_status[1], // Per-sensor void detection (0 for bypass)
-               sensor_void_status[2], // Per-sensor void detection (0 for bypass)
-               void_system_running ? 'y' : 'n',
-               measurement.snr_value[0],
-               measurement.snr_value[1],
-               measurement.snr_value[2]);
-    void_state.automatic_stream_count++;
+    debug_send("&vd,%d,%d,%d,%c,%d,%d,%d,y,%d,%d,%d\r\n",
+               s0_distance,
+               s1_distance,
+               s2_distance,
+               detection_char,
+               void_flag_0,
+               void_flag_1,
+               void_flag_2,
+               radar_data.snr_value[0],
+               radar_data.snr_value[1],
+               radar_data.snr_value[2]);
 }
 
 /*------------------------------------------------------------------------------

@@ -33,6 +33,12 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// Special distance values
+#define RADAR_DISTANCE_UNKNOWN 65535 // Unknown state (sensor active, no points)
+#define RADAR_DISTANCE_OFFLINE 65534 // Sensor offline
+#define RADAR_SNR_UNKNOWN      65535 // Unknown SNR
+#define RADAR_SNR_OFFLINE      0     // Offline SNR
+
 /**
  * @brief Defines the radar initialization status.
  */
