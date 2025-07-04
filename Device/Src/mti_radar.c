@@ -60,11 +60,11 @@ static struct
  * Forward Declarations
  *----------------------------------------------------------------------------*/
 
-static bool     process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *sensor);
-static bool     validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr);
-static uint16_t convert_to_millimeters(float distance_m);
-static void     update_system_health(void);
-static bool     verify_sensor_firmware(uint8_t sensor_idx);
+static bool    process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *sensor);
+static bool    validate_sensor_measurement(uint8_t sensor_idx, float distance_m, float snr);
+static int16_t convert_to_millimeters(float distance_m);
+static void    update_system_health(void);
+static bool    verify_sensor_firmware(uint8_t sensor_idx);
 
 /*------------------------------------------------------------------------------
  * System Initialization
@@ -219,13 +219,13 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         return false;
     }
 
-    // Case 1: No points detected = return -1 (represented as 65535 internally)
+    // Case 1: No points detected = UNKNOWN condition (could be void OR wall contact)
     if (sensor->current_point_count == 0)
     {
         if (sensor->status == RADAR_CHIRPING)
         {
-            debug_send("S%d: No points - VOID (-1)", sensor_idx);
-            latest_measurements.distance_mm[sensor_idx] = 65535; // Internal representation of -1
+            debug_send("S%d: No points - UNKNOWN (void or wall contact)", sensor_idx);
+            latest_measurements.distance_mm[sensor_idx] = -1; // Store directly as -1
             latest_measurements.snr_value[sensor_idx]   = 0;
             latest_measurements.data_valid[sensor_idx]  = true;
             return true;
@@ -238,7 +238,7 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         }
     }
 
-    // Case 2: Points detected - process them and select highest SNR
+    // Case 2: Points detected - process normally
     float   best_distance     = 0.0f;
     float   best_snr          = 0.0f;
     bool    valid_point_found = false;
@@ -269,6 +269,7 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
         latest_measurements.snr_value[sensor_idx]   = (uint16_t)best_snr;
         latest_measurements.data_valid[sensor_idx]  = true;
 
+        // Normal measurement output
         debug_send("S%d: %dmm, SNR=%d (point %d of %d)",
                    sensor_idx,
                    latest_measurements.distance_mm[sensor_idx],
@@ -279,9 +280,9 @@ static bool process_sensor_data_from_can(uint8_t sensor_idx, can_sensor_t *senso
     }
     else
     {
-        // Points were detected but all were invalid (e.g., poor SNR)
-        debug_send("S%d: Invalid points - VOID (-1)", sensor_idx);
-        latest_measurements.distance_mm[sensor_idx] = 65535; // Internal representation of -1
+        // Points detected but all invalid (poor SNR) - also unknown condition
+        debug_send("S%d: Invalid points - UNKNOWN (poor signal)", sensor_idx);
+        latest_measurements.distance_mm[sensor_idx] = -1; // Store directly as -1
         latest_measurements.snr_value[sensor_idx]   = 0;
         latest_measurements.data_valid[sensor_idx]  = true;
         return true;
@@ -295,29 +296,31 @@ static bool validate_sensor_measurement(uint8_t sensor_idx, float distance_m, fl
 
     if (snr < 50.0f) // Only reject very poor signals
     {
-        debug_send("RAD:S%d, REJECTED - SNR %.1f too low (< 50)", sensor_idx, snr);
+        // Only print validation errors, not normal rejections
+        // Most SNR rejections are normal, only log if unusual
         return false;
     }
 
-    debug_send("RAD:S%d, VALID - %.3fm (%dmm), SNR=%.1f", sensor_idx, distance_m, convert_to_millimeters(distance_m), snr);
+    // Remove the "VALID" debug message - this is normal operation
     return true;
 }
 
-static uint16_t convert_to_millimeters(float distance_m)
+static int16_t convert_to_millimeters(float distance_m)
 {
     float distance_mm_f = distance_m * 1000.0f;
 
     if (distance_mm_f < 0.0f)
     {
-        return 0;
+        return -1; // Invalid/negative distance
     }
-    else if (distance_mm_f > UINT16_MAX)
+    else if (distance_mm_f > 32767.0f) // Max positive int16_t
     {
-        return UINT16_MAX;
+        debug_send("RAD: Distance overflow %.1fm -> clamped to 32767mm", distance_m);
+        return 32767;
     }
     else
     {
-        return (uint16_t)distance_mm_f;
+        return (int16_t)distance_mm_f;
     }
 }
 

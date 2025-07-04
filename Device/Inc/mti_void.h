@@ -62,9 +62,9 @@ typedef struct
 
 
 /** @name Measurement Data Structure */
-typedef struct
+typedef struct void_measurement_t
 {
-    uint16_t distance_mm[MAX_RADAR_SENSORS]; // Current distances
+    int16_t  distance_mm[MAX_RADAR_SENSORS]; // Changed from uint16_t to int16_t
     uint16_t snr_value[MAX_RADAR_SENSORS];   // SNR values as integers
     bool     data_valid[MAX_RADAR_SENSORS];  // Data validity flags
     uint8_t  valid_sensor_count;             // Number of valid sensors

@@ -170,7 +170,7 @@ void void_system_process(void)
 
     uint32_t current_time = HAL_GetTick();
 
-    // debug_send("[V]proc");
+    // Remove verbose processing debug message
 
     // Process new radar data immediately
     if (process_radar_data())
@@ -201,10 +201,50 @@ static bool process_radar_data(void)
     // Validate radar data
     if (!validate_radar_data(&radar_data))
     {
+        // Only print errors, not normal validation failures
         strcpy(latest_results.status_text, "Invalid radar data");
         latest_results.void_detected      = false;
         latest_results.confidence_percent = 0;
         void_state.new_results_available  = true;
+        return false;
+    }
+
+    // NEW: Only process if we have a complete frame from ALL active sensors
+    // This ensures S0, S1, S2 are processed together in order
+    bool     complete_frame   = true;
+    uint32_t newest_timestamp = 0;
+    uint32_t oldest_timestamp = UINT32_MAX;
+
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_data.data_valid[i])
+        {
+            // Check if this sensor's data is fresh (within 100ms)
+            uint32_t age = HAL_GetTick() - radar_data.timestamp_ms;
+            if (age > 100)
+            {
+                complete_frame = false;
+                debug_send("VOID: S%d data too old (%lums)", i, age);
+                break;
+            }
+
+            if (radar_data.timestamp_ms > newest_timestamp)
+                newest_timestamp = radar_data.timestamp_ms;
+            if (radar_data.timestamp_ms < oldest_timestamp)
+                oldest_timestamp = radar_data.timestamp_ms;
+        }
+    }
+
+    // Check timestamp spread - all sensors should be within 50ms of each other
+    if (complete_frame && (newest_timestamp - oldest_timestamp) > 50)
+    {
+        complete_frame = false;
+        debug_send("VOID: Sensor timestamp spread too large (%lums)", newest_timestamp - oldest_timestamp);
+    }
+
+    if (!complete_frame)
+    {
+        // Don't send partial data - wait for complete frame
         return false;
     }
 
@@ -233,7 +273,7 @@ static bool process_radar_data(void)
         break;
 
     default:
-        debug_send("VOID:proc, Unknown algorithm %d", config.algorithm);
+        debug_send("VOID: ERROR - Unknown algorithm %d", config.algorithm);
         return false;
     }
 
@@ -254,7 +294,7 @@ static bool process_radar_data(void)
         if (void_detected)
         {
             void_state.total_detections++;
-            debug_send("VOID:detect, Void detected by %s, confidence %d%%", algorithm_name, confidence);
+            debug_send("VOID: Detected by %s, confidence %d%%", algorithm_name, confidence);
         }
     }
 
@@ -645,11 +685,11 @@ static bool validate_radar_data(const radar_distance_t *radar_data)
             if (radar_data->data_valid[i])
             {
                 any_valid_data = true;
-                debug_send("VOID:S%d, Bypass accepts: %dmm, SNR=%d", i, radar_data->distance_mm[i], radar_data->snr_value[i]);
+                break;
             }
         }
 
-        debug_send("VOID:valid, Bypass mode - %s", any_valid_data ? "ACCEPTED" : "NO DATA");
+        // Remove verbose bypass mode message
         return any_valid_data;
     }
     else
@@ -675,7 +715,7 @@ static bool validate_radar_data(const radar_distance_t *radar_data)
             }
         }
 
-        debug_send("VOID:valid, Algorithm validation passed");
+        // Remove verbose validation success message
         return true;
     }
 }
@@ -726,13 +766,15 @@ bool void_set_algorithm(void_algorithm_t algorithm)
 {
     if (algorithm > VOID_ALGORITHM_CIRCLEFIT)
     {
+        debug_send("VOID: ERROR - Invalid algorithm %d", algorithm);
         return false;
     }
 
     if (config.algorithm != algorithm)
     {
         void_state.algorithm_switches++;
-        debug_send("VOID:config, Algorithm switched to %d", algorithm);
+        // Only print on actual changes
+        debug_send("VOID: Algorithm changed to %d", algorithm);
     }
 
     config.algorithm = algorithm;
@@ -743,6 +785,7 @@ bool void_set_baseline_diameter(uint16_t diameter_mm)
 {
     if (diameter_mm < 50 || diameter_mm > 1000)
     {
+        debug_send("VOID: ERROR - Invalid baseline diameter %dmm (range: 50-1000mm)", diameter_mm);
         return false;
     }
 
@@ -755,6 +798,7 @@ bool void_set_threshold(uint16_t threshold_mm)
 {
     if (threshold_mm < 10 || threshold_mm > 500)
     {
+        debug_send("VOID: ERROR - Invalid threshold %dmm (range: 10-500mm)", threshold_mm);
         return false;
     }
 
@@ -767,6 +811,7 @@ bool void_set_confidence_threshold(uint8_t confidence_percent)
 {
     if (confidence_percent > 100)
     {
+        debug_send("VOID: ERROR - Invalid confidence %d%% (range: 0-100%%)", confidence_percent);
         return false;
     }
 
@@ -1100,7 +1145,7 @@ bool void_system_start(void)
     // Check if system is initialized
     if (!void_state.system_initialized)
     {
-        debug_send("VOID: ERROR - System not initialized");
+        debug_send("VOID: ERROR - Cannot start, system not initialized");
         return false;
     }
 
@@ -1115,7 +1160,7 @@ bool void_system_start(void)
     debug_send("VOID: Sending START command to radar sensors");
     if (!radar_start_sensors())
     {
-        debug_send("VOID: ERROR - Failed to send start command to radar sensors");
+        debug_send("VOID: ERROR - Failed to start radar sensors");
         return false;
     }
 
@@ -1304,11 +1349,34 @@ static void void_send_automatic_stream_internal(void)
         return;
     }
 
+    // NEW: Check for complete frame before sending
+    // Only send when we have valid data from ALL active sensors
+    bool    complete_frame = true;
+    uint8_t active_sensors = 0;
 
-    // Convert 65535 to -1 for uphole transmission
-    int16_t s0_distance = (radar_data.distance_mm[0] == 65535) ? -1 : (int16_t)radar_data.distance_mm[0];
-    int16_t s1_distance = (radar_data.distance_mm[1] == 65535) ? -1 : (int16_t)radar_data.distance_mm[1];
-    int16_t s2_distance = (radar_data.distance_mm[2] == 65535) ? -1 : (int16_t)radar_data.distance_mm[2];
+    for (uint8_t i = 0; i < MAX_RADAR_SENSORS; i++)
+    {
+        if (radar_data.data_valid[i])
+        {
+            active_sensors++;
+        }
+    }
+
+    // Only send if we have data from all 3 sensors (or at least 2 for partial operation)
+    if (active_sensors < 2)
+    {
+        // Don't send partial data - wait for more sensors
+        return;
+    }
+
+    // Use consistent ordering: always S0, S1, S2
+    int16_t s0_distance = radar_data.data_valid[0] ? radar_data.distance_mm[0] : -1;
+    int16_t s1_distance = radar_data.data_valid[1] ? radar_data.distance_mm[1] : -1;
+    int16_t s2_distance = radar_data.data_valid[2] ? radar_data.distance_mm[2] : -1;
+
+    uint16_t s0_snr = radar_data.data_valid[0] ? radar_data.snr_value[0] : 0;
+    uint16_t s1_snr = radar_data.data_valid[1] ? radar_data.snr_value[1] : 0;
+    uint16_t s2_snr = radar_data.data_valid[2] ? radar_data.snr_value[2] : 0;
 
     // Determine void flags (in bypass mode, always 0)
     uint8_t void_flag_0 = 0;
@@ -1325,10 +1393,9 @@ static void void_send_automatic_stream_internal(void)
                 void_flag_0,
                 void_flag_1,
                 void_flag_2,
-                radar_data.snr_value[0],
-                radar_data.snr_value[1],
-                radar_data.snr_value[2]);
-
+                s0_snr,
+                s1_snr,
+                s2_snr);
 
     debug_send("&vd,%d,%d,%d,%c,%d,%d,%d,y,%d,%d,%d\r\n",
                s0_distance,
@@ -1338,9 +1405,11 @@ static void void_send_automatic_stream_internal(void)
                void_flag_0,
                void_flag_1,
                void_flag_2,
-               radar_data.snr_value[0],
-               radar_data.snr_value[1],
-               radar_data.snr_value[2]);
+               s0_snr,
+               s1_snr,
+               s2_snr);
+
+    void_state.automatic_stream_count++;
 }
 
 /*------------------------------------------------------------------------------

@@ -52,11 +52,11 @@ typedef enum
 
 
 /** @name Processed Measurement Data */
-typedef struct
+typedef struct radar_distance_t
 {
-    uint16_t distance_mm[MAX_RADAR_SENSORS];   // Clean distances in millimeters
-    uint16_t angle_deg[MAX_RADAR_SENSORS];     // Sensor angles (0,120,240)
-    uint16_t snr_value[MAX_RADAR_SENSORS];     // SNR values as integers
+    int16_t  distance_mm[MAX_RADAR_SENSORS];   // Changed from uint16_t to int16_t
+    uint16_t angle_deg[MAX_RADAR_SENSORS];     // Keep as uint16_t (always positive)
+    uint16_t snr_value[MAX_RADAR_SENSORS];     // Keep as uint16_t (always positive)
     bool     data_valid[MAX_RADAR_SENSORS];    // Validity flags per sensor
     float    confidence[MAX_RADAR_SENSORS];    // Confidence per sensor (0.0-1.0)
     uint8_t  quality_score[MAX_RADAR_SENSORS]; // Signal quality (0-100)
